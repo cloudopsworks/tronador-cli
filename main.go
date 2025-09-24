@@ -2,9 +2,9 @@
 package main
 
 import (
-	"hello-service/internal/server"
 	"log"
 	"os"
+	"tronador-cli/internal/server"
 )
 
 func main() {
