@@ -2,13 +2,10 @@
 package cli
 
 import (
-	"fmt"
-	"os"
-
 	"tronador-cli/internal/aws"
+	awssub "tronador-cli/internal/cli/sub/aws"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // awsCmd represents the aws command
@@ -33,30 +30,6 @@ var (
 	assumeRoleDurationSecs int32
 )
 
-// verboseLog prints a message only if verbose mode is enabled
-func verboseLog(cmd *cobra.Command, format string, args ...interface{}) {
-	verbose, _ := cmd.Flags().GetBool("verbose")
-	if !verbose {
-		// Check viper as fallback
-		verbose = viper.GetBool("verbose")
-	}
-	if verbose {
-		fmt.Fprintf(os.Stderr, "[VERBOSE] "+format+"\n", args...)
-	}
-}
-
-// debugLog prints detailed debug information only if verbose mode is enabled
-func debugLog(cmd *cobra.Command, title, details string) {
-	verbose, _ := cmd.Flags().GetBool("verbose")
-	if !verbose {
-		// Check viper as fallback
-		verbose = viper.GetBool("verbose")
-	}
-	if verbose {
-		fmt.Fprintf(os.Stderr, "[DEBUG] %s:\n%s\n", title, details)
-	}
-}
-
 // buildAWSConfigFromFlags builds an AWS configuration from the persistent flags
 func buildAWSConfigFromFlags(cmd *cobra.Command) (aws.Config, error) {
 	// AWS configuration flags are persistent flags on the aws parent command,
@@ -77,10 +50,6 @@ func init() {
 	// Add aws command to root
 	rootCmd.AddCommand(awsCmd)
 
-	// Add subcommands to aws
-	awsCmd.AddCommand(tagCmd)
-	awsCmd.AddCommand(removeDefaultVpcCmd)
-
 	// AWS configuration flags (promoted to aws parent command)
 	awsCmd.PersistentFlags().StringVar(&profile, "profile", "", "AWS profile to use")
 	awsCmd.PersistentFlags().StringVar(&region, "region", "", "AWS region to use")
@@ -90,6 +59,15 @@ func init() {
 	awsCmd.PersistentFlags().Int32Var(&assumeRoleDurationSecs, "assume-role-duration-secs", 3600, "Duration for assume role in seconds")
 
 	// Initialize subcommand flags
-	initTagCommand()
-	initRemoveDefaultVpcCommand()
+	awssub.InitTagCommand()
+	awssub.InitRemoveDefaultVpcCommand()
+
+	// Add subcommands to aws
+	awsCmd.AddCommand(awssub.TagCmd)
+	awsCmd.AddCommand(awssub.RemoveDefaultVpcCmd)
+
+	// Set up a pre-run hook to share AWS configuration with subcommands
+	awsCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		awssub.SetAWSConfig(profile, region, assumeRoleArn, assumeRoleSessionName, assumeRoleExternalId, assumeRoleDurationSecs)
+	}
 }
