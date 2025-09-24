@@ -103,15 +103,12 @@ func ShouldSkipResource(tags map[string]string, reapply bool) (bool, string) {
 		return true, "managed by IaC"
 	}
 
-	// If reapply mode is enabled, process regardless of existing tags (except IaC)
-	if reapply {
-		return false, ""
-	}
+	// New eligibility logic:
+	// - If resource has no tags -> eligible for tagging
+	// - If resource has tags but contains "managed-by=iac" -> not eligible (already handled above)
+	// - If resource has tags but does NOT contain "managed-by=iac" -> eligible for tagging
 
-	// In normal mode, skip if resource already has tags
-	if !IsUntagged(tags) {
-		return true, fmt.Sprintf("already has %d tags", len(tags))
-	}
-
+	// Resources are eligible for tagging regardless of existing tags (except managed-by=iac)
+	// The reapply flag now only affects whether we show additional messaging
 	return false, ""
 }

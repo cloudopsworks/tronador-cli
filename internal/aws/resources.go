@@ -12,11 +12,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/backup"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
+	kmstypes "github.com/aws/aws-sdk-go-v2/service/kms/types"
 	"github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 // DefaultResourceTypes defines the resource types supported by default
@@ -347,6 +349,456 @@ func (rt *ResourceTagger) discoverEC2SecurityGroups(ctx context.Context) ([]Reso
 	return resources, nil
 }
 
+// discoverSNSTopics enumerates all SNS topics directly
+func (rt *ResourceTagger) discoverSNSTopics(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all topics
+	paginator := sns.NewListTopicsPaginator(rt.snsClient, &sns.ListTopicsInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list SNS topics: %w", err)
+		}
+
+		for _, topic := range page.Topics {
+			if topic.TopicArn == nil {
+				continue
+			}
+
+			resource := Resource{
+				ARN:  *topic.TopicArn,
+				Tags: make(map[string]string),
+			}
+
+			// Get topic tags
+			tagsResult, err := rt.snsClient.ListTagsForResource(ctx, &sns.ListTagsForResourceInput{
+				ResourceArn: topic.TopicArn,
+			})
+			if err == nil && tagsResult.Tags != nil {
+				for _, tag := range tagsResult.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+			}
+			// Ignore error if topic has no tags
+
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// discoverSQSQueues enumerates all SQS queues directly
+func (rt *ResourceTagger) discoverSQSQueues(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all queues
+	result, err := rt.sqsClient.ListQueues(ctx, &sqs.ListQueuesInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list SQS queues: %w", err)
+	}
+
+	for _, queueUrl := range result.QueueUrls {
+		// Get queue attributes to get the ARN
+		attrsResult, err := rt.sqsClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+			QueueUrl:       &queueUrl,
+			AttributeNames: []sqstypes.QueueAttributeName{sqstypes.QueueAttributeNameQueueArn},
+		})
+		if err != nil {
+			continue // Skip this queue if we can't get its ARN
+		}
+
+		queueArn, exists := attrsResult.Attributes["QueueArn"]
+		if !exists {
+			continue
+		}
+
+		resource := Resource{
+			ARN:  queueArn,
+			Tags: make(map[string]string),
+		}
+
+		// Get queue tags
+		tagsResult, err := rt.sqsClient.ListQueueTags(ctx, &sqs.ListQueueTagsInput{
+			QueueUrl: &queueUrl,
+		})
+		if err == nil && tagsResult.Tags != nil {
+			for k, v := range tagsResult.Tags {
+				resource.Tags[k] = v
+			}
+		}
+		// Ignore error if queue has no tags
+
+		resources = append(resources, resource)
+	}
+
+	return resources, nil
+}
+
+// discoverACMCertificates enumerates all ACM certificates directly
+func (rt *ResourceTagger) discoverACMCertificates(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all certificates
+	paginator := acm.NewListCertificatesPaginator(rt.acmClient, &acm.ListCertificatesInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list ACM certificates: %w", err)
+		}
+
+		for _, cert := range page.CertificateSummaryList {
+			if cert.CertificateArn == nil {
+				continue
+			}
+
+			resource := Resource{
+				ARN:  *cert.CertificateArn,
+				Tags: make(map[string]string),
+			}
+
+			// Get certificate tags
+			tagsResult, err := rt.acmClient.ListTagsForCertificate(ctx, &acm.ListTagsForCertificateInput{
+				CertificateArn: cert.CertificateArn,
+			})
+			if err == nil && tagsResult.Tags != nil {
+				for _, tag := range tagsResult.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+			}
+			// Ignore error if certificate has no tags
+
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// discoverKMSKeys enumerates all customer-managed KMS keys directly
+func (rt *ResourceTagger) discoverKMSKeys(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all customer-managed keys
+	paginator := kms.NewListKeysPaginator(rt.kmsClient, &kms.ListKeysInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list KMS keys: %w", err)
+		}
+
+		for _, key := range page.Keys {
+			if key.KeyId == nil {
+				continue
+			}
+
+			// Get key details to filter out AWS managed keys
+			keyResult, err := rt.kmsClient.DescribeKey(ctx, &kms.DescribeKeyInput{
+				KeyId: key.KeyId,
+			})
+			if err != nil {
+				continue // Skip this key if we can't describe it
+			}
+
+			// Skip AWS managed keys
+			if keyResult.KeyMetadata != nil && keyResult.KeyMetadata.KeyManager == kmstypes.KeyManagerTypeAws {
+				continue
+			}
+
+			// Build ARN
+			arn := *keyResult.KeyMetadata.Arn
+
+			resource := Resource{
+				ARN:  arn,
+				Tags: make(map[string]string),
+			}
+
+			// Get key tags
+			tagsResult, err := rt.kmsClient.ListResourceTags(ctx, &kms.ListResourceTagsInput{
+				KeyId: key.KeyId,
+			})
+			if err == nil && tagsResult.Tags != nil {
+				for _, tag := range tagsResult.Tags {
+					if tag.TagKey != nil && tag.TagValue != nil {
+						resource.Tags[*tag.TagKey] = *tag.TagValue
+					}
+				}
+			}
+			// Ignore error if key has no tags
+
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// discoverAutoScalingGroups enumerates all Auto Scaling groups directly
+func (rt *ResourceTagger) discoverAutoScalingGroups(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// Get account ID
+	accountID, err := rt.client.GetAccountId(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	// List all Auto Scaling groups
+	paginator := autoscaling.NewDescribeAutoScalingGroupsPaginator(rt.asgClient, &autoscaling.DescribeAutoScalingGroupsInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to describe Auto Scaling groups: %w", err)
+		}
+
+		for _, asg := range page.AutoScalingGroups {
+			if asg.AutoScalingGroupName == nil {
+				continue
+			}
+
+			// Build ARN
+			arn := fmt.Sprintf("arn:aws:autoscaling:%s:%s:autoScalingGroup:*:autoScalingGroupName/%s",
+				rt.client.GetEffectiveRegion(),
+				accountID,
+				*asg.AutoScalingGroupName)
+
+			resource := Resource{
+				ARN:  arn,
+				Tags: make(map[string]string),
+			}
+
+			// Convert ASG tags
+			for _, tag := range asg.Tags {
+				if tag.Key != nil && tag.Value != nil {
+					resource.Tags[*tag.Key] = *tag.Value
+				}
+			}
+
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// discoverSecretsManagerSecrets enumerates all Secrets Manager secrets directly
+func (rt *ResourceTagger) discoverSecretsManagerSecrets(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all secrets
+	paginator := secretsmanager.NewListSecretsPaginator(rt.secretsClient, &secretsmanager.ListSecretsInput{})
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list Secrets Manager secrets: %w", err)
+		}
+
+		for _, secret := range page.SecretList {
+			if secret.ARN == nil {
+				continue
+			}
+
+			resource := Resource{
+				ARN:  *secret.ARN,
+				Tags: make(map[string]string),
+			}
+
+			// Convert secret tags
+			for _, tag := range secret.Tags {
+				if tag.Key != nil && tag.Value != nil {
+					resource.Tags[*tag.Key] = *tag.Value
+				}
+			}
+
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// discoverBackupVaults enumerates all AWS Backup vaults directly
+func (rt *ResourceTagger) discoverBackupVaults(ctx context.Context) ([]Resource, error) {
+	var resources []Resource
+
+	// List all backup vaults
+	result, err := rt.backupClient.ListBackupVaults(ctx, &backup.ListBackupVaultsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list backup vaults: %w", err)
+	}
+
+	for _, vault := range result.BackupVaultList {
+		if vault.BackupVaultArn == nil {
+			continue
+		}
+
+		resource := Resource{
+			ARN:  *vault.BackupVaultArn,
+			Tags: make(map[string]string),
+		}
+
+		// Get vault tags
+		tagsResult, err := rt.backupClient.ListTags(ctx, &backup.ListTagsInput{
+			ResourceArn: vault.BackupVaultArn,
+		})
+		if err == nil && tagsResult.Tags != nil {
+			for k, v := range tagsResult.Tags {
+				resource.Tags[k] = v
+			}
+		}
+		// Ignore error if vault has no tags
+
+		resources = append(resources, resource)
+	}
+
+	return resources, nil
+}
+
+// discoverAdditionalEC2Resources enumerates additional EC2 resources directly
+func (rt *ResourceTagger) discoverAdditionalEC2Resources(ctx context.Context, resourceType string) ([]Resource, error) {
+	var resources []Resource
+
+	// Get account ID
+	accountID, err := rt.client.GetAccountId(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account ID: %w", err)
+	}
+
+	region := rt.client.GetEffectiveRegion()
+
+	switch resourceType {
+	case "ec2:vpc":
+		// List all VPCs
+		paginator := ec2.NewDescribeVpcsPaginator(rt.ec2Client, &ec2.DescribeVpcsInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe VPCs: %w", err)
+			}
+			for _, vpc := range page.Vpcs {
+				if vpc.VpcId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:vpc/%s", region, accountID, *vpc.VpcId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range vpc.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:subnet":
+		// List all subnets
+		paginator := ec2.NewDescribeSubnetsPaginator(rt.ec2Client, &ec2.DescribeSubnetsInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe subnets: %w", err)
+			}
+			for _, subnet := range page.Subnets {
+				if subnet.SubnetId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:subnet/%s", region, accountID, *subnet.SubnetId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range subnet.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:internet-gateway":
+		// List all internet gateways
+		paginator := ec2.NewDescribeInternetGatewaysPaginator(rt.ec2Client, &ec2.DescribeInternetGatewaysInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe internet gateways: %w", err)
+			}
+			for _, igw := range page.InternetGateways {
+				if igw.InternetGatewayId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:internet-gateway/%s", region, accountID, *igw.InternetGatewayId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range igw.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:route-table":
+		// List all route tables
+		paginator := ec2.NewDescribeRouteTablesPaginator(rt.ec2Client, &ec2.DescribeRouteTablesInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe route tables: %w", err)
+			}
+			for _, rt := range page.RouteTables {
+				if rt.RouteTableId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:route-table/%s", region, accountID, *rt.RouteTableId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range rt.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:network-acl":
+		// List all network ACLs
+		paginator := ec2.NewDescribeNetworkAclsPaginator(rt.ec2Client, &ec2.DescribeNetworkAclsInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe network ACLs: %w", err)
+			}
+			for _, nacl := range page.NetworkAcls {
+				if nacl.NetworkAclId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:network-acl/%s", region, accountID, *nacl.NetworkAclId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range nacl.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	default:
+		return []Resource{}, nil
+	}
+
+	return resources, nil
+}
+
 // discoverResourcesDirect enumerates resources directly using service-specific APIs
 func (rt *ResourceTagger) discoverResourcesDirect(ctx context.Context, resourceType string) ([]Resource, error) {
 	switch resourceType {
@@ -356,6 +808,22 @@ func (rt *ResourceTagger) discoverResourcesDirect(ctx context.Context, resourceT
 		return rt.discoverS3Buckets(ctx)
 	case "ec2:security-group":
 		return rt.discoverEC2SecurityGroups(ctx)
+	case "sns:topic":
+		return rt.discoverSNSTopics(ctx)
+	case "sqs:queue":
+		return rt.discoverSQSQueues(ctx)
+	case "acm:certificate":
+		return rt.discoverACMCertificates(ctx)
+	case "kms:key":
+		return rt.discoverKMSKeys(ctx)
+	case "autoscaling:autoScalingGroup":
+		return rt.discoverAutoScalingGroups(ctx)
+	case "secretsmanager:secret":
+		return rt.discoverSecretsManagerSecrets(ctx)
+	case "backup:backup-vault":
+		return rt.discoverBackupVaults(ctx)
+	case "ec2:vpc", "ec2:subnet", "ec2:internet-gateway", "ec2:route-table", "ec2:network-acl":
+		return rt.discoverAdditionalEC2Resources(ctx, resourceType)
 	default:
 		// For unsupported resource types, return empty slice
 		// This allows gradual implementation of all resource types
