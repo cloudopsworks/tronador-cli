@@ -1,8 +1,4 @@
 package main
 
-import (
-	_ "embed"
-)
-
-//go:embed VERSION
-var Version string
+// Version contains the current version of tronador-cli
+const Version = "1.0.0"
