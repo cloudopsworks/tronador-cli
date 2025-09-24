@@ -1,0 +1,29 @@
+#annotations: []
+#podAnnotations: []
+#replicaCount: 1
+#env: []
+probe:
+  path: /healthz
+#  port: 8082
+startupProbe:
+  enabled: true
+#livenessProbe:
+#readinessProbe:
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  rules:
+    - host: PROD-URL
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: PROJECT_NAME-helm
+                port:
+                  number: 80
+
+# Uncomment to enable opentelemetry instrumentation
+#podAnnotations:
+#  instrumentation.opentelemetry.io/inject-go: "true"
