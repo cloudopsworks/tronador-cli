@@ -3,9 +3,9 @@ package server
 
 import (
 	"context"
-	"hello-service/internal/api"
 	"net/http"
 	"time"
+	"tronador-cli/internal/api"
 )
 
 // Server represents the HTTP server

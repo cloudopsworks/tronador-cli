@@ -49,17 +49,17 @@ config:
   requiredReviewers: 1
 
   # Required: needed if not automatic or protection is true
-  reviewers: []
-  #  - elasticguru-bot
-  #  - cloudopsworks-dev
-  #  - cloudopsworks/engineering
+  reviewers:
+    - berahac
+    - elasticguru-bot
+    - cloudopsworks/engineering
 
   # Required: needed for permit owners to perform commits under protected branches.
   # Teams are specified as org/team-name
-  owners: []
-  #  - elasticguru-bot
-  #  - cloudopsworks-dev
-  #  - cloudopsworks/admin
+  owners:
+    - berahac
+    - elasticguru-bot
+    - cloudopsworks/admin
 
   # Optional configure the repository members
   contributors:
