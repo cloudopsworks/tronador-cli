@@ -50,14 +50,7 @@ var (
 )
 
 // AWS configuration variables (shared with parent)
-var (
-	profile                string
-	region                 string
-	assumeRoleArn          string
-	assumeRoleSessionName  string
-	assumeRoleExternalId   string
-	assumeRoleDurationSecs int32
-)
+var awsConfig *awsclient.AWSConfig
 
 // InitTagCommand initializes the tag command flags
 func InitTagCommand() {
@@ -84,24 +77,19 @@ func InitTagCommand() {
 
 // SetAWSConfig sets the shared AWS configuration variables
 func SetAWSConfig(p, r, ara, arsn, arei string, ards int32) {
-	profile = p
-	region = r
-	assumeRoleArn = ara
-	assumeRoleSessionName = arsn
-	assumeRoleExternalId = arei
-	assumeRoleDurationSecs = ards
+	awsConfig = &awsclient.AWSConfig{
+		Profile:                p,
+		Region:                 r,
+		AssumeRoleArn:          ara,
+		AssumeRoleSessionName:  arsn,
+		AssumeRoleExternalId:   arei,
+		AssumeRoleDurationSecs: ards,
+	}
 }
 
 // buildAWSConfigFromFlags builds an AWS configuration from the shared variables
 func buildAWSConfigFromFlags() awsclient.Config {
-	return awsclient.Config{
-		Profile:                profile,
-		Region:                 region,
-		AssumeRoleArn:          assumeRoleArn,
-		AssumeRoleSessionName:  assumeRoleSessionName,
-		AssumeRoleExternalId:   assumeRoleExternalId,
-		AssumeRoleDurationSecs: assumeRoleDurationSecs,
-	}
+	return awsConfig.BuildAWSConfig()
 }
 
 // runTagCommand executes the tag command
@@ -156,14 +144,14 @@ func runTagCommand(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   Organization Unit: %s\n", organizationUnit)
 	fmt.Printf("   Application: %s (%s)\n", applicationName, applicationType)
 	fmt.Printf("   Managed By: %s\n", managedBy)
-	if profile != "" {
-		fmt.Printf("   AWS Profile: %s\n", profile)
+	if awsConfig.Profile != "" {
+		fmt.Printf("   AWS Profile: %s\n", awsConfig.Profile)
 	}
-	if region != "" {
-		fmt.Printf("   AWS Region: %s\n", region)
+	if awsConfig.Region != "" {
+		fmt.Printf("   AWS Region: %s\n", awsConfig.Region)
 	}
-	if assumeRoleArn != "" {
-		fmt.Printf("   Assume Role: %s\n", assumeRoleArn)
+	if awsConfig.AssumeRoleArn != "" {
+		fmt.Printf("   Assume Role: %s\n", awsConfig.AssumeRoleArn)
 	}
 	if dryRun {
 		fmt.Printf("   🧪 DRY-RUN MODE: No changes will be made\n")
