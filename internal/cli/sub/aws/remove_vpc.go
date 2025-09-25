@@ -80,11 +80,11 @@ func runRemoveDefaultVpcCommand(cmd *cobra.Command, args []string) error {
 
 	// Print configuration summary
 	fmt.Printf("🗑️ Default VPC Removal Configuration:\n")
-	if profile != "" {
-		fmt.Printf("   AWS Profile: %s\n", profile)
+	if awsConfig.Profile != "" {
+		fmt.Printf("   AWS Profile: %s\n", awsConfig.Profile)
 	}
-	if assumeRoleArn != "" {
-		fmt.Printf("   Assume Role: %s\n", assumeRoleArn)
+	if awsConfig.AssumeRoleArn != "" {
+		fmt.Printf("   Assume Role: %s\n", awsConfig.AssumeRoleArn)
 	}
 	if excludeRegions != "" {
 		fmt.Printf("   Excluded Regions: %s\n", excludeRegions)

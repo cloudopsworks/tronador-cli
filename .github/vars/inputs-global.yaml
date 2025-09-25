@@ -19,8 +19,8 @@ golang:
 #  enabled: true
 #
 # Set Semgrep processing to true if want to enable, the tool is disabled by default
-#semgrep:
-#  enabled: true
+semgrep:
+  enabled: true
 #
 # Set Sonarqube processing to true if want to enable, the tool is disabled by default
 #sonarqube:
