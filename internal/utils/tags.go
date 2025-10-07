@@ -87,8 +87,10 @@ func BuildStandardTags(cfg TagConfig) map[string]string {
 
 // HasManagedByIaC checks if a resource has the managed-by=iac tag
 func HasManagedByIaC(tags map[string]string) bool {
+	// check both managed-by and managed_by tags:
 	managedBy, exists := tags["managed-by"]
-	return exists && managedBy == "iac"
+	managedByAlt, existsAlt := tags["managed_by"]
+	return (exists && managedBy == "iac") || (existsAlt && managedByAlt == "iac")
 }
 
 // IsUntagged checks if a resource has zero tags

@@ -54,8 +54,8 @@ func init() {
 	awsCmd.PersistentFlags().StringVar(&profile, "profile", "", "AWS profile to use")
 	awsCmd.PersistentFlags().StringVar(&region, "region", "", "AWS region to use")
 	awsCmd.PersistentFlags().StringVar(&assumeRoleArn, "assume-role-arn", "", "ARN of role to assume")
-	awsCmd.PersistentFlags().StringVar(&assumeRoleSessionName, "assume-role-session-name", "", "Session name for assume role")
-	awsCmd.PersistentFlags().StringVar(&assumeRoleExternalId, "assume-role-external-id", "", "External ID for assume role")
+	awsCmd.PersistentFlags().StringVar(&assumeRoleSessionName, "assume-role-session-name", "tronador-cli", "Session name for assume role")
+	awsCmd.PersistentFlags().StringVar(&assumeRoleExternalId, "assume-role-external-id", "tronador-cli", "External ID for assume role")
 	awsCmd.PersistentFlags().Int32Var(&assumeRoleDurationSecs, "assume-role-duration-secs", 3600, "Duration for assume role in seconds")
 
 	// Initialize subcommand flags
