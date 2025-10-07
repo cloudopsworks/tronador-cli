@@ -45,6 +45,8 @@ var DefaultResourceTypes = []string{
 	"backup:backup-plan",
 	"backup:framework",
 	"backup:report-plan",
+	"events:event-bus",
+	"events:schedule-group",
 }
 
 // ResourceTypeAliases maps friendly names to AWS resource types
@@ -89,6 +91,13 @@ var ResourceTypeAliases = map[string]string{
 	"autoscaling_group":     "autoscaling:autoScalingGroup",
 	"asg":                   "autoscaling:autoScalingGroup",
 	"asgs":                  "autoscaling:autoScalingGroup",
+	"eventbus":              "events:event-bus",
+	"eventbuses":            "events:event-bus",
+	"schedulegroup":         "events:schedule-group",
+	"schedulegroups":        "events:schedule-group",
+	"schedule-group":        "events:schedule-group",
+	"schedule-groups":       "events:schedule-group",
+	"scheduled-events":      "events:schedule-group",
 	"s3-bucket":             "s3:bucket",
 	"s3_bucket":             "s3:bucket",
 	"bucket":                "s3:bucket",
@@ -664,6 +673,15 @@ func (rt *ResourceTagger) discoverBackupVaults(ctx context.Context) ([]Resource,
 	return resources, nil
 }
 
+// discoverAdditionalBackupResources enumerates additional Backup resources directly
+func (rt *ResourceTagger) discoverAdditionalBackupResources(ctx context.Context, resourceType string) ([]Resource, error) {
+	// For backup resources beyond backup-vault, we rely primarily on the Resource Groups Tagging API
+	// as these resources don't have simple direct enumeration APIs or require complex nested queries.
+	// The Resource Groups Tagging API will catch these resources if they are tagged.
+	// This method exists to maintain consistency but returns empty for direct enumeration.
+	return []Resource{}, nil
+}
+
 // discoverAdditionalEC2Resources enumerates additional EC2 resources directly
 func (rt *ResourceTagger) discoverAdditionalEC2Resources(ctx context.Context, resourceType string) ([]Resource, error) {
 	var resources []Resource
@@ -792,6 +810,72 @@ func (rt *ResourceTagger) discoverAdditionalEC2Resources(ctx context.Context, re
 			}
 		}
 
+	case "ec2:dhcp-options":
+		// List all DHCP options sets
+		paginator := ec2.NewDescribeDhcpOptionsPaginator(rt.ec2Client, &ec2.DescribeDhcpOptionsInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe DHCP options: %w", err)
+			}
+			for _, dhcpOptions := range page.DhcpOptions {
+				if dhcpOptions.DhcpOptionsId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:dhcp-options/%s", region, accountID, *dhcpOptions.DhcpOptionsId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range dhcpOptions.Tags {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:network-interface":
+		// List all network interfaces
+		paginator := ec2.NewDescribeNetworkInterfacesPaginator(rt.ec2Client, &ec2.DescribeNetworkInterfacesInput{})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to describe network interfaces: %w", err)
+			}
+			for _, eni := range page.NetworkInterfaces {
+				if eni.NetworkInterfaceId == nil {
+					continue
+				}
+				arn := fmt.Sprintf("arn:aws:ec2:%s:%s:network-interface/%s", region, accountID, *eni.NetworkInterfaceId)
+				resource := Resource{ARN: arn, Tags: make(map[string]string)}
+				for _, tag := range eni.TagSet {
+					if tag.Key != nil && tag.Value != nil {
+						resource.Tags[*tag.Key] = *tag.Value
+					}
+				}
+				resources = append(resources, resource)
+			}
+		}
+
+	case "ec2:elastic-ip":
+		// List all elastic IPs
+		result, err := rt.ec2Client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to describe elastic IPs: %w", err)
+		}
+		for _, address := range result.Addresses {
+			if address.AllocationId == nil {
+				continue
+			}
+			arn := fmt.Sprintf("arn:aws:ec2:%s:%s:elastic-ip/%s", region, accountID, *address.AllocationId)
+			resource := Resource{ARN: arn, Tags: make(map[string]string)}
+			for _, tag := range address.Tags {
+				if tag.Key != nil && tag.Value != nil {
+					resource.Tags[*tag.Key] = *tag.Value
+				}
+			}
+			resources = append(resources, resource)
+		}
+
 	default:
 		return []Resource{}, nil
 	}
@@ -822,13 +906,26 @@ func (rt *ResourceTagger) discoverResourcesDirect(ctx context.Context, resourceT
 		return rt.discoverSecretsManagerSecrets(ctx)
 	case "backup:backup-vault":
 		return rt.discoverBackupVaults(ctx)
-	case "ec2:vpc", "ec2:subnet", "ec2:internet-gateway", "ec2:route-table", "ec2:network-acl":
+	case "backup:recovery-point", "backup:backup-plan", "backup:framework", "backup:report-plan":
+		return rt.discoverAdditionalBackupResources(ctx, resourceType)
+	case "ec2:vpc", "ec2:subnet", "ec2:internet-gateway", "ec2:route-table", "ec2:network-acl", "ec2:dhcp-options", "ec2:network-interface", "ec2:elastic-ip":
 		return rt.discoverAdditionalEC2Resources(ctx, resourceType)
+	case "events:event-bus":
+		eventBridgeDiscovery := NewEventBridgeResourceDiscovery(rt.client)
+		return eventBridgeDiscovery.DiscoverEventBusResources(ctx)
+	case "events:schedule-group":
+		eventBridgeDiscovery := NewEventBridgeResourceDiscovery(rt.client)
+		return eventBridgeDiscovery.DiscoverScheduleGroupResources(ctx)
 	default:
 		// For unsupported resource types, return empty slice
 		// This allows gradual implementation of all resource types
 		return []Resource{}, nil
 	}
+}
+
+// isEndpointResolutionError checks if the error is related to endpoint resolution
+func isEndpointResolutionError(err error) bool {
+	return strings.Contains(err.Error(), "ResolveEndpointV2") || strings.Contains(err.Error(), "not found")
 }
 
 // DiscoverResources discovers resources using both Resource Groups Tagging API and direct enumeration
@@ -849,6 +946,12 @@ func (rt *ResourceTagger) DiscoverResources(ctx context.Context, resourceTypes [
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
+			// If Resource Groups Tagging API is not available (endpoint resolution error),
+			// continue with direct enumeration only
+			if isEndpointResolutionError(err) {
+				fmt.Printf("⚠️  Resource Groups Tagging API not available, using direct enumeration only\n")
+				break
+			}
 			return nil, fmt.Errorf("failed to get resources page from Resource Groups API: %w", err)
 		}
 
@@ -873,6 +976,11 @@ func (rt *ResourceTagger) DiscoverResources(ctx context.Context, resourceTypes [
 	for _, resourceType := range resourceTypes {
 		directResources, err := rt.discoverResourcesDirect(ctx, resourceType)
 		if err != nil {
+			// If direct enumeration fails due to endpoint resolution, skip this resource type
+			if isEndpointResolutionError(err) {
+				fmt.Printf("⚠️  Direct enumeration for %s not available, skipping\n", resourceType)
+				continue
+			}
 			return nil, fmt.Errorf("failed to discover %s resources directly: %w", resourceType, err)
 		}
 
@@ -883,6 +991,33 @@ func (rt *ResourceTagger) DiscoverResources(ctx context.Context, resourceTypes [
 			if _, exists := resourceMap[resource.ARN]; !exists {
 				resourceMap[resource.ARN] = resource
 			}
+		}
+	}
+
+	// Handle EventBridge resources specifically - these are not caught by the standard discovery methods
+	// but need to be added if the resource types are included
+	var eventBridgeResources []Resource
+
+	for _, resourceType := range resourceTypes {
+		if resourceType == "events:event-bus" || resourceType == "events:schedule-group" {
+			// We need to create an EventBridgeResourceDiscovery instance to get these resources
+			eventBridgeDiscovery := NewEventBridgeResourceDiscovery(rt.client)
+
+			// Discover all EventBridge resources
+			eventBridgeRes, err := eventBridgeDiscovery.DiscoverEventBridgeResources(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to discover EventBridge resources: %w", err)
+			}
+
+			eventBridgeResources = append(eventBridgeResources, eventBridgeRes...)
+			break // We only need to do this once per discovery session
+		}
+	}
+
+	// Merge EventBridge resources into the main resource map to avoid duplicates
+	for _, resource := range eventBridgeResources {
+		if _, exists := resourceMap[resource.ARN]; !exists {
+			resourceMap[resource.ARN] = resource
 		}
 	}
 
@@ -925,6 +1060,20 @@ func (rt *ResourceTagger) TagResources(ctx context.Context, arns []string, tags 
 		if err != nil {
 			return fmt.Errorf("failed to tag resources chunk %d-%d: %w", i, end-1, err)
 		}
+	}
+
+	return nil
+}
+
+// TagEventBridgeResources tags EventBridge event buses and schedule groups with provided tags
+func (rt *ResourceTagger) TagEventBridgeResources(ctx context.Context, arns []string, tags map[string]string) error {
+	// Create EventBridge resource discovery instance
+	eventBridgeDiscovery := NewEventBridgeResourceDiscovery(rt.client)
+
+	// Tag the resources using EventBridge client
+	err := eventBridgeDiscovery.TagEventBridgeResources(ctx, arns, tags)
+	if err != nil {
+		return fmt.Errorf("failed to tag EventBridge resources: %w", err)
 	}
 
 	return nil

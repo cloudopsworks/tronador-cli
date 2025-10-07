@@ -26,6 +26,7 @@ This command supports tagging various AWS resource types including:
 - Secrets Manager secrets
 - ACM certificates, KMS keys
 - AWS Backup resources
+- EventBridge event buses and schedule groups
 
 The command uses Resource Groups Tagging API with native service discovery
 fallback to ensure comprehensive resource coverage.`,
@@ -263,6 +264,7 @@ func tagAWSResources(ctx context.Context, awsClient *awsclient.Client, tags map[
 	// Filter resources based on tagging logic
 	utils.VerboseLog(cmd, "Filtering resources based on tagging logic (reapply: %t)...", reapply)
 	var resourcesToTag []string
+	var eventBridgeResources []string
 	skipped := 0
 
 	for i, resource := range resources {
@@ -277,50 +279,93 @@ func tagAWSResources(ctx context.Context, awsClient *awsclient.Client, tags map[
 			continue
 		}
 		utils.VerboseLog(cmd, "Resource will be tagged: %s", resource.ARN)
-		resourcesToTag = append(resourcesToTag, resource.ARN)
+
+		// Check if this is an EventBridge resource that needs special handling
+		if strings.Contains(resource.ARN, ":event-bus/") || strings.Contains(resource.ARN, ":schedule-group/") {
+			eventBridgeResources = append(eventBridgeResources, resource.ARN)
+		} else {
+			resourcesToTag = append(resourcesToTag, resource.ARN)
+		}
 	}
 
-	utils.VerboseLog(cmd, "Resource filtering completed: %d to tag, %d skipped", len(resourcesToTag), skipped)
+	utils.VerboseLog(cmd, "Resource filtering completed: %d to tag (including %d EventBridge), %d skipped", len(resourcesToTag), len(eventBridgeResources), skipped)
 
-	if len(resourcesToTag) == 0 {
+	if len(resourcesToTag) == 0 && len(eventBridgeResources) == 0 {
 		fmt.Println("No resources need tagging.")
 		utils.VerboseLog(cmd, "No resources require tagging - operation complete")
 		return 0, skipped, 0, nil
 	}
 
-	fmt.Printf("Will tag %d resources\n", len(resourcesToTag))
-	utils.VerboseLog(cmd, "Proceeding to tag %d resources", len(resourcesToTag))
+	// Tag regular resources using Resource Groups Tagging API
+	if len(resourcesToTag) > 0 {
+		fmt.Printf("Will tag %d regular resources\n", len(resourcesToTag))
+		utils.VerboseLog(cmd, "Proceeding to tag %d regular resources", len(resourcesToTag))
 
-	if dryRun {
-		fmt.Println("🧪 DRY-RUN: Would tag the following resources:")
-		utils.VerboseLog(cmd, "DRY-RUN mode: listing resources that would be tagged")
-		for i, arn := range resourcesToTag {
-			fmt.Printf("  %d. %s\n", i+1, arn)
-			if i >= 9 { // Show only first 10 in dry-run
-				fmt.Printf("  ... and %d more\n", len(resourcesToTag)-10)
-				break
+		if dryRun {
+			fmt.Println("🧪 DRY-RUN: Would tag the following regular resources:")
+			utils.VerboseLog(cmd, "DRY-RUN mode: listing regular resources that would be tagged")
+			for i, arn := range resourcesToTag {
+				fmt.Printf("  %d. %s\n", i+1, arn)
+				if i >= 9 { // Show only first 10 in dry-run
+					fmt.Printf("  ... and %d more\n", len(resourcesToTag)-10)
+					break
+				}
 			}
+			fmt.Printf("Tags to apply: %v\n", tags)
+			utils.VerboseLog(cmd, "DRY-RUN completed: %d regular resources would be tagged", len(resourcesToTag))
+		} else {
+			utils.VerboseLog(cmd, "Starting actual tagging operation for regular resources...")
+			utils.DebugLog(cmd, "Tagging Details",
+				fmt.Sprintf("Resources to tag: %d\nTags to apply: %v\nBatch size: 20 (Resource Groups API limit)",
+					len(resourcesToTag), tags))
+
+			err = resourceTagger.TagResources(ctx, resourcesToTag, tags)
+			if err != nil {
+				utils.VerboseLog(cmd, "Tagging operation failed: %v", err)
+				return 0, skipped, len(resourcesToTag), fmt.Errorf("failed to tag regular resources: %w", err)
+			}
+
+			fmt.Printf("✅ Successfully tagged %d regular resources\n", len(resourcesToTag))
+			utils.VerboseLog(cmd, "Regular resources tagging completed successfully: %d tagged, %d skipped", len(resourcesToTag), skipped)
 		}
-		fmt.Printf("Tags to apply: %v\n", tags)
-		utils.VerboseLog(cmd, "DRY-RUN completed: %d resources would be tagged", len(resourcesToTag))
-		return len(resourcesToTag), skipped, 0, nil
 	}
 
-	// Perform tagging
-	utils.VerboseLog(cmd, "Starting actual tagging operation...")
-	utils.DebugLog(cmd, "Tagging Details",
-		fmt.Sprintf("Resources to tag: %d\nTags to apply: %v\nBatch size: 20 (Resource Groups API limit)",
-			len(resourcesToTag), tags))
+	// Tag EventBridge resources using EventBridge-specific method
+	if len(eventBridgeResources) > 0 {
+		fmt.Printf("Will tag %d EventBridge resources\n", len(eventBridgeResources))
+		utils.VerboseLog(cmd, "Proceeding to tag %d EventBridge resources", len(eventBridgeResources))
 
-	err = resourceTagger.TagResources(ctx, resourcesToTag, tags)
-	if err != nil {
-		utils.VerboseLog(cmd, "Tagging operation failed: %v", err)
-		return 0, skipped, len(resourcesToTag), fmt.Errorf("failed to tag resources: %w", err)
+		if dryRun {
+			fmt.Println("🧪 DRY-RUN: Would tag the following EventBridge resources:")
+			utils.VerboseLog(cmd, "DRY-RUN mode: listing EventBridge resources that would be tagged")
+			for i, arn := range eventBridgeResources {
+				fmt.Printf("  %d. %s\n", i+1, arn)
+				if i >= 9 { // Show only first 10 in dry-run
+					fmt.Printf("  ... and %d more\n", len(eventBridgeResources)-10)
+					break
+				}
+			}
+			fmt.Printf("Tags to apply: %v\n", tags)
+			utils.VerboseLog(cmd, "DRY-RUN completed: %d EventBridge resources would be tagged", len(eventBridgeResources))
+		} else {
+			utils.VerboseLog(cmd, "Starting actual tagging operation for EventBridge resources...")
+			utils.DebugLog(cmd, "EventBridge Tagging Details",
+				fmt.Sprintf("EventBridge resources to tag: %d\nTags to apply: %v",
+					len(eventBridgeResources), tags))
+
+			err = resourceTagger.TagEventBridgeResources(ctx, eventBridgeResources, tags)
+			if err != nil {
+				utils.VerboseLog(cmd, "EventBridge tagging operation failed: %v", err)
+				return len(resourcesToTag), skipped, len(eventBridgeResources), fmt.Errorf("failed to tag EventBridge resources: %w", err)
+			}
+
+			fmt.Printf("✅ Successfully tagged %d EventBridge resources\n", len(eventBridgeResources))
+			utils.VerboseLog(cmd, "EventBridge resources tagging completed successfully: %d tagged, %d skipped", len(eventBridgeResources), skipped)
+		}
 	}
 
-	fmt.Printf("✅ Successfully tagged %d resources\n", len(resourcesToTag))
-	utils.VerboseLog(cmd, "AWS resources tagging completed successfully: %d tagged, %d skipped", len(resourcesToTag), skipped)
-	return len(resourcesToTag), skipped, 0, nil
+	totalTagged := len(resourcesToTag) + len(eventBridgeResources)
+	return totalTagged, skipped, 0, nil
 }
 
 // tagIAMResources handles tagging of IAM roles and policies
