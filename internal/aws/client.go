@@ -8,7 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 )
 
@@ -41,8 +41,45 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		opts = append(opts, config.WithRegion(cfg.Region))
 	}
 
+	// If assume role is requested, use AWS SDK V2 assume role credentials options
+	if cfg.AssumeRoleArn != "" {
+		sessionName := cfg.AssumeRoleSessionName
+		if sessionName == "" {
+			sessionName = fmt.Sprintf("tronador-cli-%d", time.Now().Unix())
+		}
+
+		assumeRoleOptions := func(options *stscreds.AssumeRoleOptions) {
+			options.RoleSessionName = sessionName
+			if cfg.AssumeRoleDurationSecs > 0 {
+				options.Duration = time.Duration(cfg.AssumeRoleDurationSecs) * time.Second
+			}
+			if cfg.AssumeRoleExternalId != "" {
+				options.ExternalID = &cfg.AssumeRoleExternalId
+			}
+		}
+
+		// Load base config first to get the STS client
+		baseConfig, err := config.LoadDefaultConfig(ctx, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load base AWS config: %w", err)
+		}
+
+		// Create assume role provider with proper STS client
+		assumeRoleProvider := stscreds.NewAssumeRoleProvider(
+			sts.NewFromConfig(baseConfig),
+			cfg.AssumeRoleArn,
+			assumeRoleOptions,
+		)
+
+		opts = append(opts, config.WithCredentialsProvider(assumeRoleProvider))
+	}
+
 	awsConfig, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
+		// Check if this is an endpoint resolution error for assume role
+		if cfg.AssumeRoleArn != "" && isEndpointResolutionError(err) {
+			return nil, fmt.Errorf("assume role failed - STS endpoint not available: %w", err)
+		}
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
@@ -51,53 +88,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 		STS:    sts.NewFromConfig(awsConfig),
 	}
 
-	// If assume role is requested, get temporary credentials
-	if cfg.AssumeRoleArn != "" {
-		if err := client.assumeRole(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("failed to assume role: %w", err)
-		}
-	}
-
 	return client, nil
-}
-
-// assumeRole assumes the specified role and updates the client config with temporary credentials
-func (c *Client) assumeRole(ctx context.Context, cfg Config) error {
-	sessionName := cfg.AssumeRoleSessionName
-	if sessionName == "" {
-		sessionName = fmt.Sprintf("tronador-cli-%d", time.Now().Unix())
-	}
-
-	input := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(cfg.AssumeRoleArn),
-		RoleSessionName: aws.String(sessionName),
-		DurationSeconds: aws.Int32(cfg.AssumeRoleDurationSecs),
-	}
-
-	if cfg.AssumeRoleExternalId != "" {
-		input.ExternalId = aws.String(cfg.AssumeRoleExternalId)
-	}
-
-	result, err := c.STS.AssumeRole(ctx, input)
-	if err != nil {
-		return fmt.Errorf("assume role failed: %w", err)
-	}
-
-	if result.Credentials == nil {
-		return fmt.Errorf("assume role returned nil credentials")
-	}
-
-	// Update the config with temporary credentials
-	c.Config.Credentials = credentials.NewStaticCredentialsProvider(
-		*result.Credentials.AccessKeyId,
-		*result.Credentials.SecretAccessKey,
-		*result.Credentials.SessionToken,
-	)
-
-	// Update STS client to use new credentials
-	c.STS = sts.NewFromConfig(c.Config)
-
-	return nil
 }
 
 // GetEffectiveRegion returns the effective region being used
