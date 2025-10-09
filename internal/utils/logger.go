@@ -9,6 +9,16 @@ import (
 	"github.com/spf13/viper"
 )
 
+// IsVerbose Return if verbosity is enabled
+func IsVerbose(cmd *cobra.Command) bool {
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	if !verbose {
+		// Check viper as fallback
+		verbose = viper.GetBool("verbose")
+	}
+	return verbose
+}
+
 // VerboseLog prints a message only if verbose mode is enabled
 func VerboseLog(cmd *cobra.Command, format string, args ...interface{}) {
 	verbose, _ := cmd.Flags().GetBool("verbose")

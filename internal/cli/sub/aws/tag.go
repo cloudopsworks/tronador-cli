@@ -50,9 +50,6 @@ var (
 	targetResources      string // "resources", "iam", or "all"
 )
 
-// AWS configuration variables (shared with parent)
-var awsConfig *awsclient.AWSConfig
-
 // InitTagCommand initializes the tag command flags
 func InitTagCommand() {
 	// Required organization metadata flags
@@ -74,23 +71,6 @@ func InitTagCommand() {
 	TagCmd.Flags().BoolVar(&reapply, "reapply", false, "Reapply tags even if resources already have tags")
 	TagCmd.Flags().BoolVar(&includeServiceLinked, "include-service-linked", false, "Include service-linked IAM roles")
 	TagCmd.Flags().StringVar(&targetResources, "target", "all", "Target resources: 'resources', 'iam', or 'all'")
-}
-
-// SetAWSConfig sets the shared AWS configuration variables
-func SetAWSConfig(p, r, ara, arsn, arei string, ards int32) {
-	awsConfig = &awsclient.AWSConfig{
-		Profile:                p,
-		Region:                 r,
-		AssumeRoleArn:          ara,
-		AssumeRoleSessionName:  arsn,
-		AssumeRoleExternalId:   arei,
-		AssumeRoleDurationSecs: ards,
-	}
-}
-
-// buildAWSConfigFromFlags builds an AWS configuration from the shared variables
-func buildAWSConfigFromFlags() awsclient.Config {
-	return awsConfig.BuildAWSConfig()
 }
 
 // runTagCommand executes the tag command
