@@ -23,7 +23,8 @@ var RemediationCmd = &cobra.Command{
 security best practices and compliance controls across AWS resources.
 
 Available subcommands:
-  s3    Remediate S3 security controls including SSL enforcement`,
+  s3    Remediate S3 security controls including SSL enforcement
+  ec2   Remediate EC2 security controls including default security groups restrictions`,
 }
 
 // S3RemediationCmd represents the s3 remediation command
@@ -55,61 +56,35 @@ func InitRemediationCommand() {
 func runS3RemediationCommand(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 
-	utils.VerboseLog(cmd, "Starting S3 remediation command execution")
-	utils.VerboseLog(cmd, "Command arguments: %v", args)
+	// Log remediation start
+	LogRemediationStart(cmd, "S3")
 
-	// Get dry-run flag from global flags
-	dryRun, err := cmd.Flags().GetBool("dry-run")
+	// Build common remediation configuration
+	config, err := BuildRemediationConfig(ctx, cmd)
 	if err != nil {
-		dryRun = false
+		return fmt.Errorf("failed to build remediation configuration: %w", err)
 	}
-	utils.VerboseLog(cmd, "Dry-run mode: %t", dryRun)
-
-	// Build AWS configuration using helper function
-	awsConfig := buildAWSConfigFromFlags()
-	utils.VerboseLog(cmd, "AWS configuration: Profile=%s, Region=%s, AssumeRole=%s",
-		awsConfig.Profile, awsConfig.Region, awsConfig.AssumeRoleArn)
-
-	// Create AWS client
-	utils.VerboseLog(cmd, "Creating AWS client...")
-	awsClient, err := awsclient.NewClient(ctx, awsConfig)
-	if err != nil {
-		utils.VerboseLog(cmd, "Failed to create AWS client: %v", err)
-		return fmt.Errorf("failed to create AWS client: %w", err)
-	}
-	utils.VerboseLog(cmd, "AWS client created successfully")
 
 	// Print configuration summary
-	fmt.Printf("🔒 S3 Security Remediation Configuration:\n")
-	if awsConfig.Profile != "" {
-		fmt.Printf("   AWS Profile: %s\n", awsConfig.Profile)
-	}
-	if awsConfig.AssumeRoleArn != "" {
-		fmt.Printf("   Assume Role: %s\n", awsConfig.AssumeRoleArn)
-	}
-	fmt.Printf("   Control: S3-5 (SSL/TLS enforcement)\n")
-	if dryRun {
-		fmt.Printf("   🧪 DRY-RUN MODE: No changes will be made\n")
-	}
-	fmt.Println()
+	PrintRemediationHeader(config, "S3", "S3-5", "SSL/TLS enforcement")
 
 	// Perform S3 security remediation
-	totalProcessed, totalSkipped, totalFailed, err := remediateS3SecurityControls(ctx, awsClient, dryRun, cmd)
+	totalProcessed, totalSkipped, totalFailed, err := remediateS3SecurityControls(ctx, config.Client, config.DryRun, cmd)
 	if err != nil {
 		utils.VerboseLog(cmd, "S3 security remediation failed: %v", err)
 		return fmt.Errorf("failed to remediate S3 security controls: %w", err)
 	}
 
 	// Print summary
-	utils.VerboseLog(cmd, "Final totals: %d processed, %d skipped, %d failed", totalProcessed, totalSkipped, totalFailed)
-	fmt.Printf("\n✅ S3 Security Remediation Summary:\n")
-	fmt.Printf("   Buckets processed: %d\n", totalProcessed)
-	fmt.Printf("   Buckets skipped: %d\n", totalSkipped)
-	if totalFailed > 0 {
-		fmt.Printf("   Buckets failed: %d\n", totalFailed)
+	result := &RemediationResult{
+		Processed: totalProcessed,
+		Skipped:   totalSkipped,
+		Failed:    totalFailed,
 	}
+	PrintRemediationSummary(result, "Buckets", cmd)
 
-	utils.VerboseLog(cmd, "S3 remediation command execution completed successfully")
+	// Log completion
+	LogRemediationComplete(cmd, "S3")
 	return nil
 }
 
@@ -396,4 +371,7 @@ func init() {
 
 	// Add S3 subcommand to remediation
 	RemediationCmd.AddCommand(S3RemediationCmd)
+
+	// Add EC2 subcommand to remediation
+	RemediationCmd.AddCommand(EC2RemediationCmd)
 }
