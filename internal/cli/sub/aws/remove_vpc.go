@@ -121,9 +121,7 @@ func removeDefaultVPCs(ctx context.Context, awsClient *awsclient.Client, dryRun 
 	utils.VerboseLog(cmd, "Starting default VPC removal process")
 
 	// Create EC2 client for region discovery (using us-east-1 as per shell script)
-	regionDiscoveryConfig := awsClient.Config
-	regionDiscoveryConfig.Region = "us-east-1"
-	ec2ClientForRegions := ec2.NewFromConfig(regionDiscoveryConfig)
+	ec2ClientForRegions := ec2.NewFromConfig(awsClient.Config)
 
 	// Get all AWS regions
 	regionsResult, err := ec2ClientForRegions.DescribeRegions(ctx, &ec2.DescribeRegionsInput{})
