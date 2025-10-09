@@ -17,7 +17,8 @@ AWS resources including tagging, discovery, and configuration.
 
 Available subcommands:
   tag                   Tag AWS resources with organization metadata
-  remove-default-vpc    Remove default VPCs from all regions in the account`,
+  remove-default-vpc    Remove default VPCs from all regions in the account
+  remediation           AWS security remediation commands`,
 }
 
 // AWS configuration flags (shared across all subcommands)
@@ -61,10 +62,12 @@ func init() {
 	// Initialize subcommand flags
 	awssub.InitTagCommand()
 	awssub.InitRemoveDefaultVpcCommand()
+	awssub.InitRemediationCommand()
 
 	// Add subcommands to aws
 	awsCmd.AddCommand(awssub.TagCmd)
 	awsCmd.AddCommand(awssub.RemoveDefaultVpcCmd)
+	awsCmd.AddCommand(awssub.RemediationCmd)
 
 	// Set up a pre-run hook to share AWS configuration with subcommands
 	awsCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
