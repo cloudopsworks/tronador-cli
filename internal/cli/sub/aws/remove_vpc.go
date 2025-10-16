@@ -325,6 +325,41 @@ func removeVPCResources(ctx context.Context, ec2Client *ec2.Client, vpcId, regio
 		return fmt.Errorf("failed to describe security groups: %w", err)
 	}
 
+	// Cleanup of Security Groups Rules first, then delete Security Groups include in this process the default SG (it will be skipped for deletion)
+	for _, sg := range sgResult.SecurityGroups {
+		if sg.GroupId == nil || sg.GroupName == nil {
+			continue
+		}
+
+		sgId := *sg.GroupId
+		fmt.Printf("    🛡️  Revoking Rules on security group %s\n", sgId)
+		utils.VerboseLog(cmd, "Revoking Rules on security group %s", sgId)
+
+		// Clean up inbound rules before deletion
+		if len(sg.IpPermissions) > 0 {
+			utils.VerboseLog(cmd, "Revoking %d inbound rules for security group %s", len(sg.IpPermissions), sgId)
+			_, err := ec2Client.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{
+				GroupId:       sg.GroupId,
+				IpPermissions: sg.IpPermissions,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to revoke ingress rules for security group %s: %w", sgId, err)
+			}
+		}
+
+		// Clean up outbound rules before deletion
+		if len(sg.IpPermissionsEgress) > 0 {
+			utils.VerboseLog(cmd, "Revoking %d outbound rules for security group %s", len(sg.IpPermissionsEgress), sgId)
+			_, err := ec2Client.RevokeSecurityGroupEgress(ctx, &ec2.RevokeSecurityGroupEgressInput{
+				GroupId:       sg.GroupId,
+				IpPermissions: sg.IpPermissionsEgress,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to revoke egress rules for security group %s: %w", sgId, err)
+			}
+		}
+	}
+
 	for _, sg := range sgResult.SecurityGroups {
 		if sg.GroupId == nil || sg.GroupName == nil {
 			continue
@@ -340,7 +375,7 @@ func removeVPCResources(ctx context.Context, ec2Client *ec2.Client, vpcId, regio
 		fmt.Printf("    🛡️  Deleting security group %s\n", sgId)
 		utils.VerboseLog(cmd, "Deleting security group %s", sgId)
 
-		_, err := ec2Client.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
+		_, err = ec2Client.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
 			GroupId: sg.GroupId,
 		})
 		if err != nil {
