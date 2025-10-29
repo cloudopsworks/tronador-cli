@@ -336,6 +336,32 @@ func copySecret(ctx context.Context, awsConfig awsclient.Config, sourceSecret, d
 
 		utils.VerboseLog(cmd, "New version of destination secret created successfully")
 
+		// Copy tags from source to existing destination secret if source has tags
+		if len(describeResult.Tags) > 0 {
+			utils.VerboseLog(cmd, "Copying %d tags from source secret to existing destination secret", len(describeResult.Tags))
+
+			sourceTags := make([]types.Tag, len(describeResult.Tags))
+			for i, tag := range describeResult.Tags {
+				sourceTags[i] = types.Tag{
+					Key:   tag.Key,
+					Value: tag.Value,
+				}
+			}
+
+			tagInput := &secretsmanager.TagResourceInput{
+				SecretId: aws.String(destSecret),
+				Tags:     sourceTags,
+			}
+
+			_, err = destSMClient.TagResource(ctx, tagInput)
+			if err != nil {
+				utils.VerboseLog(cmd, "Warning: Failed to copy tags to existing destination secret: %v", err)
+				// Don't fail the entire operation for tagging issues, just log warning
+			} else {
+				utils.VerboseLog(cmd, "Successfully copied tags to existing destination secret")
+			}
+		}
+
 	} else {
 		// Create new secret
 		utils.VerboseLog(cmd, "Creating new destination secret: %s", destSecret)
