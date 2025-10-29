@@ -16,6 +16,7 @@ var awsCmd = &cobra.Command{
 AWS resources including tagging, discovery, and configuration.
 
 Available subcommands:
+  copysecret            Copy a secret from one location to another
   tag                   Tag AWS resources with organization metadata
   remove-default-vpc    Remove default VPCs from all regions in the account
   remediation           AWS security remediation commands`,
@@ -63,11 +64,13 @@ func init() {
 	awssub.InitTagCommand()
 	awssub.InitRemoveDefaultVpcCommand()
 	awssub.InitRemediationCommand()
+	awssub.InitCopySecretCommand()
 
 	// Add subcommands to aws
 	awsCmd.AddCommand(awssub.TagCmd)
 	awsCmd.AddCommand(awssub.RemoveDefaultVpcCmd)
 	awsCmd.AddCommand(awssub.RemediationCmd)
+	awsCmd.AddCommand(awssub.CopySecretCmd)
 
 	// Set up a pre-run hook to share AWS configuration with subcommands
 	awsCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
