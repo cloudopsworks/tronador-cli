@@ -41,6 +41,7 @@ on:
         required: true
         type: string
       semver:
+        description: 'Semver Version'
         required: true
         type: string
       default_azure_rg:
@@ -55,6 +56,11 @@ on:
         default: ''
       default_gcp_project:
         description: 'Default GCP Project ID'
+        required: false
+        type: string
+        default: ''
+      default_gcp_impersonate_sa:
+        description: 'Default GCP Impersonation SA ID'
         required: false
         type: string
         default: ''
@@ -96,11 +102,18 @@ jobs:
     name: 'Deploy Green Environment - Branch: ${{ github.ref_name }} - Env: ${{ inputs.deployment_name }}'
     runs-on: ${{ inputs.runner_set }}
     environment: ${{ inputs.deployment_name }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+      AWS_DEFAULT_REGION: ${{ inputs.default_aws_region }}
+      GOOGLE_CREDENTIALS: ${{ secrets.gcp_credentials }}
+      ARM_CLIENT_ID: ${{ secrets.azure_service_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.azure_service_secret }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       # Get Pipeline Config
       - name: Get Pipeline Config
@@ -136,7 +149,7 @@ jobs:
           token: ${{ secrets.token }}
           azure_service_id: ${{ secrets.azure_service_id }}
           azure_service_secret: ${{ secrets.azure_service_secret }}
-          azure_rg: ${{ steps.config.outputs.azure_rg != '' && steps.config.outputs.azure_rg || inputs.default_azure_rg }}
+          azure_rg: ${{ steps.config.outputs.build_azure_rg != '' && steps.config.outputs.build_azure_rg || inputs.default_azure_rg }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ inputs.semver }}
@@ -154,6 +167,7 @@ jobs:
           cloud_type: ${{ inputs.cloud_type }}
           token: ${{ secrets.token }}
           gcp_credentials: ${{ secrets.gcp_credentials }}
+          gcp_impersonate_sa: ${{ steps.config.outputs.deploy_gcp_impersonate_sa != '' && steps.config.outputs.deploy_gcp_impersonate_sa || inputs.default_gcp_impersonate_sa }}
           gcp_project: ${{ steps.config.outputs.gcp_project != '' && steps.config.outputs.gcp_project || inputs.default_gcp_project }}
           gcp_region: ${{ steps.config.outputs.gcp_region != '' && steps.config.outputs.gcp_region || inputs.default_gcp_region }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
@@ -171,11 +185,18 @@ jobs:
     name: 'Deploy Blue Environment - Branch: ${{ github.ref_name }} - Env: ${{ inputs.deployment_name }}'
     runs-on: ${{ inputs.runner_set }}
     environment: ${{ inputs.deployment_name }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+      AWS_DEFAULT_REGION: ${{ inputs.default_aws_region }}
+      GOOGLE_CREDENTIALS: ${{ secrets.gcp_credentials }}
+      ARM_CLIENT_ID: ${{ secrets.azure_service_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.azure_service_secret }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       # Get Pipeline Config
       - name: Get Pipeline Config
@@ -210,7 +231,7 @@ jobs:
           token: ${{ secrets.token }}
           azure_service_id: ${{ secrets.azure_service_id }}
           azure_service_secret: ${{ secrets.azure_service_secret }}
-          azure_rg: ${{ steps.config.outputs.azure_rg != '' && steps.config.outputs.azure_rg || inputs.default_azure_rg }}
+          azure_rg: ${{ steps.config.outputs.build_azure_rg != '' && steps.config.outputs.build_azure_rg || inputs.default_azure_rg }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ inputs.semver }}
@@ -228,6 +249,7 @@ jobs:
           cloud_type: ${{ inputs.cloud_type }}
           token: ${{ secrets.token }}
           gcp_credentials: ${{ secrets.gcp_credentials }}
+          gcp_impersonate_sa: ${{ steps.config.outputs.deploy_gcp_impersonate_sa != '' && steps.config.outputs.deploy_gcp_impersonate_sa || inputs.default_gcp_impersonate_sa }}
           gcp_project: ${{ steps.config.outputs.gcp_project != '' && steps.config.outputs.gcp_project || inputs.default_gcp_project }}
           gcp_region: ${{ steps.config.outputs.gcp_region != '' && steps.config.outputs.gcp_region || inputs.default_gcp_region }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
@@ -247,11 +269,18 @@ jobs:
     runs-on: ${{ inputs.runner_set }}
     if: ${{ inputs.apis_enabled }}
     environment: ${{ inputs.deployment_name }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+      AWS_DEFAULT_REGION: ${{ inputs.default_aws_region }}
+      GOOGLE_CREDENTIALS: ${{ secrets.gcp_credentials }}
+      ARM_CLIENT_ID: ${{ secrets.azure_service_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.azure_service_secret }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       # Get Pipeline Config
       - name: Get Pipeline Config
@@ -281,7 +310,7 @@ jobs:
           token: ${{ secrets.token }}
           azure_service_id: ${{ secrets.azure_service_id }}
           azure_service_secret: ${{ secrets.azure_service_secret }}
-          azure_rg: ${{ steps.config.outputs.azure_rg != '' && steps.config.outputs.azure_rg || inputs.default_azure_rg }}
+          azure_rg: ${{ steps.config.outputs.build_azure_rg != '' && steps.config.outputs.build_azure_rg || inputs.default_azure_rg }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ inputs.semver }}
@@ -295,6 +324,7 @@ jobs:
         with:
           token: ${{ secrets.token }}
           gcp_credentials: ${{ secrets.gcp_credentials }}
+          gcp_impersonate_sa: ${{ steps.config.outputs.deploy_gcp_impersonate_sa != '' && steps.config.outputs.deploy_gcp_impersonate_sa || inputs.default_gcp_impersonate_sa }}
           gcp_project: ${{ steps.config.outputs.gcp_project != '' && steps.config.outputs.gcp_project || inputs.default_gcp_project }}
           gcp_region: ${{ steps.config.outputs.gcp_region != '' && steps.config.outputs.gcp_region || inputs.default_gcp_region }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
@@ -309,11 +339,18 @@ jobs:
       - deploy-blue
     name: 'Destroy Green environment - Branch: ${{ github.ref_name }} - Env: ${{ inputs.deployment_name }}'
     runs-on: ${{ inputs.runner_set }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.aws_access_key_id }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.aws_secret_access_key }}
+      AWS_DEFAULT_REGION: ${{ inputs.default_aws_region }}
+      GOOGLE_CREDENTIALS: ${{ secrets.gcp_credentials }}
+      ARM_CLIENT_ID: ${{ secrets.azure_service_id }}
+      ARM_CLIENT_SECRET: ${{ secrets.azure_service_secret }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       # Get Pipeline Config
       - name: Get Pipeline Config
@@ -349,7 +386,7 @@ jobs:
           token: ${{ secrets.token }}
           azure_service_id: ${{ secrets.azure_service_id }}
           azure_service_secret: ${{ secrets.azure_service_secret }}
-          azure_rg: ${{ steps.config.outputs.azure_rg != '' && steps.config.outputs.azure_rg || inputs.default_azure_rg }}
+          azure_rg: ${{ steps.config.outputs.build_azure_rg != '' && steps.config.outputs.build_azure_rg || inputs.default_azure_rg }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ inputs.semver }}
@@ -366,6 +403,7 @@ jobs:
           cloud_type: ${{ inputs.cloud_type }}
           token: ${{ secrets.token }}
           gcp_credentials: ${{ secrets.gcp_credentials }}
+          gcp_impersonate_sa: ${{ steps.config.outputs.deploy_gcp_impersonate_sa != '' && steps.config.outputs.deploy_gcp_impersonate_sa || inputs.default_gcp_impersonate_sa }}
           gcp_project: ${{ steps.config.outputs.gcp_project != '' && steps.config.outputs.gcp_project || inputs.default_gcp_project }}
           gcp_region: ${{ steps.config.outputs.gcp_region != '' && steps.config.outputs.gcp_region || inputs.default_gcp_region }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}

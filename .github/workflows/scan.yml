@@ -39,6 +39,10 @@ on:
         required: false
         type: boolean
         default: false
+      semver:
+        description: 'SemVer Version from build'
+        required: true
+        type: string
 
     secrets:
       token:
@@ -85,9 +89,9 @@ jobs:
       quality_gate_enabled: ${{ steps.config.outputs.quality_gate_enabled }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Pipeline Configuration
         id: config
@@ -104,10 +108,10 @@ jobs:
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_TOKEN }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         id: co
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Download Target Artifacts
         uses: ./bp/ci/common/download/artifacts
@@ -134,10 +138,10 @@ jobs:
     runs-on: ${{ needs.preload.outputs.runner_set }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         id: co
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Download Target Artifacts
         uses: ./bp/ci/common/download/artifacts
@@ -154,7 +158,7 @@ jobs:
           source_path: ${{ steps.co.outputs.source_path }}
           snyk_token: ${{ secrets.snyk_token }}
           bot_user: ${{ inputs.bot_user }}
-          semver: ${{ steps.build.outputs.semver }}
+          semver: ${{ inputs.semver }}
           token: ${{ secrets.token }}
 
       - name: SonarQube Scan
@@ -167,7 +171,7 @@ jobs:
           sonarqube_url: ${{ inputs.sonarqube_url }}
           sonarqube_token: ${{ secrets.sonarqube_token }}
           sonarqube_project_key: ${{ needs.preload.outputs.project_key }}
-          semver: ${{ steps.build.outputs.semver }}
+          semver: ${{ inputs.semver }}
 
       - name: SonarQube Scan Quality Gate
         if: ${{ needs.preload.outputs.sonarqube_enabled == 'true' && needs.preload.outputs.quality_gate_enabled == 'true' }}
@@ -189,7 +193,7 @@ jobs:
           sonarqube_url: ${{ inputs.sonarqube_url }}
           sonarqube_token: ${{ secrets.sonarqube_token }}
           sonarqube_project_key: ${{ needs.preload.outputs.project_key }}
-          semver: ${{ steps.build.outputs.semver }}
+          semver: ${{ inputs.semver }}
 
       - name: Dependency track Scan
         if: ${{ needs.preload.outputs.dtrack_enabled == 'true' }}
@@ -202,7 +206,7 @@ jobs:
           dtrack_token: ${{ secrets.dtrack_token }}
           dtrack_project_key: ${{ needs.preload.outputs.project_key }}
           project_type: ${{ needs.preload.outputs.dtrack_project_type }}
-          semver: ${{ steps.build.outputs.semver }}
+          semver: ${{ inputs.semver }}
 
       - name: Upload Artifacts
         uses: ./bp/ci/go/test/artifacts

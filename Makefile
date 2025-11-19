@@ -11,10 +11,10 @@ YQ ?= $(INSTALL_PATH)/yq
 version: packages/install/gitversion
 	$(call assert-set,GITVERSION)
 ifeq ($(GIT_IS_TAG),1)
-	@echo "$(GIT_TAG)" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+((-alpha|-beta).[0-9]?)?)(\+deploy-.*)?$$/\1/g' > versions/VERSION
+	@echo "$(GIT_TAG)" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+((-alpha|-beta).[0-9]?)?)(\+deploy-.*)?$$/\1/g' > VERSION
 else
 	# Translates + in version to - for helm/docker compatibility
-	@echo "$(shell $(GITVERSION) -output json -showvariable FullSemVer | tr '+' '-')" > versions/VERSION
+	@echo "$(shell $(GITVERSION) -output json -showvariable FullSemVer | tr '+' '-')" > VERSION
 endif
 
 # Modify pom.xml to change the project name with the $(PROJECT) variable
