@@ -46,6 +46,6 @@ jobs:
           jira_api_user: ${{ vars.JIRA_INTEGRATION_API_USER }}
           jira_api_token: ${{ secrets.JIRA_INTEGRATION_API_TOKEN }}
           atlassian_cloud_domain: ${{ vars.JIRA_INTEGRATION_CLOUD_DOMAIN }}
-          project_key: ${{ steps.config.ouputs.jira_project_key != '' && steps.config.ouputs.jira_project_key || vars.JIRA_INTEGRATION_DEFAULT_PROJECT_KEY }}
-          project_id: ${{ steps.config.ouputs.jira_project_id != '' && steps.config.ouputs.jira_project_id || vars.JIRA_INTEGRATION_DEFAULT_PROJECT_ID }}
+          project_key: ${{ steps.config.outputs.jira_project_key != '' && steps.config.outputs.jira_project_key || vars.JIRA_INTEGRATION_DEFAULT_PROJECT_KEY }}
+          project_id: ${{ steps.config.outputs.jira_project_id != '' && steps.config.outputs.jira_project_id || vars.JIRA_INTEGRATION_DEFAULT_PROJECT_ID }}
           token: ${{ secrets.BOT_TOKEN }}
