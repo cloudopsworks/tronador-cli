@@ -35,7 +35,7 @@ config:
   branchProtection: true
   # Configure the repository to use Git Flow and or support Branches enablement
   gitFlow:
-    enabled: true
+    enabled: false
     supportBranches: false
   # Protected sources rules (future implementation)
   protectedSources:

@@ -1,0 +1,209 @@
+{
+  "schemaVersion": "1.0",
+  "templateDirectory": ".template",
+  "defaultPullBranch": "master",
+  "templates": [
+    {
+      "name": "dotnet",
+      "description": "DotNet project template",
+      "marker": ".dotnet",
+      "repository": "cloudopsworks/dotnet-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "dotnet/510"
+    },
+    {
+      "name": "go",
+      "description": "Go project template",
+      "marker": ".golang",
+      "repository": "cloudopsworks/go-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "go/510"
+    },
+    {
+      "name": "rust",
+      "description": "Rust project template",
+      "marker": ".rust",
+      "repository": "cloudopsworks/rust-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "rust/510"
+    },
+    {
+      "name": "xcode",
+      "description": "XCode project template",
+      "marker": ".xcode",
+      "repository": "cloudopsworks/xcode-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "xcode/510"
+    },
+    {
+      "name": "androidsdk",
+      "description": "Android SDK project template",
+      "marker": ".android",
+      "repository": "cloudopsworks/androidsdk-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "androidsdk/510"
+    },
+    {
+      "name": "flutter",
+      "description": "Flutter project template",
+      "marker": ".flutter",
+      "repository": "cloudopsworks/fluttermobile-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "flutter/510"
+    },
+    {
+      "name": "java",
+      "description": "Java project template",
+      "marker": ".java",
+      "repository": "cloudopsworks/java-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "java/510"
+    },
+    {
+      "name": "node",
+      "description": "NodeJS project template",
+      "marker": ".node",
+      "repository": "cloudopsworks/node-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "node/510"
+    },
+    {
+      "name": "docker",
+      "description": "Docker project template",
+      "marker": ".docker",
+      "repository": "cloudopsworks/docker-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "docker/510"
+    },
+    {
+      "name": "python",
+      "description": "Python project template",
+      "marker": ".python",
+      "repository": "cloudopsworks/python-app-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "migration": "python/510"
+    },
+    {
+      "name": "terragrunt",
+      "description": "Terragrunt project template",
+      "marker": ".iac",
+      "repository": "cloudopsworks/terragrunt-project-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": true,
+      "boilerplate": true,
+      "boilerplatePathPre510": ".cloudopsworks",
+      "boilerplatePathV510Plus": ".cloudopsworks/boilerplate",
+      "agentsOverride": true,
+      "migration": "terragrunt/510"
+    },
+    {
+      "name": "terraform-module",
+      "description": "Terraform module template",
+      "marker": ".terraform-module",
+      "repository": "cloudopsworks/terraform-module-template",
+      "merge": true,
+      "versioned": false,
+      "cicd": false,
+      "boilerplate": true,
+      "boilerplatePathPre510": ".cloudopsworks",
+      "boilerplatePathV510Plus": ".cloudopsworks/boilerplate",
+      "agentsOverride": true,
+      "migration": "terraform/510"
+    }
+  ],
+  "migrationPlans": [
+    {
+      "version": "510",
+      "aliases": ["5.10", "v5.10", "5.10+"],
+      "description": "Move pre-v5.10 GitHub blueprint files into .cloudopsworks layout.",
+      "common": [
+        {"action": "ensureDir", "destination": ".cloudopsworks"},
+        {"action": "moveMany", "sources": [".github/vars", ".github/values", ".github/cloudopsworks*.yaml", ".github/LICENSE", ".github/Makefile", ".github/_VERSION", ".github/labeler.yml"], "destination": ".cloudopsworks", "optional": true},
+        {"action": "gitAdd", "sources": [".github"]}
+      ],
+      "templates": {
+        "java": [
+          {"action": "move", "source": ".github/.java", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "node": [
+          {"action": "move", "source": ".github/.node", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "dotnet": [
+          {"action": "move", "source": ".github/.dotnet", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "go": [
+          {"action": "move", "source": ".github/.golang", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "rust": [
+          {"action": "move", "source": ".github/.rust", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "python": [
+          {"action": "move", "source": ".github/.python", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "xcode": [
+          {"action": "move", "source": ".github/.xcode", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "docker": [
+          {"action": "move", "source": ".github/.docker", "destination": ".cloudopsworks", "optional": true}
+        ],
+        "terragrunt": [
+          {"action": "ensureDir", "destination": ".cloudopsworks"},
+          {"action": "moveMany", "sources": [".github/cloudopsworks*.yaml", ".github/LICENSE", ".github/Makefile", ".github/_VERSION", ".github/labeler.yml", ".github/.iac"], "destination": ".cloudopsworks", "optional": true},
+          {"action": "move", "source": ".github/.inputs_cicd", "destination": ".cloudopsworks", "optional": true},
+          {"action": "gitAdd", "sources": [".github"]}
+        ],
+        "terraform": [
+          {"action": "ensureDir", "destination": ".cloudopsworks/boilerplate"},
+          {"action": "move", "source": ".github/.terraform-module", "destination": ".cloudopsworks", "optional": true},
+          {"action": "moveMany", "sources": [".github/auto*.yml"], "destination": ".cloudopsworks", "optional": true},
+          {"action": "move", "source": ".github/_VERSION", "destination": ".cloudopsworks", "optional": true, "when": "missing:.cloudopsworks/_VERSION"},
+          {"action": "move", "source": ".github/.provider", "destination": ".cloudopsworks", "optional": true},
+          {"action": "move", "source": ".cloudopsworks/aws", "destination": ".cloudopsworks/boilerplate", "optional": true},
+          {"action": "move", "source": ".cloudopsworks/gcp", "destination": ".cloudopsworks/boilerplate", "optional": true},
+          {"action": "move", "source": ".cloudopsworks/azure", "destination": ".cloudopsworks/boilerplate", "optional": true}
+        ],
+        "androidsdk": [
+          {"action": "unsupported", "message": "Android SDK is available only for v5.10+ templates, no migration needed."}
+        ],
+        "flutter": [
+          {"action": "unsupported", "message": "Flutter is available only for v5.10+ templates, no migration needed."}
+        ]
+      }
+    },
+    {
+      "version": "511",
+      "aliases": ["5.11", "v5.11"],
+      "description": "Reserved migration slot for the v5.11 repository layout.",
+      "common": [],
+      "templates": {}
+    },
+    {
+      "version": "512",
+      "aliases": ["5.12", "v5.12"],
+      "description": "Reserved migration slot for the v5.12 repository layout.",
+      "common": [],
+      "templates": {}
+    }
+  ]
+}

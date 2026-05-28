@@ -16,6 +16,22 @@ A powerful CLI tool for managing AWS resources with consistent organization tagg
 - AWS CLI configured with appropriate permissions
 
 ### Installation
+
+Install from published GitHub Release binaries using shell, PowerShell, Homebrew, or Chocolatey package assets.
+See [docs/installation.md](docs/installation.md) for package-manager setup, version pinning, upgrade, and uninstall instructions.
+
+```bash
+# Linux/macOS latest stable
+curl -fsSL https://raw.githubusercontent.com/cloudopsworks/tronador-cli/master/scripts/install.sh | sh
+```
+
+```powershell
+# Windows latest stable
+iwr https://raw.githubusercontent.com/cloudopsworks/tronador-cli/master/scripts/install.ps1 -UseB | iex
+```
+
+For development builds from source:
+
 ```bash
 # Clone the repository
 git clone https://github.com/cloudopsworks/tronador-cli.git

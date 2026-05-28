@@ -176,10 +176,10 @@ func copySecret(ctx context.Context, awsConfig awsclient.Config, sourceSecret, d
 	utils.VerboseLog(cmd, "Source secret description retrieved successfully")
 	utils.DebugLog(cmd, "Source Secret Details",
 		fmt.Sprintf("Name: %s\nARN: %s\nDescription: %s\nKMS Key: %s\nCreated: %v\nLast Changed: %v\nTags: %v",
-			describeResult.Name,
-			describeResult.ARN,
-			describeResult.Description,
-			describeResult.KmsKeyId,
+			aws.ToString(describeResult.Name),
+			aws.ToString(describeResult.ARN),
+			aws.ToString(describeResult.Description),
+			aws.ToString(describeResult.KmsKeyId),
 			describeResult.CreatedDate,
 			describeResult.LastChangedDate,
 			describeResult.Tags))
