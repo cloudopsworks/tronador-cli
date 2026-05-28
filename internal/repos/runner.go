@@ -167,8 +167,8 @@ func (r *Runner) Available(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	latestMinor := latestMatchingTag(tags, regexp.MustCompile(fmt.Sprintf(`^v?%s\.%s\.[0-9]+$`, regexp.QuoteMeta(major), regexp.QuoteMeta(minor))))
-	latestMajor := latestMatchingTag(tags, regexp.MustCompile(fmt.Sprintf(`^v?%s\.[0-9]+\.[0-9]+$`, regexp.QuoteMeta(major))))
+	latestMinor := latestMatchingTag(tags, currentMinorTagPattern(major, minor))
+	latestMajor := latestMatchingTag(tags, currentMajorTagPattern(major))
 
 	fmt.Fprintf(r.Opts.Stdout, "Repo: %s\n", tmpl.Repository)
 	fmt.Fprintf(r.Opts.Stdout, "Version: %s = %s.%s\n", state.Version, major, minor)
@@ -179,17 +179,9 @@ func (r *Runner) Available(ctx context.Context) error {
 	return nil
 }
 
-// Upgrade upgrades to the latest tag within the current major/minor.
+// Upgrade mirrors make repos/upgrade: run the full upgrade workflow against the
+// latest tag in the current major/minor line.
 func (r *Runner) Upgrade(ctx context.Context) error {
-	return r.upgradeByTagPattern(ctx, false)
-}
-
-// UpgradeMajor upgrades to the latest tag within the current major.
-func (r *Runner) UpgradeMajor(ctx context.Context) error {
-	return r.upgradeByTagPattern(ctx, true)
-}
-
-func (r *Runner) upgradeByTagPattern(ctx context.Context, majorOnly bool) error {
 	tmpl, state, err := r.TemplateInit(ctx)
 	if err != nil {
 		return err
@@ -202,10 +194,7 @@ func (r *Runner) upgradeByTagPattern(ctx context.Context, majorOnly bool) error 
 	if err != nil {
 		return err
 	}
-	pattern := regexp.MustCompile(fmt.Sprintf(`^v?%s\.%s\.[0-9]+$`, regexp.QuoteMeta(major), regexp.QuoteMeta(minor)))
-	if majorOnly {
-		pattern = regexp.MustCompile(fmt.Sprintf(`^v?%s\.[0-9]+\.[0-9]+$`, regexp.QuoteMeta(major)))
-	}
+	pattern := currentMinorTagPattern(major, minor)
 	tag := latestMatchingTag(tags, pattern)
 	if tag == "" {
 		return fmt.Errorf("no matching tags found for %s", tmpl.Repository)
@@ -214,24 +203,6 @@ func (r *Runner) upgradeByTagPattern(ctx context.Context, majorOnly bool) error 
 	fmt.Fprintf(r.Opts.Stdout, "Version: %s = %s.%s\n", state.Version, major, minor)
 	fmt.Fprintf(r.Opts.Stdout, "Last Version: %s\n", tag)
 	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: tag})
-}
-
-// UpgradeDev upgrades from develop.
-func (r *Runner) UpgradeDev(ctx context.Context) error {
-	tmpl, state, err := r.TemplateInit(ctx)
-	if err != nil {
-		return err
-	}
-	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: "develop"})
-}
-
-// UpgradeMaster upgrades from the configured default branch.
-func (r *Runner) UpgradeMaster(ctx context.Context) error {
-	tmpl, state, err := r.TemplateInit(ctx)
-	if err != nil {
-		return err
-	}
-	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: r.Config.DefaultPullBranch})
 }
 
 // UpgradeVersion upgrades from a user-specified tag or branch.
@@ -243,7 +214,9 @@ func (r *Runner) UpgradeVersion(ctx context.Context, version string) error {
 	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: version})
 }
 
-// Fetch checks out the requested branch/tag in the template checkout and returns its commit hash.
+// Fetch checks out the requested branch/tag in the template checkout and returns
+// its commit hash. It is an internal full-upgrade workflow step, not a public
+// CLI subcommand.
 func (r *Runner) Fetch(ctx context.Context, pullBranch string) (string, error) {
 	if pullBranch == "" {
 		pullBranch = r.Opts.PullBranch
@@ -268,6 +241,7 @@ func (r *Runner) Fetch(ctx context.Context, pullBranch string) (string, error) {
 }
 
 // EvalTemplateVersion reports whether the fetched template uses v5.10+ layout.
+// It is an internal full-upgrade workflow step, not a public CLI subcommand.
 func (r *Runner) EvalTemplateVersion() (string, error) {
 	versionPath := r.path(r.Config.TemplateDirectory, ".cloudopsworks/_VERSION")
 	version := ""
@@ -290,6 +264,7 @@ type StackOptions struct {
 }
 
 // Stack applies the fetched template into the target repository and commits it.
+// It is an internal full-upgrade workflow step, not a public CLI subcommand.
 func (r *Runner) Stack(ctx context.Context, opts StackOptions) error {
 	if opts.Template.Name == "" || opts.State.WorkDir == "" {
 		tmpl, state, err := r.TemplateInit(ctx)
@@ -747,6 +722,14 @@ func latestMatchingTag(tags []string, pattern *regexp.Regexp) string {
 		return ""
 	}
 	return matches[len(matches)-1]
+}
+
+func currentMinorTagPattern(major, minor string) *regexp.Regexp {
+	return regexp.MustCompile(fmt.Sprintf(`^v?%s\.%s\.[0-9]+$`, regexp.QuoteMeta(major), regexp.QuoteMeta(minor)))
+}
+
+func currentMajorTagPattern(major string) *regexp.Regexp {
+	return regexp.MustCompile(fmt.Sprintf(`^v?%s\.[0-9]+\.[0-9]+$`, regexp.QuoteMeta(major)))
 }
 
 func parseMajorMinor(version string) (string, string, error) {

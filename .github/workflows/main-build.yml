@@ -182,6 +182,10 @@ jobs:
       - name: GoReleaser Pipeline
         uses: ./bp/cd/go/release
         if: needs.code-build.outputs.golang_goreleaser == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+          TRONADOR_CHOCOLATEY_PUBLISH: ${{ vars.TRONADOR_CHOCOLATEY_PUBLISH }}
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}

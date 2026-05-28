@@ -91,6 +91,18 @@ func TestLatestMatchingTagSortsSemver(t *testing.T) {
 	}
 }
 
+func TestCurrentMinorTagPatternMirrorsMakefileDefaultUpgrade(t *testing.T) {
+	major, minor, err := parseMajorMinor("v5.10.1")
+	if err != nil {
+		t.Fatalf("parseMajorMinor() error = %v", err)
+	}
+	tags := []string{"v5.9.9", "v5.10.2", "v5.10.10", "v5.11.0", "v6.0.0"}
+	got := latestMatchingTag(tags, currentMinorTagPattern(major, minor))
+	if got != "v5.10.10" {
+		t.Fatalf("default upgrade tag = %s, want v5.10.10 from current major/minor", got)
+	}
+}
+
 func TestTemplateDryRunSkipsWhenMarkerMissing(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
