@@ -188,7 +188,7 @@ jobs:
           gpg_passphrase: ${{ secrets.GPG_PASSPHRASE }}
           semver: ${{ needs.code-build.outputs.semver }}
           golang_version: ${{ needs.code-build.outputs.golang_version }}
-          homebrew_tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          homebrew_tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.BOT_TOKEN }}
           chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
 
   scan:
