@@ -1,6 +1,10 @@
 # This file contains the environment variables for the Kubernetes deployment
+# Agents: cloud=aws|gcp|azure ; cloud_type=kubernetes
+# Agents: cloud=aws ; cloud_type=eks
+# Agents: cloud=azure ; cloud_type=aks
+# Agents: cloud=gcp ; cloud_type=gke
 environment: "dev|uat|prod|demo"
-runner_set: "RUNNER-ENV"
+#runner_set: "RUNNER-ENV" # Optional: when using self-hosted runners
 #disable_deploy: true
 container_registry: REGISTRY
 cluster_name: CLUSTER_NAME
@@ -35,6 +39,12 @@ helm_values_overrides:
 #  deploy_resource_group: RESOURCE_GROUP # Optional: set this if the build and deploy resource groups are different
 #  keyvayult_name: KEYVAULT_NAME
 #  keyvault_secret_filter: KEYVAULT_SECRET_FILTER
+#  external_secrets:                 # If Enabled, secrets path filter will be used to configure the External Secrets Store for automatically fetching secrets from AWS Secrets Manager
+#    enabled: true | false                 # Optional: set this to true if you want to use the External Secrets Store, defaults to false
+#    create_store: true | false            # Optional: set this if you want to create the External Secrets Store
+#    store_name: "external-secrets-store"  # Optional: set this if you want to use an existing External Secrets Store, valid only if create_store is false
+#    refresh_interval: "1h"                # Optional: set this to change the refresh interval of the External Secrets Store
+#    on_change: true | false               # Optional: set this to true if you want to trigger the deployment on change of the secrets
 #  pod_identity:
 #    enabled: true
 #    identity_name: IDENTITY_NAME
@@ -58,8 +68,18 @@ helm_values_overrides:
 #
 # For GCP
 #gcp:
+#  region: "GCP_REGION"
+#  project_id: "GCP_PROJECT"
+#  impersonate_sa: "GCP project Service Account e-mail" # Optional: when existing role is same for build and deploy
+#  build_impresonate_sa: "GCP project Service Account e-mail" # Optional: when existing role is different for build and deploy
+#  deploy_impersonate_sa: "GCP project Service Account e-mail" # Optional: when existing role is different for build and deploy
 #  secrets_path_filter: /secrets
+#  external_secrets:                 # If Enabled, secrets path filter will be used to configure the External Secrets Store for automatically fetching secrets from AWS Secrets Manager
+#    enabled: true | false                 # Optional: set this to true if you want to use the External Secrets Store, defaults to false
+#    create_store: true | false            # Optional: set this if you want to create the External Secrets Store
+#    store_name: "external-secrets-store"  # Optional: set this if you want to use an existing External Secrets Store, valid only if create_store is false
+#    refresh_interval: "1h"                # Optional: set this to change the refresh interval of the External Secrets Store
+#    on_change: true | false               # Optional: set this to true if you want to trigger the deployment on change of the secrets
 #  pod_identity:
 #    enabled: true
 #    service_account_name: SERVICE_ACCOUNT_NAME
-

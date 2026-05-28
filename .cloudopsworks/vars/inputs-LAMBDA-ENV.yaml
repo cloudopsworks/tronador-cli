@@ -1,5 +1,7 @@
+# This file contains the input variables for the Lambda environment.
+# Agents: cloud=aws ; cloud_type=lambda
 environment: "dev|uat|prod|demo"
-runner_set: "RUNNER-ENV"
+#runner_set: "RUNNER-ENV" # Optional: when using self-hosted runners
 #disable_deploy: true
 versions_bucket: "VERSIONS_BUCKET"
 #logs_bucket: "LOGS_BUCKET"
@@ -168,7 +170,7 @@ lambda:
   #  enabled: true
   #  arn: arn:aws:elasticfilesystem:us-east-1:123456789012:file-system/fs-12345678
   #  local_mount_path: /mnt/efs
-  
+
   ##
   # Optional: triggers notifications for the lambda function.
   triggers: {}
@@ -184,15 +186,18 @@ lambda:
   #    maximumConcurrency: 2 # Optional: Maximum number of concurrent messages to process
   #    metricsConfig: true # Optional: Enable metrics for the DynamoDB stream, defaults to false
   #    filterCriteria:
-  #      body:
-  #        Temperature:
-  #          - numeric:
-  #              - ">"
-  #              - 0
-  #              - "<="
-  #              - 100
-  #        Location:
-  #          - New York
+  #      - pattern: '{ "body": { "Temperature": [ { "numeric": [ ">", 0, "<=", 100 ] } ], "Location": [ "New York" ] } }'
+  #      - pattern_object:
+  #          body:
+  #            Temperature:
+  #              - numeric:
+  #                  - ">"
+  #                  - 0
+  #                  - "<="
+  #                  - 100
+  #            Location:
+  #              - New York
+  #
   #  dynamodb:
   #    tableName: DYNAMODB_TABLE_NAME
   #    startingPosition: LATEST | TRIM_HORIZON # Optional: Starting position for the stream, defaults to LATEST
@@ -200,15 +205,17 @@ lambda:
   #    maximumRetryAttempts: 3 # Optional: Maximum number of retry attempts for failed records, defaults to -1
   #    metricsConfig: true # Optional: Enable metrics for the DynamoDB stream, defaults to false
   #    filterCriteria:
-  #      body:
-  #        Temperature:
-  #          - numeric:
-  #              - ">"
-  #              - 0
-  #              - "<="
-  #              - 100
-  #        Location:
-  #          - New York
+  #      - pattern: '{ "body": { "Temperature": [ { "numeric": [ ">", 0, "<=", 100 ] } ], "Location": [ "New York" ] } }'
+  #      - pattern_object:
+  #          body:
+  #            Temperature:
+  #              - numeric:
+  #                  - ">"
+  #                  - 0
+  #                  - "<="
+  #                  - 100
+  #            Location:
+  #              - New York
 
   ## Lambda Layers
   layers: []

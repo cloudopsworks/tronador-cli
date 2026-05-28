@@ -1,6 +1,7 @@
+# This file contains the input variables for the LIB-ENV workflow
+# Agents: cloud=aws|gcp|azure, cloud_type=none
 environment: "dev|uat|prod|demo"
-# This file contains the environment variables for the Kubernetes deployment
-runner_set: "RUNNER-ENV"
+#runner_set: "RUNNER-ENV" # Optional: when using self-hosted runners
 #
 # The following are for cloud specific configurations
 # These will be used to filter the secrets from the secret manager
@@ -21,5 +22,9 @@ runner_set: "RUNNER-ENV"
 #
 # For GCP
 #gcp:
+#  region: "GCP_REGION"
+#  project_id: "GCP_PROJECT"
+#  impersonate_sa: "GCP project Service Account e-mail" # Optional: when existing role is same for build and deploy
+#  build_impresonate_sa: "GCP project Service Account e-mail" # Optional: when existing role is different for build and deploy
 #  secrets_path_filter: /secrets
 #
