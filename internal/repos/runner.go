@@ -29,8 +29,10 @@ type Options struct {
 
 // Runner executes repos commands using the JSON configuration catalog.
 type Runner struct {
-	Config *Config
-	Opts   Options
+	Config       *Config
+	Opts         Options
+	gitClient    GitClient
+	githubClient GitHubClient
 }
 
 // RepositoryState is the detected local repository layout.
@@ -132,7 +134,7 @@ func (r *Runner) CloneTemplate(ctx context.Context, tmpl Template) error {
 	}
 	fmt.Fprintf(r.Opts.Stdout, "%s will be pulled\n", label)
 	url := fmt.Sprintf("https://github.com/%s.git", tmpl.Repository)
-	return r.run(ctx, r.gitPath(), "clone", url, r.Config.TemplateDirectory)
+	return r.cloneTemplateRepository(ctx, url)
 }
 
 // CleanTemplate removes the temporary template checkout.
@@ -141,7 +143,11 @@ func (r *Runner) CleanTemplate(ctx context.Context) error {
 	if err := r.removeAll(r.path(r.Config.TemplateDirectory)); err != nil {
 		return err
 	}
-	return r.runIgnoreError(ctx, r.gitPath(), "remote", "remove", "template")
+	if r.Opts.DryRun {
+		return r.runIgnoreError(ctx, r.gitPath(), "remote", "remove", "template")
+	}
+	_ = r.git().RemoveRemote(ctx, r.Opts.WorkDir, "template")
+	return nil
 }
 
 // Clean removes generated GitHub workflows and recreates the directory.
@@ -225,14 +231,10 @@ func (r *Runner) Fetch(ctx context.Context, pullBranch string) (string, error) {
 		return "", fmt.Errorf("pull branch is required")
 	}
 	fmt.Fprintf(r.Opts.Stdout, "Fetching template repository from branch: %s\n", pullBranch)
-	if err := r.runInDir(ctx, r.path(r.Config.TemplateDirectory), r.gitPath(), "checkout", pullBranch); err != nil {
-		return "", err
-	}
-	out, err := r.outputInDir(ctx, r.path(r.Config.TemplateDirectory), r.gitPath(), "rev-parse", pullBranch)
+	hash, err := r.checkoutTemplateRepository(ctx, pullBranch)
 	if err != nil {
 		return "", err
 	}
-	hash := strings.TrimSpace(out)
 	if err := r.removeAll(r.path(r.Config.TemplateDirectory, ".git")); err != nil {
 		return "", err
 	}
@@ -301,7 +303,7 @@ func (r *Runner) Stack(ctx context.Context, opts StackOptions) error {
 	org, repo, err := r.gitRemoteOwnerRepo(ctx)
 	if err == nil && org != "" && repo != "" {
 		fmt.Fprintf(r.Opts.Stdout, "Setting default repository: %s/%s\n", org, repo)
-		if err := r.run(ctx, r.ghPath(), "repo", "set-default", fmt.Sprintf("%s/%s", org, repo)); err != nil {
+		if err := r.setDefaultRepository(ctx, org, repo); err != nil {
 			return err
 		}
 	} else {
@@ -530,7 +532,7 @@ func (r *Runner) Recover(ctx context.Context) error {
 	org, repo, err := r.gitRemoteOwnerRepo(ctx)
 	if err == nil && org != "" && repo != "" {
 		fmt.Fprintf(r.Opts.Stdout, "Setting default repository: %s/%s\n", org, repo)
-		if err := r.run(ctx, r.ghPath(), "repo", "set-default", fmt.Sprintf("%s/%s", org, repo)); err != nil {
+		if err := r.setDefaultRepository(ctx, org, repo); err != nil {
 			return err
 		}
 	}
@@ -693,6 +695,15 @@ func (r *Runner) movePath(src, dst string) error {
 }
 
 func (r *Runner) fetchTags(ctx context.Context, repository string) ([]string, error) {
+	tags, err := r.github().ListTags(ctx, repository)
+	if err == nil {
+		return tags, nil
+	}
+	fmt.Fprintf(r.Opts.Stderr, "Native GitHub tag lookup failed, falling back to gh: %v\n", err)
+	return r.fetchTagsFromShell(ctx, repository)
+}
+
+func (r *Runner) fetchTagsFromShell(ctx context.Context, repository string) ([]string, error) {
 	out, err := r.output(ctx, r.ghPath(), "api", fmt.Sprintf("repos/%s/tags", repository), "--jq", ".[].name")
 	if err != nil {
 		return nil, err
@@ -781,29 +792,14 @@ func displayMigrationVersion(version string) string {
 }
 
 func (r *Runner) gitRemoteOwnerRepo(ctx context.Context) (string, string, error) {
+	if org, repo, err := r.git().OriginOwnerRepo(ctx, r.Opts.WorkDir); err == nil {
+		return org, repo, nil
+	}
 	out, err := r.output(ctx, r.gitPath(), "remote", "get-url", "origin")
 	if err != nil {
 		return "", "", err
 	}
-	url := strings.TrimSpace(out)
-	url = strings.TrimSuffix(url, ".git")
-	url = strings.TrimSuffix(url, "/")
-	if strings.HasPrefix(url, "git@") {
-		parts := strings.SplitN(url, ":", 2)
-		if len(parts) == 2 {
-			url = parts[1]
-		}
-	} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
-		parts := strings.Split(url, "/")
-		if len(parts) >= 2 {
-			url = strings.Join(parts[len(parts)-2:], "/")
-		}
-	}
-	parts := strings.Split(url, "/")
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("cannot parse git remote origin URL %q", strings.TrimSpace(out))
-	}
-	return parts[len(parts)-2], parts[len(parts)-1], nil
+	return parseOwnerRepo(out)
 }
 
 func (r *Runner) gitAdd(ctx context.Context, paths ...string) error {
