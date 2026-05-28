@@ -133,6 +133,13 @@ Leave it unset when the repository should only build container/image artifacts. 
 > - `GPG_PASSPHRASE` — passphrase for the GPG private key
 >
 > The workflow will fail at the GoReleaser signing step if either secret is absent. It is also recommended to set `cloud_type: none` in `inputs-global.yaml` when using GoReleaser so that no cloud deployment is attempted alongside the release.
+>
+> **Optional GoReleaser distribution secrets:** If your GoReleaser configuration publishes to Homebrew or Chocolatey, also add:
+>
+> - `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository
+> - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
+>
+> These secrets are passed through to GoReleaser automatically when present. The workflow proceeds without them if the GoReleaser configuration does not reference those publishers.
 
 ---
 
@@ -244,6 +251,10 @@ Typical examples:
 If you enable `golang.goreleaser: true`, the following secrets are **required** at the repository or organization level — the workflow will fail without them:
 - `GPG_PRIVATE_KEY` — armored GPG private key for signing release artifacts
 - `GPG_PASSPHRASE` — passphrase for the GPG private key
+
+The following secrets are **optional** and only needed when your GoReleaser configuration targets those distribution channels:
+- `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository
+- `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
 
 `GITHUB_TOKEN` is supplied automatically by GitHub Actions and is used by the GoReleaser release step for repository publication.
 
