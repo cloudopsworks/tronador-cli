@@ -33,6 +33,11 @@ aws:
   #fail_on_warnings: false # uncomment to disable fail on warnings
   #log_location: /aws/apigateway
   #log_retention_days: 30
+  #waf:   # Available only for REST APIs
+  #  enabled: true | false # Defaults to false
+  #  name: waf-name        # required if id is not specified
+  #  arn: waf-id arn
+  #  scope: REGIONAL | CLOUDFRONT # defaults to REGIONAL
   #settings:
   #  metrics_enabled: true | false
   #  logging_level: OFF | ERROR | INFO
