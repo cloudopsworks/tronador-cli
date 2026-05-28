@@ -8,6 +8,7 @@ repository_owner: "cloudopsworks" # Required
 ## Image variant should be used for the specific version of OS image to run
 golang:
   main_file: .
+  goreleaser: true
 #  version: 1.23
 #  dist: linux
 #  arch: amd64
@@ -127,8 +128,8 @@ semgrep:
 #
 ## CD pipeline configuration uncomment and configure accordingly to enable
 # Target Cloud
-cloud: aws | azure | gcp
+cloud: none
 # Cloud deployment type depends on the target cloud
-cloud_type: beanstalk | eks | lambda | aks | webapp | function | gke | function | kubernetes
+cloud_type: none
 # Indicate the Runner that will be used for the deployment - usually will be a hosted runner
 # runner_set: "arc-runner-set"
