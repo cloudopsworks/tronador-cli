@@ -87,6 +87,8 @@ jobs:
       runner_set: ${{ steps.config.outputs.runner_set != '' && steps.config.outputs.runner_set || inputs.default_runner_set  }}
       fail_on_quality_gate: ${{ steps.config.outputs.fail_on_quality_gate }}
       quality_gate_enabled: ${{ steps.config.outputs.quality_gate_enabled }}
+      trivy_enabled: ${{ steps.config.outputs.trivy_enabled }}
+      container_enabled: ${{ steps.config.outputs.container_enabled }}
     steps:
       - name: Checkout w/Blueprint
         uses: cloudopsworks/blueprints/cd/checkout@v5.10
@@ -207,6 +209,17 @@ jobs:
           dtrack_project_key: ${{ needs.preload.outputs.project_key }}
           project_type: ${{ needs.preload.outputs.dtrack_project_type }}
           semver: ${{ inputs.semver }}
+
+      - name: Trivy Scan
+        if: | 
+          (needs.preload.outputs.trivy_enabled == 'true') &&
+          (needs.preload.outputs.container_enabled == 'true')
+        uses: ./bp/ci/docker/scan/trivy
+        continue-on-error: true
+        with:
+          source_path: ${{ steps.co.outputs.source_path }}
+          bot_user: ${{ inputs.bot_user }}
+          token: ${{ secrets.token }}
 
       - name: Upload Artifacts
         uses: ./bp/ci/go/test/artifacts
