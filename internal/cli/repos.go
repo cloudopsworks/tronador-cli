@@ -31,7 +31,7 @@ func init() {
 	reposCmd.PersistentFlags().StringVar(&reposWorkDir, "workdir", ".", "Target repository directory")
 	reposCmd.PersistentFlags().StringVar(&reposGitPath, "git", "", "git executable path (defaults to GIT env or PATH)")
 	reposCmd.PersistentFlags().StringVar(&reposGHPath, "gh", "", "gh executable path (defaults to GH env or PATH)")
-	reposCmd.PersistentFlags().StringVar(&reposPullBranch, "pull-branch", "", "Template branch/tag for fetch, stack, recover, or direct upgrade")
+	reposCmd.PersistentFlags().StringVar(&reposPullBranch, "pull-branch", "", "Template branch/tag for recover; upgrade uses optional [version]")
 
 	reposCmd.AddCommand(newReposAvailableCommand())
 	reposCmd.AddCommand(newReposCleanCommand())
@@ -190,10 +190,19 @@ func addConfiguredTemplateCommands(parent *cobra.Command) {
 }
 
 func newReposUpgradeCommand() *cobra.Command {
-	upgradeCmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "upgrade [version]",
-		Short: "Upgrade repository from templates",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Run the full repository template upgrade workflow",
+		Long: `Run the full repository template upgrade workflow.
+
+Without [version], the command mirrors the Tronador make repos/upgrade target:
+it detects the current template type, resolves the latest tag in the current
+major/minor line, fetches that template internally, applies the stack, updates
+CICD metadata when applicable, and commits the result.
+
+Passing [version] is equivalent to the Makefile repos/upgrade/<version> target
+and runs the same full workflow against that explicit tag or branch.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runner, err := newReposRunner(cmd)
 			if err != nil {
@@ -205,75 +214,6 @@ func newReposUpgradeCommand() *cobra.Command {
 			return runner.Upgrade(context.Background())
 		},
 	}
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "dev",
-		Short: "Upgrade repository from develop templates",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			return runner.UpgradeDev(context.Background())
-		},
-	})
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "major",
-		Short: "Upgrade repository to latest tag in the current major version",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			return runner.UpgradeMajor(context.Background())
-		},
-	})
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "master",
-		Short: "Upgrade repository from master templates",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			return runner.UpgradeMaster(context.Background())
-		},
-	})
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "fetch",
-		Short: "Fetch template repository branch/tag",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			_, err = runner.Fetch(context.Background(), reposPullBranch)
-			return err
-		},
-	})
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "eval",
-		Short: "Evaluate fetched template repository layout",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			_, err = runner.EvalTemplateVersion()
-			return err
-		},
-	})
-	upgradeCmd.AddCommand(&cobra.Command{
-		Use:   "stack",
-		Short: "Apply fetched template upgrade stack",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			return runner.Stack(context.Background(), repos.StackOptions{PullBranch: reposPullBranch})
-		},
-	})
-	return upgradeCmd
 }
 
 func newReposRecoverCommand() *cobra.Command {
