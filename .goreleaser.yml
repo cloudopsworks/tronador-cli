@@ -109,7 +109,7 @@ publishers:
       --out dist/chocolatey
     env:
       - CHOCOLATEY_API_KEY={{ .Env.CHOCOLATEY_API_KEY }}
-      - TRONADOR_CHOCOLATEY_PUBLISH=true
+      - TRONADOR_CHOCOLATEY_PUBLISH=false
 release:
   extra_files:
     - glob: ./scripts/install.sh
