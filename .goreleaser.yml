@@ -31,7 +31,7 @@ builds:
         goarch: '386'
       - goos: windows
         goarch: arm
-    binary: '{{ .ProjectName }}'
+    binary: 'tronador' #'{{ .ProjectName }}'
 archives:
   - id: tronador-cli
     ids:
@@ -90,12 +90,15 @@ homebrew_casks:
       name: homebrew-tap
       branch: main
       token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+      pull_request:
+        enabled: true
+        draft: false
     directory: Casks
     description: CLI tool for CloudOps Works Tronador workflows and AWS automation.
     homepage: https://github.com/cloudopsworks/tronador-cli
     license: Apache-2.0
     binaries:
-      - tronador-cli
+      - tronador
     skip_upload: '{{ not (isEnvSet "HOMEBREW_TAP_TOKEN") }}'
 publishers:
   - name: chocolatey-package
