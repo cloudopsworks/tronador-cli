@@ -321,6 +321,37 @@ If you use the CloudOps Works release workflow, keep changes grouped by release 
 
 ---
 
+## Upgrading from the Template
+
+Repositories derived from this template stay in sync with upstream releases using the
+`make repos/upgrade*` targets. An agent asked to "upgrade", "update from template",
+"sync with template", "apply template changes", or "bump template version" should use
+these targets — never fetch or apply template changes manually.
+
+### Available upgrade targets
+
+| Target | When to use |
+|---|---|
+| `make repos/upgrade` | **Default — patch upgrade.** Pulls the latest patch within the **same minor version**. No breaking changes. Use for routine maintenance. |
+| `make repos/upgrade/major` | Pulls the latest release within the **same major version**. May include workflow-level changes. |
+| `make repos/upgrade/master` | Pulls from the template's `master` branch tip. Use only when explicitly asked to track the latest unreleased template state. |
+| `make repos/upgrade/dev` | Pulls from the template's `develop` branch. Use only for pre-release or preview upgrades. |
+| `make repos/available` | Lists the latest available patch and major versions without modifying anything. Run this first to see what is available. |
+
+### Upgrade workflow for agents
+
+1. Run `make repos/available` to see the current and latest available versions.
+2. Choose the appropriate target (default: `make repos/upgrade` for a routine patch upgrade).
+3. Review the diff — the upgrade overwrites `.github/workflows/` and selected `.cloudopsworks/` metadata; application source files are never touched.
+4. Commit the result with: `chore: upgrade from <template-name> <old-version> → <new-version> +semver: patch`
+5. Use `/cw-release` to create and merge the hotfix PR (see [Release Workflow — use `cw-release`](#release-workflow--use-cw-release)).
+
+> **Note:** `Makefile`, `.github/`, `.cloudopsworks/labeler.yml`, `.cloudopsworks/Makefile`,
+> and `.cloudopsworks/LICENSE` are owned by the template and will be overwritten on every upgrade.
+> Do not edit these files manually in derived repositories.
+
+---
+
 ## AI-assisted upgrade of `.cloudopsworks/vars` configuration files
 
 This section is a machine-readable protocol for AI agents performing a seamless, non-destructive upgrade of all configuration files under `.cloudopsworks/vars/` when a new template version is released. Follow the steps below in order.
@@ -465,3 +496,34 @@ When a merge cannot be resolved automatically (for example, the upstream templat
 1. Emit a diff showing both the upstream template block and the local operator block side by side.
 2. Pause and present the conflict to the operator, asking which version to keep or whether a manual merge is needed.
 3. Never silently choose one side.
+
+---
+
+## Release Workflow — use `cw-release`
+
+All releases **must** be performed using the `cw-release` skill from the CloudOps Works skill set. Do **not** create release branches, hotfix branches, version tags, or release PRs manually — the skill owns the full GitFlow-aware release lifecycle for this repository.
+
+### When to invoke `cw-release`
+
+Use it whenever you are asked to:
+- Release, ship, or publish a new version (patch, minor, or major)
+- Create a hotfix or patch release
+- Create a release branch or feature-merge PR
+- Tag and publish a version
+
+### How to run it
+
+In Claude Code (CLI, IDE extension, or web):
+
+```
+/cw-release
+```
+
+### What the skill does
+
+1. Detects the GitVersion flow in use (`gitversion_gitflow.yaml` or `gitversion_githubflow.yaml`).
+2. Reads the repo-local release policy from `.cloudopsworks/cloudopsworks-ci.yaml`.
+3. Drives the shared tronador `make` / `gh` release path end-to-end.
+4. Creates the correct branch, PR, tag, and GitHub Release in the right sequence.
+
+> **Do not** run `git tag`, `gh release create`, or `make release` directly. Always let `cw-release` orchestrate these steps to keep version history and CI consistent.
