@@ -123,3 +123,17 @@ release:
   # draft: true
 changelog:
   disable: true
+notarize:
+  macos:
+    - enabled: '{{ ifEnvSet "MACOS_SIGN_P12" }}'
+      ids:
+        - tronador-cli
+      sign:
+        certificate: {{ .Env.MACOS_SIGN_P12 }}
+        password: {{ .Env.MACOS_SIGN_PASSWORD }}
+      notarize:
+        issuer_id: {{ .Env.MACOS_NOTARY_ISSUER_ID }}
+        key_id: {{ .Env.MACOS_NOTARY_KEY_ID }}
+        key: {{ .Env.MACOS_NOTARY_KEY }}
+        wait: true
+        timeout: 20m
