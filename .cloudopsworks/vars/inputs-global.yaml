@@ -153,4 +153,4 @@ cloud: none
 # Cloud deployment type depends on the target cloud
 cloud_type: none
 # Indicate the Runner that will be used for the deployment - usually will be a hosted runner
-# runner_set: "arc-runner-set"
+runner_set: "macos-latest"
