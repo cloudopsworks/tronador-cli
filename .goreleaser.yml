@@ -43,6 +43,29 @@ archives:
       - README.md
       - src: .cloudopsworks/LICENSE
         dst: LICENSE
+nfpms:
+  - id: tronador-cli
+    ids:
+      - tronador-cli
+    package_name: tronador-cli
+    file_name_template: '{{ .ConventionalFileName }}'
+    vendor: CloudOps Works LLC
+    homepage: https://github.com/cloudopsworks/tronador-cli
+    maintainer: CloudOps Works <info@cloudopsworks.co>
+    description: CLI tool for CloudOps Works Tronador workflows and AWS automation.
+    license: Apache-2.0
+    section: utils
+    priority: optional
+    bindir: /usr/bin
+    formats:
+      - apk
+      - deb
+      - rpm
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/tronador-cli/README.md
+      - src: .cloudopsworks/LICENSE
+        dst: /usr/share/doc/tronador-cli/LICENSE
 checksum:
   name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
   algorithm: sha256
