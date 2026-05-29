@@ -40,7 +40,7 @@ The JSON catalog contains:
 
 `tronador-cli repos upgrade` is the only public upgrade command. With no
 argument, it mirrors the Makefile `repos/upgrade` target: initialize the detected
-template checkout, query tags with `gh`, select the latest tag in the current
+template checkout, query tags through the native GitHub API adapter (with `gh` fallback), select the latest tag in the current
 major/minor line, fetch that tag, evaluate the template layout, apply the upgrade
 stack, update CICD metadata, and commit the result.
 
