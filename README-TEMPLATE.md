@@ -141,12 +141,17 @@ Leave it unset when the repository should only build container/image artifacts. 
 >
 > The workflow will fail at the GoReleaser signing step if either secret is absent. It is also recommended to set `cloud_type: none` in `inputs-global.yaml` when using GoReleaser so that no cloud deployment is attempted alongside the release.
 >
-> **Optional GoReleaser distribution secrets:** If your GoReleaser configuration publishes to Homebrew or Chocolatey, also add:
+> **Optional GoReleaser distribution secrets:** If your GoReleaser configuration publishes to Homebrew, Chocolatey, or signed macOS binaries, also add:
 >
 > - `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository. Falls back to `BOT_TOKEN` when absent, so Homebrew tap commits use the bot identity instead of failing.
 > - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
+> - `XCODE_BUILD_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing
+> - `XCODE_BUILD_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate
+> - `APPLE_STORE_CONNECT_KEY_BASE64` — base64-encoded App Store Connect API key for macOS notarization
+> - `APPLE_STORE_CONNECT_KEY_ID` — App Store Connect API key identifier
+> - `APPLE_STORE_CONNECT_ISSUER_ID` — App Store Connect API issuer identifier
 >
-> These secrets are passed through to GoReleaser automatically when present. The workflow proceeds without them if the GoReleaser configuration does not reference those publishers.
+> These secrets are passed through to GoReleaser automatically when present. The workflow proceeds without them if the GoReleaser configuration does not reference those publishers or signing steps.
 
 ---
 
@@ -259,9 +264,14 @@ If you enable `golang.goreleaser: true`, the following secrets are **required** 
 - `GPG_PRIVATE_KEY` — armored GPG private key for signing release artifacts
 - `GPG_PASSPHRASE` — passphrase for the GPG private key
 
-The following secrets are **optional** and only needed when your GoReleaser configuration targets those distribution channels:
+The following secrets are **optional** and only needed when your GoReleaser configuration targets those distribution channels or signing steps:
 - `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository. Falls back to `BOT_TOKEN` when absent.
 - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
+- `XCODE_BUILD_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing
+- `XCODE_BUILD_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate
+- `APPLE_STORE_CONNECT_KEY_BASE64` — base64-encoded App Store Connect API key for macOS notarization
+- `APPLE_STORE_CONNECT_KEY_ID` — App Store Connect API key identifier
+- `APPLE_STORE_CONNECT_ISSUER_ID` — App Store Connect API issuer identifier
 
 `GITHUB_TOKEN` is supplied automatically by GitHub Actions and is used by the GoReleaser release step for repository publication.
 
