@@ -9,7 +9,7 @@
 draft.toml
 charts/
 NOTICE
-LICENSE
+.cloudopsworks/*
 README.md
 OWNERS
 OWNERS_ALIASES

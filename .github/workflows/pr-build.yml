@@ -38,10 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
           source_ref: ${{ github.head_ref }}
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Pipeline Configuration
         id: config
@@ -79,10 +79,10 @@ jobs:
       environment: ${{ steps.config.outputs.environment }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
           source_ref: ${{ github.head_ref }}
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Pipeline Configuration
         id: config
@@ -146,6 +146,7 @@ jobs:
       aws_secret_access_key: ${{ secrets.BUILD_AWS_SECRET_ACCESS_KEY }}
       azure_service_id: ${{ secrets.BUILD_AZURE_SERVICE_ID }}
       azure_service_secret: ${{ secrets.BUILD_AZURE_SERVICE_SECRET }}
+      gcp_credentials: ${{ secrets.BUILD_GCP_CREDENTIALS }}
 
   preview:
     name: 'Preview Deployment'
@@ -154,12 +155,19 @@ jobs:
       - deploy-container
     if: needs.code-build.outputs.has_preview == 'true'
     runs-on: ${{ needs.code-build.outputs.runner_set }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.DEPLOYMENT_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DEPLOYMENT_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ vars.DEPLOYMENT_AWS_REGION }}
+      GOOGLE_CREDENTIALS: ${{ secrets.DEPLOYMENT_GCP_CREDENTIALS }}
+      ARM_CLIENT_ID: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_SECRET }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
           source_ref: ${{ github.head_ref }}
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       # Get Pipeline Config
       - name: Get Pipeline Config
@@ -196,7 +204,7 @@ jobs:
           token: ${{ secrets.BOT_TOKEN }}
           azure_service_id: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_ID }}
           azure_service_secret: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_SECRET }}
-          azure_rg: ${{ steps.config.outputs.azure_rg != '' && steps.config.outputs.azure_rg || vars.PREVIEW_AZURE_RESOURCE_GROUP }}
+          azure_rg: ${{ steps.config.outputs.preview_azure_rg != '' && steps.config.outputs.preview_azure_rg || vars.PREVIEW_AZURE_RESOURCE_GROUP }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ needs.code-build.outputs.semver }}
@@ -216,8 +224,9 @@ jobs:
           cloud_type: ${{ steps.config.outputs.cloud }}
           token: ${{ secrets.BOT_TOKEN }}
           gcp_credentials: ${{ secrets.PREVIEW_GCP_CREDENTIALS }}
-          gcp_project: ${{ steps.config.outputs.gcp_project != '' && steps.config.outputs.gcp_project || inputs.PREVIEW_GCP_PROJECT }}
-          gcp_region: ${{ steps.config.outputs.gcp_region != '' && steps.config.outputs.gcp_region || inputs.PREVIEW_GCP_REGION }}
+          gcp_impersonate_sa: ${{ vars.PREVIEW_CGP_IMPERSONATE_SA }}
+          gcp_project: ${{ vars.PREVIEW_GCP_PROJECT }}
+          gcp_region: ${{ vars.PREVIEW_GCP_REGION }}
           terraform_state_conf: ${{ inputs.terraform_state_conf }}
           release_name: ${{ steps.config.outputs.release_name }}
           release_version: ${{ needs.code-build.outputs.semver }}
@@ -237,6 +246,7 @@ jobs:
     uses: ./.github/workflows/scan.yml
     with:
       deployment_name: ${{ needs.code-build.outputs.deployment_name }}
+      semver: ${{ needs.code-build.outputs.semver }}
       bot_user: ${{ vars.BOT_USER }}
       sonarqube_url: ${{ vars.SONARQUBE_URL }}
       dtrack_url: ${{ vars.DEPENDENCYTRACK_URL }}
