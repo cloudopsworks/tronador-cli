@@ -125,7 +125,7 @@ changelog:
   disable: true
 notarize:
   macos:
-    - enabled: '{{ ifEnvSet "MACOS_SIGN_P12" }}'
+    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
       ids:
         - tronador-cli
       sign:
