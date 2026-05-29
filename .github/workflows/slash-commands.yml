@@ -26,6 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Git-Ops
-        uses: cloudopsworks/blueprints/cd/gitops/command@v5.9
+        uses: cloudopsworks/blueprints/cd/gitops/command@v5.10
         with:
           token: ${{ secrets.BOT_TOKEN }}

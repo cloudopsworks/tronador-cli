@@ -19,10 +19,12 @@ on:
       - develop
       - support/**
       - release/**
-    paths-ignore:
-      - '.github/**'
-      - '!.github/vars/**'
-      - '!.github/values/**'
+    paths:
+      - '**'
+      - '.cloudopsworks/vars/**'
+      - '.cloudopsworks/values/**'
+      - '!.github/**'
+      - '!.cloudopsworks/*'
   workflow_dispatch:
 
 concurrency: build-${{ github.repository }}-${{ github.ref }}
@@ -65,11 +67,13 @@ jobs:
       has_qualifier: ${{ steps.config.outputs.has_qualifier }}
       observability_enabled: ${{ steps.config.outputs.observability_enabled }}
       observability_agent: ${{ steps.config.outputs.observability_agent }}
+      golang_version: ${{ steps.build.outputs.golang_version }}
+      golang_goreleaser: ${{ steps.build.outputs.golang_goreleaser }}
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Pipeline Configuration
         id: config
@@ -131,8 +135,11 @@ jobs:
       runner_set: ${{ needs.code-build.outputs.runner_set }}
       default_aws_region: ${{ vars.BUILD_AWS_REGION }}
       default_aws_sts_role_arn: ${{ vars.BUILD_AWS_STS_ROLE_ARN }}
-      default_azure_rg: ${{ vars.BUILD_AZURE_RG }}
+      default_azure_rg: ${{ vars.BUILD_AZURE_RESOURCE_GROUP }}
       default_registry_address: ${{ vars.DOCKER_REGISTRY_ADDRESS }}
+      default_gcp_project: ${{ vars.BUILD_GCP_PROJECT }}
+      default_gcp_region: ${{ vars.BUILD_GCP_REGION }}
+      default_gcp_impersonate_sa: ${{ vars.BUILD_GCP_IMPERSONATE_SA }}
       project_key: ${{ needs.code-build.outputs.project_key }}
       project_owner: ${{ needs.code-build.outputs.project_owner }}
     secrets:
@@ -141,6 +148,7 @@ jobs:
       aws_secret_access_key: ${{ secrets.BUILD_AWS_SECRET_ACCESS_KEY }}
       azure_service_id: ${{ secrets.BUILD_AZURE_SERVICE_ID }}
       azure_service_secret: ${{ secrets.BUILD_AZURE_SERVICE_SECRET }}
+      gcp_credentials: ${{ secrets.BUILD_GCP_CREDENTIALS }}
 
   release:
     name: 'Generate Release'
@@ -155,10 +163,10 @@ jobs:
       (needs.code-build.outputs.has_qualifier != 'true')
     steps:
       - name: Checkout w/Blueprint
-        uses: cloudopsworks/blueprints/cd/checkout@v5.9
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
         id: co
         with:
-          blueprint_ref: 'v5.9'
+          blueprint_ref: 'v5.10'
 
       - name: Perform Release
         uses: ./bp/cd/release
@@ -171,6 +179,18 @@ jobs:
             *.zip
           token: ${{ secrets.BOT_TOKEN }}
 
+      - name: GoReleaser Pipeline
+        uses: ./bp/cd/go/release
+        if: needs.code-build.outputs.golang_goreleaser == 'true'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg_passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          semver: ${{ needs.code-build.outputs.semver }}
+          golang_version: ${{ needs.code-build.outputs.golang_version }}
+          homebrew_tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.BOT_TOKEN }}
+          chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
+
   scan:
     name: 'Code Scan SAST/SCA/DAST'
     needs:
@@ -182,6 +202,7 @@ jobs:
     uses: ./.github/workflows/scan.yml
     with:
       deployment_name: ${{ needs.code-build.outputs.deployment_name }}
+      semver: ${{ needs.code-build.outputs.semver }}
       bot_user: ${{ vars.BOT_USER }}
       sonarqube_url: ${{ vars.SONARQUBE_URL }}
       dtrack_url: ${{ vars.DEPENDENCYTRACK_URL }}
@@ -203,7 +224,8 @@ jobs:
       (needs.code-build.result == 'success') &&
       (needs.code-build.outputs.blue_green_enabled != 'true') && 
       (needs.code-build.outputs.deployment_enabled == 'true') && 
-      (needs.code-build.outputs.is_library != 'true')
+      (needs.code-build.outputs.is_library != 'true') && 
+      (needs.code-build.outputs.golang_goreleaser != 'true')
     uses: ./.github/workflows/deploy.yml
     with:
       deployment_name: ${{ needs.code-build.outputs.deployment_name }}
@@ -212,7 +234,10 @@ jobs:
       runner_set: ${{ needs.code-build.outputs.runner_set }}
       default_aws_region: ${{ vars.DEPLOYMENT_AWS_REGION }}
       default_aws_sts_role_arn: ${{ vars.DEPLOYMENT_AWS_STS_ROLE_ARN }}
-      default_azure_rg: ${{ vars.DEPLOYMENT_AZURE_RG }}
+      default_gcp_impersonate_sa: ${{ vars.DEPLOYMENT_GCP_IMPERSONATE_SA }}
+      default_gcp_project: ${{ vars.DEPLOYMENT_GCP_PROJECT }}
+      default_gcp_region: ${{ vars.DEPLOYMENT_GCP_REGION }}
+      default_azure_rg: ${{ vars.DEPLOYMENT_AZURE_RESOURCE_GROUP }}
       terraform_state_conf: ${{ vars.DEPLOYMENT_STATE_CONF }}
       semver: ${{ needs.code-build.outputs.semver }}
       apis_enabled: ${{ needs.code-build.outputs.apis_enabled == 'true' }}
@@ -224,6 +249,7 @@ jobs:
       aws_secret_access_key: ${{ secrets.DEPLOYMENT_AWS_SECRET_ACCESS_KEY }}
       azure_service_id: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_ID }}
       azure_service_secret: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_SECRET }}
+      gcp_credentials: ${{ secrets.DEPLOYMENT_GCP_CREDENTIALS }}
 
   deploy-blue-green:
     needs:
@@ -234,7 +260,8 @@ jobs:
       (needs.code-build.result == 'success') &&
       (needs.code-build.outputs.blue_green_enabled == 'true')  && 
       (needs.code-build.outputs.deployment_enabled == 'true') && 
-      (needs.code-build.outputs.is_library != 'true')
+      (needs.code-build.outputs.is_library != 'true') && 
+      (needs.code-build.outputs.golang_goreleaser != 'true')
     uses: ./.github/workflows/deploy-blue-green.yml
     with:
       deployment_name: ${{ needs.code-build.outputs.deployment_name }}
@@ -243,7 +270,10 @@ jobs:
       runner_set: ${{ needs.code-build.outputs.runner_set }}
       default_aws_region: ${{ vars.DEPLOYMENT_AWS_REGION }}
       default_aws_sts_role_arn: ${{ vars.DEPLOYMENT_AWS_STS_ROLE_ARN }}
-      default_azure_rg: ${{ vars.DEPLOYMENT_AZURE_RG }}
+      default_gcp_impersonate_sa: ${{ vars.DEPLOYMENT_GCP_IMPERSONATE_SA }}
+      default_gcp_project: ${{ vars.DEPLOYMENT_GCP_PROJECT }}
+      default_gcp_region: ${{ vars.DEPLOYMENT_GCP_REGION }}
+      default_azure_rg: ${{ vars.DEPLOYMENT_AZURE_RESOURCE_GROUP }}
       terraform_state_conf: ${{ vars.DEPLOYMENT_STATE_CONF }}
       semver: ${{ needs.code-build.outputs.semver }}
       apis_enabled: ${{ needs.code-build.outputs.apis_enabled == 'true' }}
@@ -255,3 +285,4 @@ jobs:
       aws_secret_access_key: ${{ secrets.DEPLOYMENT_AWS_SECRET_ACCESS_KEY }}
       azure_service_id: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_ID }}
       azure_service_secret: ${{ secrets.DEPLOYMENT_AZURE_SERVICE_SECRET }}
+      gcp_credentials: ${{ secrets.DEPLOYMENT_GCP_CREDENTIALS }}

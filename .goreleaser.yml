@@ -1,0 +1,99 @@
+# Visit https://goreleaser.com for documentation on how to customize this
+# behavior.
+version: 2
+before:
+  hooks:
+    - go mod tidy
+    - ./scripts/validate-installers.sh
+builds:
+  - id: tronador-cli
+    env:
+      # goreleaser does not work with CGO, it could also complicate
+      # installations because users may not have shared libraries available.
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
+    goos:
+      - freebsd
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - '386'
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: '386'
+      - goos: windows
+        goarch: arm
+    binary: '{{ .ProjectName }}'
+archives:
+  - id: tronador-cli
+    ids:
+      - tronador-cli
+    formats:
+      - zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - src: .cloudopsworks/LICENSE
+        dst: LICENSE
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_SHA256SUMS'
+  algorithm: sha256
+signs:
+  - artifacts: checksum
+    args:
+      # If you are using this in a GitHub action or other automated pipeline,
+      # pass the batch flag so GPG is not interactive.
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+homebrew_casks:
+  - name: tronador-cli
+    ids:
+      - tronador-cli
+    repository:
+      owner: cloudopsworks
+      name: homebrew-tap
+      branch: main
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+    directory: Casks
+    description: CLI tool for CloudOps Works Tronador workflows and AWS automation.
+    homepage: https://github.com/cloudopsworks/tronador-cli
+    license: Apache-2.0
+    binaries:
+      - tronador-cli
+    skip_upload: '{{ not (isEnvSet "HOMEBREW_TAP_TOKEN") }}'
+publishers:
+  - name: chocolatey-package
+    ids:
+      - tronador-cli
+    cmd: >-
+      ./packaging/chocolatey/package.sh
+      --artifact "{{ abs .ArtifactPath }}"
+      --version "{{ .Version }}"
+      --tag "{{ .Tag }}"
+      --out dist/chocolatey
+    env:
+      - CHOCOLATEY_API_KEY={{ .Env.CHOCOLATEY_API_KEY }}
+      - TRONADOR_CHOCOLATEY_PUBLISH=true
+release:
+  extra_files:
+    - glob: ./scripts/install.sh
+      name_template: install.sh
+    - glob: ./scripts/install.ps1
+      name_template: install.ps1
+  # If you want to manually examine the release before its live, uncomment this line:
+  # draft: true
+changelog:
+  disable: true
