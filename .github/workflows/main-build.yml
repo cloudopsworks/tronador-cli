@@ -155,7 +155,7 @@ jobs:
     needs:
       - code-build
       - deploy-container
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.code-build.outputs.runner_set }}
     if: |
       (! cancelled()) &&
       (needs.code-build.result == 'success') &&
@@ -201,8 +201,9 @@ jobs:
           golang_version: ${{ needs.code-build.outputs.golang_version }}
           homebrew_tap_token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || secrets.BOT_TOKEN }}
           chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
-          apple_certificate_b64: ${{ secrets.XCODE_BUILD_CERTIFICATE_BASE64 }}
-          apple_certificate_pass: ${{ secrets.XCODE_BUILD_CERTIFICATE_PASS }}
+          apple_certificate_b64: ${{ secrets.APPLE_SIGN_CERTIFICATE_BASE64 != '' && secrets.APPLE_SIGN_CERTIFICATE_BASE64 || secrets.XCODE_BUILD_CERTIFICATE_BASE64 }}
+          apple_certificate_pass: ${{ secrets.APPLE_SIGN_CERTIFICATE_PASS != '' && secrets.APPLE_SIGN_CERTIFICATE_PASS || secrets.XCODE_BUILD_CERTIFICATE_PASS }}
+          apple_keychain_password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD != '' && secrets.APPLE_KEYCHAIN_PASSWORD || secrets.XCODE_KEYCHAIN_PASSWORD }}
           apple_store_connect_key_b64: ${{ secrets.APPLE_STORE_CONNECT_KEY_BASE64 }}
           apple_store_connect_key_id: ${{ secrets.APPLE_STORE_CONNECT_KEY_ID }}
           apple_store_connect_issuer_id: ${{ secrets.APPLE_STORE_CONNECT_ISSUER_ID }}
