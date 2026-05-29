@@ -6,5 +6,6 @@ import (
 )
 
 func main() {
+	cli.SetVersion(buildVersion())
 	cli.Execute()
 }
