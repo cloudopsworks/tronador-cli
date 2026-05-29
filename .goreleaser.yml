@@ -124,16 +124,27 @@ release:
 changelog:
   disable: true
 notarize:
-  macos:
+#  macos:
+#    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+#      ids:
+#        - tronador-cli
+#      sign:
+#        certificate: '{{ .Env.MACOS_SIGN_P12 }}'
+#        password: '{{ .Env.MACOS_SIGN_PASSWORD }}'
+#      notarize:
+#        issuer_id: '{{ .Env.MACOS_NOTARY_ISSUER_ID }}'
+#        key_id: '{{ .Env.MACOS_NOTARY_KEY_ID }}'
+#        key: '{{ .Env.MACOS_NOTARY_KEY }}'
+#        wait: true
+#        timeout: 20m
+  macos_native:
     - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
       ids:
         - tronador-cli
+      use: pkg
       sign:
-        certificate: '{{ .Env.MACOS_SIGN_P12 }}'
-        password: '{{ .Env.MACOS_SIGN_PASSWORD }}'
+        keychain: '{{ .Env.KEYCHAIN_PATH }}'
+        identity: 'Developer ID Installer: Cloud Ops Works LLC (WFK2QJU4SS)'
       notarize:
-        issuer_id: '{{ .Env.MACOS_NOTARY_ISSUER_ID }}'
-        key_id: '{{ .Env.MACOS_NOTARY_KEY_ID }}'
-        key: '{{ .Env.MACOS_NOTARY_KEY }}'
+        profile_name: '{{ .Env.MACOS_NOTARY_PROFILE_NAME }}'
         wait: true
-        timeout: 20m
