@@ -11,7 +11,7 @@ repository_owner: "cloudopsworks" # Required
 golang:
   main_file: .
   package_name: tronador # Optional, defaults to the go.mod module name or repository name
-#  version: 1.23
+  version: 1.26.3
 #  dist: linux
 #  arch: amd64
 #  image_variant: alpine:3.21
