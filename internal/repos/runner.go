@@ -358,6 +358,9 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 	if err := r.copyIssueTemplatesIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
+		return err
+	}
 	for _, file := range []string{"Makefile", ".gitignore"} {
 		if err := r.copyFile(r.path(r.Config.TemplateDirectory, file), r.path(file)); err != nil {
 			return err
@@ -429,6 +432,9 @@ func (r *Runner) applyUnversionedTemplate() error {
 	if err := r.copyIssueTemplatesIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
+		return err
+	}
 	if err := r.gitAdd(context.Background(), ".github/workflows"); err != nil {
 		return err
 	}
@@ -472,6 +478,19 @@ func (r *Runner) copyIssueTemplatesIfExists(ctx context.Context) error {
 		return nil
 	}
 	return r.gitAdd(ctx, copied...)
+}
+
+func (r *Runner) copyPullRequestTemplateIfExists(ctx context.Context) error {
+	src := r.path(r.Config.TemplateDirectory, ".github/PULL_REQUEST_TEMPLATE.md")
+	if !exists(src) {
+		return nil
+	}
+	fmt.Fprintln(r.Opts.Stdout, "Updating pull request template")
+	dst := ".github/PULL_REQUEST_TEMPLATE.md"
+	if err := r.copyFile(src, r.path(dst)); err != nil {
+		return err
+	}
+	return r.gitAdd(ctx, dst)
 }
 
 func (r *Runner) applyBoilerplate(tmpl Template, pre510 bool) error {
