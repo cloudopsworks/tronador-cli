@@ -115,6 +115,54 @@ func TestTemplateDryRunSkipsWhenMarkerMissing(t *testing.T) {
 	}
 }
 
+func TestCopyIssueTemplatesSkipsReservedTemplateForms(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "config.yml"), "blank_issues_enabled: false\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "20_custom.yml"), "name: Custom\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "98_template_bug_report.yml"), "name: Template bug\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "99_template_feature_request.yml"), "name: Template feature\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "PULL_REQUEST_TEMPLATE.md"), "## Summary\n")
+	mustWrite(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "98_existing.yml"), "name: Existing reserved\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyIssueTemplatesIfExists(context.Background()); err != nil {
+		t.Fatalf("copyIssueTemplatesIfExists() error = %v", err)
+	}
+	if err := runner.copyPullRequestTemplateIfExists(context.Background()); err != nil {
+		t.Fatalf("copyPullRequestTemplateIfExists() error = %v", err)
+	}
+
+	for _, path := range []string{
+		".github/ISSUE_TEMPLATE/config.yml",
+		".github/ISSUE_TEMPLATE/20_custom.yml",
+		".github/ISSUE_TEMPLATE/98_existing.yml",
+		".github/PULL_REQUEST_TEMPLATE.md",
+	} {
+		if !exists(filepath.Join(dir, path)) {
+			t.Fatalf("expected %s to exist after issue template copy", path)
+		}
+	}
+	for _, path := range []string{
+		".github/ISSUE_TEMPLATE/98_template_bug_report.yml",
+		".github/ISSUE_TEMPLATE/99_template_feature_request.yml",
+	} {
+		if exists(filepath.Join(dir, path)) {
+			t.Fatalf("expected reserved template file %s not to be copied", path)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
