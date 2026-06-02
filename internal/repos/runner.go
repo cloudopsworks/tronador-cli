@@ -355,6 +355,9 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 	if err := r.copyDir(r.path(r.Config.TemplateDirectory, ".github/workflows"), r.path(".github/workflows")); err != nil {
 		return err
 	}
+	if err := r.copyIssueTemplatesIfExists(context.Background()); err != nil {
+		return err
+	}
 	for _, file := range []string{"Makefile", ".gitignore"} {
 		if err := r.copyFile(r.path(r.Config.TemplateDirectory, file), r.path(file)); err != nil {
 			return err
@@ -423,6 +426,9 @@ func (r *Runner) applyUnversionedTemplate() error {
 	if err := r.copyDir(r.path(r.Config.TemplateDirectory, ".github/workflows"), r.path(".github/workflows")); err != nil {
 		return err
 	}
+	if err := r.copyIssueTemplatesIfExists(context.Background()); err != nil {
+		return err
+	}
 	if err := r.gitAdd(context.Background(), ".github/workflows"); err != nil {
 		return err
 	}
@@ -432,6 +438,40 @@ func (r *Runner) applyUnversionedTemplate() error {
 		}
 	}
 	return r.copyFile(r.path(r.Config.TemplateDirectory, "Makefile"), r.path("Makefile"))
+}
+
+func (r *Runner) copyIssueTemplatesIfExists(ctx context.Context) error {
+	src := r.path(r.Config.TemplateDirectory, ".github/ISSUE_TEMPLATE")
+	if !exists(src) {
+		return nil
+	}
+	fmt.Fprintln(r.Opts.Stdout, "Updating issue templates, excluding reserved 98_* and 99_* files")
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := r.mkdirAll(r.path(".github/ISSUE_TEMPLATE"), 0o755); err != nil {
+		return err
+	}
+	copied := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "98_") || strings.HasPrefix(name, "99_") {
+			continue
+		}
+		if entry.IsDir() {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join(".github/ISSUE_TEMPLATE", name))
+		if err := r.copyFile(filepath.Join(src, name), r.path(rel)); err != nil {
+			return err
+		}
+		copied = append(copied, rel)
+	}
+	if len(copied) == 0 {
+		return nil
+	}
+	return r.gitAdd(ctx, copied...)
 }
 
 func (r *Runner) applyBoilerplate(tmpl Template, pre510 bool) error {
