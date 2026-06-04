@@ -18,12 +18,17 @@ var (
 )
 
 var reposCmd = &cobra.Command{
-	Use:   "repos",
-	Short: "Repository template lifecycle commands",
+	Use:     "repos",
+	Aliases: []string{"repo"},
+	Short:   "Repository template lifecycle commands",
 	Long: `Repository template lifecycle commands port the Tronador make repos/* targets
 into tronador-cli. Template metadata and migration paths are loaded from JSON so
 new repository types or future upgrade paths such as 5.11 and 5.12 can be added
 without changing command dispatch code.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {
@@ -40,7 +45,6 @@ func init() {
 	reposCmd.AddCommand(newReposUpgradeCommand())
 	reposCmd.AddCommand(newReposRecoverCommand())
 	reposCmd.AddCommand(newReposPushCommand())
-	reposCmd.AddCommand(newReposMigrateCommand())
 
 	rootCmd.AddCommand(reposCmd)
 }
@@ -201,7 +205,9 @@ major/minor line, fetches that template internally, applies the stack, updates
 CICD metadata when applicable, and commits the result.
 
 Passing [version] is equivalent to the Makefile repos/upgrade/<version> target
-and runs the same full workflow against that explicit tag or branch.`,
+and runs the same full workflow against that explicit tag or branch. The special
+version "major" resolves to the latest tag in the current major line, and
+"master" upgrades from the template repository master branch tip.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runner, err := newReposRunner(cmd)
@@ -245,62 +251,5 @@ func newReposPushCommand() *cobra.Command {
 			}
 			return runner.Push(context.Background(), tmpl, state)
 		},
-	}
-}
-
-func newReposMigrateCommand() *cobra.Command {
-	migrateCmd := &cobra.Command{
-		Use:   "migrate [template] [version]",
-		Short: "Run configured repository layout migrations",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			runner, err := newReposRunner(cmd)
-			if err != nil {
-				return err
-			}
-			if len(args) == 1 {
-				return runner.Migrate("", args[0])
-			}
-			return runner.Migrate(args[0], args[1])
-		},
-	}
-	addConfiguredMigrationCommands(migrateCmd)
-	return migrateCmd
-}
-
-func addConfiguredMigrationCommands(parent *cobra.Command) {
-	cfg, err := repos.LoadConfig("")
-	if err != nil {
-		return
-	}
-	for _, plan := range cfg.MigrationPlans {
-		plan := plan
-		parent.AddCommand(&cobra.Command{
-			Use:   plan.Version,
-			Short: plan.Description,
-			RunE: func(cmd *cobra.Command, args []string) error {
-				runner, err := newReposRunner(cmd)
-				if err != nil {
-					return err
-				}
-				return runner.Migrate("", plan.Version)
-			},
-		})
-	}
-	for _, tmpl := range cfg.Templates {
-		tmpl := tmpl
-		cmd := &cobra.Command{
-			Use:   tmpl.Name + " [version]",
-			Short: fmt.Sprintf("Run %s template migration", tmpl.Name),
-			Args:  cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				runner, err := newReposRunner(cmd)
-				if err != nil {
-					return err
-				}
-				return runner.Migrate(tmpl.Name, args[0])
-			},
-		}
-		parent.AddCommand(cmd)
 	}
 }
