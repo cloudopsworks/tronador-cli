@@ -110,7 +110,6 @@ publishers:
       - CHOCOLATEY_API_KEY={{ .Env.CHOCOLATEY_API_KEY }}
       - TRONADOR_CHOCOLATEY_PUBLISH=false
 release:
-  draft: true
   use_existing_draft: true
   extra_files:
     - glob: ./scripts/install.sh
