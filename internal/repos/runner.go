@@ -451,7 +451,7 @@ func (r *Runner) copyIssueTemplatesIfExists(ctx context.Context) error {
 	if !exists(src) {
 		return nil
 	}
-	fmt.Fprintln(r.Opts.Stdout, "Updating issue templates, excluding reserved 98_* and 99_* files")
+	fmt.Fprintln(r.Opts.Stdout, "Copying missing issue templates, excluding reserved 98_* and 99_* files")
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err
@@ -462,14 +462,26 @@ func (r *Runner) copyIssueTemplatesIfExists(ctx context.Context) error {
 	copied := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if strings.HasPrefix(name, "98_") || strings.HasPrefix(name, "99_") {
+		reserved := false
+		for _, pfx := range reservedIssueTemplatePrefixes {
+			if strings.HasPrefix(name, pfx) {
+				reserved = true
+				break
+			}
+		}
+		if reserved {
 			continue
 		}
 		if entry.IsDir() {
 			continue
 		}
-		rel := filepath.ToSlash(filepath.Join(".github/ISSUE_TEMPLATE", name))
-		if err := r.copyFile(filepath.Join(src, name), r.path(rel)); err != nil {
+		rel := filepath.ToSlash(filepath.Join(".github/ISSUE_TEMPLATE", templateIssueDestinationName(name)))
+		dst := r.path(rel)
+		if exists(dst) {
+			fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", rel)
+			continue
+		}
+		if err := r.copyFile(filepath.Join(src, name), dst); err != nil {
 			return err
 		}
 		copied = append(copied, rel)
@@ -485,12 +497,27 @@ func (r *Runner) copyPullRequestTemplateIfExists(ctx context.Context) error {
 	if !exists(src) {
 		return nil
 	}
-	fmt.Fprintln(r.Opts.Stdout, "Updating pull request template")
-	dst := ".github/PULL_REQUEST_TEMPLATE.md"
+	fmt.Fprintln(r.Opts.Stdout, "Copying missing pull request template")
+	dst := filepath.ToSlash(filepath.Join(".github", "PULL_REQUEST_TEMPLATE.md"))
+	if exists(r.path(dst)) {
+		fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", dst)
+		return nil
+	}
 	if err := r.copyFile(src, r.path(dst)); err != nil {
 		return err
 	}
 	return r.gitAdd(ctx, dst)
+}
+
+// reservedIssueTemplatePrefixes lists the filename prefixes that are
+// template-repo-only and must never be copied into an implementation repo.
+var reservedIssueTemplatePrefixes = []string{"98_", "99_"}
+
+func templateIssueDestinationName(name string) string {
+	if strings.HasSuffix(name, ".disabled") {
+		return strings.TrimSuffix(name, ".disabled")
+	}
+	return name
 }
 
 func (r *Runner) applyBoilerplate(tmpl Template, pre510 bool) error {

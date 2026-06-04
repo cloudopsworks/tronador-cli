@@ -107,6 +107,11 @@ tronador-cli repos upgrade v5.10.12 --workdir ../my-service
 - `repos migrate [template] [version]` — run configured layout migrations.
 - `repos cicd update` — update the workflow-version metadata footer.
 
+`repos upgrade` preserves implementation-owned GitHub templates: issue templates
+including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
+when missing; reserved `98_*` and `99_*` template-only issue forms are never
+propagated.
+
 The command uses the embedded JSON catalog at `internal/repos/default_config.json` by default. Override it with `--config path/to/repos-config.json` when testing new repository types or future migration plans.
 
 For the full command mapping and architecture notes, see [docs/repos-command.md](docs/repos-command.md).
