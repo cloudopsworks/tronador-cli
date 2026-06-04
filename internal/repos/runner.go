@@ -139,9 +139,12 @@ func (r *Runner) CloneTemplate(ctx context.Context, tmpl Template) error {
 
 // CleanTemplate removes the temporary template checkout.
 func (r *Runner) CleanTemplate(ctx context.Context) error {
-	fmt.Fprintln(r.Opts.Stdout, "Cleaning up template repository")
-	if err := r.removeAll(r.path(r.Config.TemplateDirectory)); err != nil {
-		return err
+	templatePath := r.path(r.Config.TemplateDirectory)
+	if exists(templatePath) || r.Opts.DryRun {
+		fmt.Fprintln(r.Opts.Stdout, "Cleaning up template repository")
+		if err := r.removeAll(templatePath); err != nil {
+			return err
+		}
 	}
 	if r.Opts.DryRun {
 		return r.runIgnoreError(ctx, r.gitPath(), "remote", "remove", "template")
@@ -160,8 +163,10 @@ func (r *Runner) Clean() error {
 }
 
 // Available prints the latest patch and major-compatible template tags.
-func (r *Runner) Available(ctx context.Context) error {
-	tmpl, state, err := r.TemplateInit(ctx)
+func (r *Runner) Available(ctx context.Context) (err error) {
+	defer r.cleanupTemplateOnExit(ctx, &err)
+
+	tmpl, state, err := r.ActiveTemplate()
 	if err != nil {
 		return err
 	}
@@ -187,23 +192,16 @@ func (r *Runner) Available(ctx context.Context) error {
 
 // Upgrade mirrors make repos/upgrade: run the full upgrade workflow against the
 // latest tag in the current major/minor line.
-func (r *Runner) Upgrade(ctx context.Context) error {
+func (r *Runner) Upgrade(ctx context.Context) (err error) {
+	defer r.cleanupTemplateOnExit(ctx, &err)
+
 	tmpl, state, err := r.TemplateInit(ctx)
 	if err != nil {
 		return err
 	}
-	major, minor, err := parseMajorMinor(state.Version)
+	tag, major, minor, err := r.resolveDefaultUpgradeTarget(ctx, tmpl, state)
 	if err != nil {
 		return err
-	}
-	tags, err := r.fetchTags(ctx, tmpl.Repository)
-	if err != nil {
-		return err
-	}
-	pattern := currentMinorTagPattern(major, minor)
-	tag := latestMatchingTag(tags, pattern)
-	if tag == "" {
-		return fmt.Errorf("no matching tags found for %s", tmpl.Repository)
 	}
 	fmt.Fprintf(r.Opts.Stdout, "Repo: %s\n", tmpl.Repository)
 	fmt.Fprintf(r.Opts.Stdout, "Version: %s = %s.%s\n", state.Version, major, minor)
@@ -212,12 +210,78 @@ func (r *Runner) Upgrade(ctx context.Context) error {
 }
 
 // UpgradeVersion upgrades from a user-specified tag or branch.
-func (r *Runner) UpgradeVersion(ctx context.Context, version string) error {
+func (r *Runner) UpgradeVersion(ctx context.Context, version string) (err error) {
+	defer r.cleanupTemplateOnExit(ctx, &err)
+
 	tmpl, state, err := r.TemplateInit(ctx)
 	if err != nil {
 		return err
 	}
-	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: version})
+	pullBranch, err := r.resolveExplicitUpgradeTarget(ctx, tmpl, state, version)
+	if err != nil {
+		return err
+	}
+	return r.Stack(ctx, StackOptions{Template: tmpl, State: state, PullBranch: pullBranch})
+}
+
+func (r *Runner) cleanupTemplateOnExit(ctx context.Context, errp *error) {
+	if cleanupErr := r.CleanTemplate(ctx); cleanupErr != nil && *errp == nil {
+		*errp = cleanupErr
+	}
+}
+
+func (r *Runner) resolveDefaultUpgradeTarget(ctx context.Context, tmpl Template, state RepositoryState) (tag, major, minor string, err error) {
+	major, minor, err = parseMajorMinor(state.Version)
+	if err != nil {
+		return "", "", "", err
+	}
+	tags, err := r.fetchTags(ctx, tmpl.Repository)
+	if err != nil {
+		return "", "", "", err
+	}
+	tag = latestMatchingTag(tags, currentMinorTagPattern(major, minor))
+	if tag == "" {
+		return "", "", "", fmt.Errorf("no matching tags found for %s in %s.%s", tmpl.Repository, major, minor)
+	}
+	return tag, major, minor, nil
+}
+
+func (r *Runner) resolveExplicitUpgradeTarget(ctx context.Context, tmpl Template, state RepositoryState, version string) (string, error) {
+	target := strings.TrimSpace(version)
+	switch {
+	case strings.EqualFold(target, "major"):
+		tag, major, err := r.resolveMajorUpgradeTarget(ctx, tmpl, state)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(r.Opts.Stdout, "Repo: %s\n", tmpl.Repository)
+		fmt.Fprintf(r.Opts.Stdout, "Version: %s = %s.x\n", state.Version, major)
+		fmt.Fprintf(r.Opts.Stdout, "Latest Major Version: %s\n", tag)
+		return tag, nil
+	case strings.EqualFold(target, "master"):
+		return "master", nil
+	case target == "":
+		tag, _, _, err := r.resolveDefaultUpgradeTarget(ctx, tmpl, state)
+		return tag, err
+	default:
+		return target, nil
+	}
+}
+
+func (r *Runner) resolveMajorUpgradeTarget(ctx context.Context, tmpl Template, state RepositoryState) (string, string, error) {
+	major, _, err := parseMajorMinor(state.Version)
+	if err != nil {
+		return "", "", err
+	}
+	tags, err := r.fetchTags(ctx, tmpl.Repository)
+	if err != nil {
+		return "", "", err
+	}
+	tag := latestMatchingTag(tags, currentMajorTagPattern(major))
+	if tag == "" {
+		return "", "", fmt.Errorf("no matching tags found for %s in major %s", tmpl.Repository, major)
+	}
+	return tag, major, nil
 }
 
 // Fetch checks out the requested branch/tag in the template checkout and returns
@@ -602,7 +666,9 @@ func (r *Runner) Push(ctx context.Context, tmpl Template, state RepositoryState)
 }
 
 // Recover overlays the fetched template checkout over the repository without committing.
-func (r *Runner) Recover(ctx context.Context) error {
+func (r *Runner) Recover(ctx context.Context) (err error) {
+	defer r.cleanupTemplateOnExit(ctx, &err)
+
 	tmpl, state, err := r.TemplateInit(ctx)
 	if err != nil {
 		return err
