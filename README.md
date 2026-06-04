@@ -90,13 +90,19 @@ tronador-cli repos upgrade --workdir ../my-service
 
 # Run the same full workflow against an explicit tag or branch
 tronador-cli repos upgrade v5.10.12 --workdir ../my-service
+
+# Run the same full workflow against the latest tag in the current major line
+tronador-cli repos upgrade major --workdir ../my-service
+
+# Run the same full workflow from the template repository master branch tip
+tronador-cli repos upgrade master --workdir ../my-service
 ```
 
-`repos upgrade` intentionally exposes a single public workflow. Internal Makefile stages such as fetch, eval, and stack are handled inside the command instead of being separate subcommands.
+`repos upgrade` intentionally exposes a single public workflow. Internal Makefile stages such as fetch, eval, migrate, and stack are handled inside the command instead of being separate subcommands. Public workflows clean up their temporary `.template` checkout when they finish or fail.
 
 ## Repository Template Commands
 
-`tronador-cli repos` ports the supported public Tronador `make repos/*` targets into the CLI:
+`tronador-cli repos` ports the supported public Tronador `make repos/*` targets into the CLI. `tronador-cli repo` is an alias for the same command tree.
 
 - `repos available` / `repos avail` — list latest compatible template tags.
 - `repos template init` and `repos template <kind>` — pull configured template repositories.
@@ -104,7 +110,6 @@ tronador-cli repos upgrade v5.10.12 --workdir ../my-service
 - `repos upgrade [version]` — run the full template upgrade workflow; `[version]` is optional.
 - `repos recover` — overlay template files without committing.
 - `repos push` — stage and commit template upgrade results.
-- `repos migrate [template] [version]` — run configured layout migrations.
 - `repos cicd update` — update the workflow-version metadata footer.
 
 `repos upgrade` preserves implementation-owned GitHub templates: issue templates
