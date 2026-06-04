@@ -47,6 +47,16 @@ stack, update CICD metadata, and commit the result.
 `tronador-cli repos upgrade <version>` mirrors the Makefile `repos/upgrade/%`
 target and runs the same full workflow against the explicit tag or branch.
 
+During the upgrade stack, `.github/workflows/` remains template-owned and is
+replaced. Issue and pull request templates are intentionally non-destructive:
+`.github/ISSUE_TEMPLATE/*` files, including `config.yml`, and
+`.github/PULL_REQUEST_TEMPLATE.md` are copied only when the implementation
+repository does not already have the destination file. Template repositories may
+store implementation issue forms with a disabled suffix such as
+`01_bug_report.yml.disabled`; the upgrade strips that suffix when copying into an
+implementation repository while still skipping reserved `98_*` and `99_*`
+template-only issue forms.
+
 The Makefile's `repos/upgrade/fetch`, `repos/upgrade/eval`, and
 `repos/upgrade/stack` targets are internal workflow stages. They are intentionally
 not exposed as CLI subcommands.
