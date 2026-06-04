@@ -105,11 +105,7 @@ publishers:
     ids:
       - tronador-cli
     cmd: >-
-      ./packaging/chocolatey/package.sh
-      --artifact "{{ abs .ArtifactPath }}"
-      --version "{{ .Version }}"
-      --tag "{{ .Tag }}"
-      --out dist/chocolatey
+      ./packaging/chocolatey/package.sh --artifact "{{ abs .ArtifactPath }}" --version "{{ .Version }}" --tag "{{ .Tag }}" --out dist/chocolatey
     env:
       - CHOCOLATEY_API_KEY={{ .Env.CHOCOLATEY_API_KEY }}
       - TRONADOR_CHOCOLATEY_PUBLISH=false
@@ -121,8 +117,7 @@ release:
       name_template: install.sh
     - glob: ./scripts/install.ps1
       name_template: install.ps1
-  # If you want to manually examine the release before its live, uncomment this line:
-  # draft: true
+  name_template: Release {{ .Tag }}
 changelog:
   disable: true
 notarize:
@@ -139,14 +134,3 @@ notarize:
         key: '{{ .Env.MACOS_NOTARY_KEY }}'
         wait: true
         timeout: 20m
-#  macos_native:
-#    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
-#      ids:
-#        - tronador-cli
-#      use: pkg
-#      sign:
-#        keychain: '{{ .Env.KEYCHAIN_PATH }}'
-#        identity: 'Developer ID Installer: Cloud Ops Works LLC (WFK2QJU4SS)'
-#      notarize:
-#        profile_name: '{{ .Env.MACOS_NOTARY_PROFILE_NAME }}'
-#        wait: true
