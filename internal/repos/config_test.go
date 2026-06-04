@@ -2,6 +2,7 @@ package repos
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -103,6 +104,101 @@ func TestCurrentMinorTagPatternMirrorsMakefileDefaultUpgrade(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultUpgradeTargetUsesCurrentMinorLine(t *testing.T) {
+	runner := &Runner{
+		Opts:         Options{WorkDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard},
+		githubClient: &fakeGitHubClient{tags: []string{"v5.10.2", "v5.10.10", "v5.11.3", "v6.0.0"}},
+	}
+	tmpl := Template{Repository: "cloudopsworks/go-app-template"}
+	state := RepositoryState{Version: "v5.10.1"}
+
+	got, major, minor, err := runner.resolveDefaultUpgradeTarget(context.Background(), tmpl, state)
+	if err != nil {
+		t.Fatalf("resolveDefaultUpgradeTarget() error = %v", err)
+	}
+	if got != "v5.10.10" || major != "5" || minor != "10" {
+		t.Fatalf("default target = %s (%s.%s), want v5.10.10 (5.10)", got, major, minor)
+	}
+}
+
+func TestResolveExplicitUpgradeTargetMajorUsesCurrentMajorLine(t *testing.T) {
+	runner := &Runner{
+		Opts:         Options{WorkDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard},
+		githubClient: &fakeGitHubClient{tags: []string{"v5.10.10", "v5.11.3", "v5.12.1", "v6.0.0"}},
+	}
+	tmpl := Template{Repository: "cloudopsworks/go-app-template"}
+	state := RepositoryState{Version: "v5.10.1"}
+
+	got, err := runner.resolveExplicitUpgradeTarget(context.Background(), tmpl, state, "major")
+	if err != nil {
+		t.Fatalf("resolveExplicitUpgradeTarget(major) error = %v", err)
+	}
+	if got != "v5.12.1" {
+		t.Fatalf("major target = %s, want latest same-major tag v5.12.1", got)
+	}
+}
+
+func TestResolveExplicitUpgradeTargetMasterBypassesVersionLookup(t *testing.T) {
+	client := &fakeGitHubClient{err: errors.New("tag lookup should not run")}
+	runner := &Runner{
+		Opts:         Options{WorkDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard},
+		githubClient: client,
+	}
+	tmpl := Template{Repository: "cloudopsworks/go-app-template"}
+	state := RepositoryState{Version: "v5.10.1"}
+
+	got, err := runner.resolveExplicitUpgradeTarget(context.Background(), tmpl, state, "master")
+	if err != nil {
+		t.Fatalf("resolveExplicitUpgradeTarget(master) error = %v", err)
+	}
+	if got != "master" {
+		t.Fatalf("master target = %s, want master", got)
+	}
+	if client.repository != "" {
+		t.Fatalf("master target queried tags for %s; want no version lookup", client.repository)
+	}
+}
+
+func TestAvailableCleansStaleTemplateWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".golang"), "")
+	mustWrite(t, filepath.Join(dir, ".template", "stale.txt"), "stale")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	runner.githubClient = &fakeGitHubClient{tags: []string{"v5.10.10", "v5.11.1"}}
+
+	if err := runner.Available(context.Background()); err != nil {
+		t.Fatalf("Available() error = %v", err)
+	}
+	if exists(filepath.Join(dir, ".template")) {
+		t.Fatalf("Available() left stale .template workspace behind")
+	}
+}
+
+func TestUpgradeVersionCleansTemplateWorkspaceAfterResolutionFailure(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".golang"), "")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	runner.gitClient = cloneWritingGitClient{}
+	runner.githubClient = &fakeGitHubClient{tags: []string{"v6.0.0"}}
+
+	if err := runner.UpgradeVersion(context.Background(), "major"); err == nil {
+		t.Fatalf("UpgradeVersion(major) succeeded; want no same-major tag error")
+	}
+	if exists(filepath.Join(dir, ".template")) {
+		t.Fatalf("UpgradeVersion() left .template workspace after failure")
+	}
+}
+
 func TestTemplateDryRunSkipsWhenMarkerMissing(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
@@ -195,4 +291,23 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+type cloneWritingGitClient struct{}
+
+func (cloneWritingGitClient) Clone(_ context.Context, _ string, destination string) error {
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(destination, "README.md"), []byte("template\n"), 0o644)
+}
+
+func (cloneWritingGitClient) RemoveRemote(context.Context, string, string) error { return nil }
+
+func (cloneWritingGitClient) Checkout(context.Context, string, string) (string, error) {
+	return "", errors.New("unused")
+}
+
+func (cloneWritingGitClient) OriginOwnerRepo(context.Context, string) (string, string, error) {
+	return "", "", errors.New("unused")
 }
