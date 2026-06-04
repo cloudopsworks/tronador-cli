@@ -1,66 +1,50 @@
-name: Infrastructure / Deployment Issue
-description: Report a problem with CI/CD pipelines, deployments, or environment configuration.
-title: "[Infra]: "
-labels: ["infrastructure", "triage"]
+name: Documentation Issue
+description: Report missing, incorrect, or unclear documentation.
+title: "[Docs]: "
+labels: ["documentation", "triage"]
 assignees: []
 
 body:
   - type: markdown
     attributes:
       value: |
-        Use this template for pipeline failures, deployment problems, or environment configuration issues.
-        For bugs in the running application, use the **Bug Report** template instead.
+        Use this template for problems with the README, inline help text, code comments, or examples.
+        For bugs in the CLI itself, use the **Bug Report** template instead.
+        For questions, join us on [Community Slack](https://cloudops.works/slack/).
 
   - type: dropdown
-    id: environment
+    id: doc_type
     attributes:
-      label: Affected environment
+      label: Documentation type
       options:
-        - dev
-        - uat
-        - prod
-        - demo
-        - hotfix
-        - preview / PR environment
-        - All environments
-        - Local / make target
+        - README
+        - CLI help text (`--help` output)
+        - Code comments / godoc
+        - Example commands or configuration
+        - Contributing guide
+        - Other
     validations:
       required: true
 
   - type: dropdown
-    id: deployment_target
+    id: issue_kind
     attributes:
-      label: Deployment target
+      label: Issue kind
       options:
-        - Kubernetes / EKS / AKS / GKE
-        - AWS Lambda
-        - AWS Elastic Beanstalk
-        - Google App Engine
-        - Google Cloud Run
-        - Library / no deployment (cloud_type=none)
-        - Not applicable
+        - Missing — information not documented anywhere
+        - Incorrect — documented behavior does not match reality
+        - Unclear — documented but hard to understand
+        - Outdated — accurate at some point but no longer correct
+        - Typo / grammar
     validations:
       required: true
 
-  - type: dropdown
-    id: workflow
+  - type: textarea
+    id: location
     attributes:
-      label: Affected workflow
-      description: Which GitHub Actions workflow is failing or misbehaving?
-      options:
-        - main-build.yml
-        - pr-build.yml
-        - deploy.yml
-        - deploy-blue-green.yml
-        - deploy-container.yml
-        - scan.yml
-        - automerge.yml
-        - slash-commands.yml
-        - environment-destroy.yml
-        - environment-unlock.yml
-        - jira-integration.yml
-        - make target (local)
-        - Not a workflow issue
+      label: Where is the issue?
+      description: File path, section heading, or exact command whose `--help` output is affected.
+      placeholder: "e.g. README.md > Installation, or `tronador-cli aws tag --help`"
     validations:
       required: true
 
@@ -68,39 +52,15 @@ body:
     id: description
     attributes:
       label: Description
-      description: What went wrong? Describe the failure clearly.
+      description: What is wrong or missing? Be specific.
     validations:
       required: true
 
   - type: textarea
-    id: trigger
+    id: suggestion
     attributes:
-      label: What triggered the issue?
-      description: The branch, event, or action that caused the problem.
-      placeholder: |
-        - Pushed to release/v2.1.0
-        - Opened a PR from feature/my-feature → develop
-        - Ran `make deploy` locally
-    validations:
-      required: true
-
-  - type: input
-    id: run_url
-    attributes:
-      label: Workflow run URL
-      description: Link to the failed GitHub Actions run, if applicable.
-      placeholder: "https://github.com/org/repo/actions/runs/..."
-    validations:
-      required: false
-
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant log output
-      description: >
-        Paste the key error lines from the workflow log or container output.
-        Do **not** include secrets, credentials, or sensitive environment values.
-      render: shell
+      label: Suggested improvement
+      description: If you have a proposed fix or wording, share it here.
     validations:
       required: false
 
@@ -108,8 +68,6 @@ body:
     id: additional
     attributes:
       label: Additional context
-      description: >
-        Relevant sections of `inputs-global.yaml` or other configuration, related issues,
-        or anything else that helps narrow down the problem.
+      description: Related issues, links, or anything else that helps.
     validations:
       required: false
