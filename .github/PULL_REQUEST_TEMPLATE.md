@@ -1,13 +1,32 @@
-## what
-* Describe high-level what changed as a result of these commits (i.e. in plain-english, what do these changes mean?)
-* Use bullet points to be concise and to the point.
+## What
+<!-- Describe the changes in plain English. What does this PR do? -->
+*
 
-## why
-* Provide the justifications for the changes (e.g. business case). 
-* Describe why these changes were made (e.g. why do these commits fix the problem?)
-* Use bullet points to be concise and to the point.
+## Why
+<!-- Explain the motivation. What problem does this solve? -->
+*
 
-## references
-* Link to any supporting github issues or helpful documentation to add some context (e.g. stackoverflow). 
-* Use `closes #123`, if this PR closes a GitHub issue `#123`
+## Type of change
 
+- [ ] Bug fix (non-breaking)
+- [ ] New feature (non-breaking)
+- [ ] Breaking change (existing behavior changes)
+- [ ] Documentation update
+- [ ] Refactor / internal improvement
+- [ ] Dependency update
+
+## Checklist
+
+- [ ] `go test ./...` passes locally
+- [ ] New or changed behavior is covered by tests
+- [ ] `--help` output and relevant docs are updated
+- [ ] No secrets, credentials, or AWS account IDs in the diff
+- [ ] PR body includes a `+semver:` annotation (`patch` / `fix` / `minor` / `feature` / `major`)
+
+## Semver annotation
+
++semver: patch
+
+## Related issues
+<!-- Use `closes #123` to auto-close a linked issue, or `ref #123` to reference without closing. -->
+*

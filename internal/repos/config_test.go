@@ -115,7 +115,7 @@ func TestTemplateDryRunSkipsWhenMarkerMissing(t *testing.T) {
 	}
 }
 
-func TestCopyIssueTemplatesSkipsReservedTemplateForms(t *testing.T) {
+func TestCopyIssueTemplatesOnlyCopiesMissingImplementationForms(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -126,11 +126,15 @@ func TestCopyIssueTemplatesSkipsReservedTemplateForms(t *testing.T) {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "config.yml"), "blank_issues_enabled: false\n")
-	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "20_custom.yml"), "name: Custom\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "01_bug_report.yml.disabled"), "name: Bug\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "20_custom.yml"), "name: Upstream custom\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "98_template_bug_report.yml"), "name: Template bug\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "ISSUE_TEMPLATE", "99_template_feature_request.yml"), "name: Template feature\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "PULL_REQUEST_TEMPLATE.md"), "## Summary\n")
+	mustWrite(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "config.yml"), "blank_issues_enabled: true\n")
+	mustWrite(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "20_custom.yml"), "name: Local custom\n")
 	mustWrite(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "98_existing.yml"), "name: Existing reserved\n")
+	mustWrite(t, filepath.Join(dir, ".github", "PULL_REQUEST_TEMPLATE.md"), "## Local PR\n")
 
 	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
@@ -144,6 +148,7 @@ func TestCopyIssueTemplatesSkipsReservedTemplateForms(t *testing.T) {
 	}
 
 	for _, path := range []string{
+		".github/ISSUE_TEMPLATE/01_bug_report.yml",
 		".github/ISSUE_TEMPLATE/config.yml",
 		".github/ISSUE_TEMPLATE/20_custom.yml",
 		".github/ISSUE_TEMPLATE/98_existing.yml",
@@ -156,10 +161,20 @@ func TestCopyIssueTemplatesSkipsReservedTemplateForms(t *testing.T) {
 	for _, path := range []string{
 		".github/ISSUE_TEMPLATE/98_template_bug_report.yml",
 		".github/ISSUE_TEMPLATE/99_template_feature_request.yml",
+		".github/ISSUE_TEMPLATE/01_bug_report.yml.disabled",
 	} {
 		if exists(filepath.Join(dir, path)) {
-			t.Fatalf("expected reserved template file %s not to be copied", path)
+			t.Fatalf("expected %s not to be copied", path)
 		}
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "config.yml")); got != "blank_issues_enabled: true\n" {
+		t.Fatalf("config.yml was overwritten: %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "ISSUE_TEMPLATE", "20_custom.yml")); got != "name: Local custom\n" {
+		t.Fatalf("20_custom.yml was overwritten: %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "PULL_REQUEST_TEMPLATE.md")); got != "## Local PR\n" {
+		t.Fatalf("PULL_REQUEST_TEMPLATE.md was overwritten: %q", got)
 	}
 }
 
@@ -171,4 +186,13 @@ func mustWrite(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }
