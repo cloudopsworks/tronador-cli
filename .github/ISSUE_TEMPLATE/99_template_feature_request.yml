@@ -1,0 +1,68 @@
+name: Template Feature Request
+description: >
+  Propose a new capability or improvement to this template.
+  Filtered by tronador upgrade workflows — not propagated to implementation repositories.
+title: "[Template Feature]: "
+labels: ["template-enhancement", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to propose improvements to the **template itself** — workflows,
+        `.cloudopsworks/` configuration scaffolding, or application scaffold.
+
+        For feature requests on a **repository generated from this template**, use the **Feature Request** template instead.
+
+  - type: dropdown
+    id: template_area
+    attributes:
+      label: Template area
+      description: Which part of the template would this affect?
+      options:
+        - CI/CD workflows (.github/workflows/)
+        - CloudOps Works configuration (.cloudopsworks/vars/)
+        - Application scaffold (source code structure)
+        - Deployment target — Kubernetes
+        - Deployment target — AWS Lambda
+        - Deployment target — AWS Elastic Beanstalk
+        - Deployment target — Google App Engine
+        - Deployment target — Google Cloud Run
+        - New deployment target (describe below)
+        - GoReleaser / release tooling
+        - Documentation / README
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: |
+        What gap or pain point does this address in the template?
+        Example: "There is no way to pass custom subnet IDs for Beanstalk deployments in a VPC."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+    validations:
+      required: false
