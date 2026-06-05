@@ -2,14 +2,18 @@ blank_issues_enabled: false
 
 contact_links:
 
-  - name: Community Slack Team
+  - name: Security vulnerability
+    url: mailto:info@cloudopsworks.co
+    about: Do NOT open a public issue for security vulnerabilities. Email us directly.
+
+  - name: Community Slack
     url: https://cloudops.works/slack/
-    about: Please ask and answer questions here.
+    about: Ask questions and get help from the community.
 
   - name: Office Hours
     url: https://cloudops.works/office-hours/
-    about: Join us every Wednesday for FREE Office Hours (lunch & learn).
+    about: Join us every Wednesday for free office hours (lunch & learn).
 
-  - name: DevOps Accelerator Program
+  - name: Tronador program
     url: https://cloudops.works/tronador/
     about: Own your infrastructure in record time. We build it. You drive it.

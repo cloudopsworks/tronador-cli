@@ -1,0 +1,91 @@
+name: Installation / Packaging Issue
+description: Report a problem installing, upgrading, or packaging tronador-cli.
+title: "[Install]: "
+labels: ["installation", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for install script failures, broken Homebrew/Chocolatey formulas, bad native packages, or source-build problems.
+        For bugs in the CLI itself after a successful install, use the **Bug Report** template instead.
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation method
+      options:
+        - Shell installer script (install.sh)
+        - PowerShell installer script (install.ps1)
+        - Homebrew (brew install)
+        - Chocolatey (choco install)
+        - .deb package (apt / dpkg)
+        - .rpm package (dnf / rpm)
+        - .apk package (apk)
+        - Direct zip / archive download
+        - Built from source (make build)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os_platform
+    attributes:
+      label: OS / architecture
+      options:
+        - Linux x86_64
+        - Linux arm64
+        - macOS x86_64 (Intel)
+        - macOS arm64 (Apple Silicon)
+        - Windows x86_64
+        - FreeBSD
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: attempted_version
+    attributes:
+      label: Version attempted
+      description: The release tag or "latest" if you were not targeting a specific version.
+      placeholder: "e.g. v1.4.2 or latest"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong? Describe the failure clearly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. curl -fsSL https://.../install.sh | sh
+        2. Observe error: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_output
+    attributes:
+      label: Error output
+      description: Paste the relevant error lines. Do **not** include tokens, credentials, or sensitive environment values.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: >
+        Package manager version, shell environment, proxy settings, or anything else
+        that might affect the install.
+    validations:
+      required: false
