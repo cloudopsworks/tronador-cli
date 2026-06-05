@@ -1,0 +1,116 @@
+name: Template Bug Report
+description: >
+  Report a bug in this template's workflows, scaffold, or CI/CD configuration.
+  Filtered by tronador upgrade workflows — not propagated to implementation repositories.
+title: "[Template Bug]: "
+labels: ["template-bug", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to report issues with the **template itself** — workflow files,
+        `.cloudopsworks/` configuration scaffolding, or application scaffold.
+
+        For bugs in a **repository generated from this template**, use the **Bug Report** template instead.
+
+  - type: input
+    id: template_version
+    attributes:
+      label: Template version
+      description: Found in `.cloudopsworks/_VERSION`.
+      placeholder: "e.g. v1.3.27"
+    validations:
+      required: true
+
+  - type: input
+    id: runtime_version
+    attributes:
+      label: Runtime / SDK version
+      description: The language or tool version relevant to this template.
+      placeholder: "e.g. Go 1.22.3"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: template_area
+    attributes:
+      label: Template area
+      description: Which part of the template is affected?
+      options:
+        - CI/CD workflows (.github/workflows/)
+        - CloudOps Works configuration (.cloudopsworks/vars/)
+        - Application scaffold (source code structure)
+        - Deployment target — Kubernetes
+        - Deployment target — AWS Lambda
+        - Deployment target — AWS Elastic Beanstalk
+        - Deployment target — Google App Engine
+        - Deployment target — Google Cloud Run
+        - GoReleaser / release tooling
+        - Documentation / README
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Affected workflow
+      options:
+        - main-build.yml
+        - pr-build.yml
+        - deploy.yml
+        - deploy-blue-green.yml
+        - deploy-container.yml
+        - scan.yml
+        - automerge.yml
+        - slash-commands.yml
+        - environment-destroy.yml
+        - environment-unlock.yml
+        - jira-integration.yml
+        - Not a workflow issue
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create repo from this template
+        2. Set `golang.goreleaser: true` in inputs-global.yaml
+        3. Push to `release/v1.0.0`
+        4. Observe failure in the release job
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant log output. Do **not** paste secrets or credentials.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Workflow run URL, relevant config sections, or related issues.
+    validations:
+      required: false
