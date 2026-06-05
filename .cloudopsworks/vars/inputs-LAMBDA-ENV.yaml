@@ -170,7 +170,7 @@ lambda:
   #  enabled: true
   #  arn: arn:aws:elasticfilesystem:us-east-1:123456789012:file-system/fs-12345678
   #  local_mount_path: /mnt/efs
-
+  
   ##
   # Optional: triggers notifications for the lambda function.
   triggers: {}
