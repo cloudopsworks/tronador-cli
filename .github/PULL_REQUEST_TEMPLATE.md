@@ -18,8 +18,9 @@
 ## Checklist
 
 - [ ] `go test ./...` passes locally
+- [ ] `make build` produces a clean binary
 - [ ] New or changed behavior is covered by tests
-- [ ] `--help` output and relevant docs are updated
+- [ ] New flags or subcommands are reflected in `README.md` or `docs/`
 - [ ] No secrets, credentials, or AWS account IDs in the diff
 - [ ] PR body includes a `+semver:` annotation (`patch` / `fix` / `minor` / `feature` / `major`)
 

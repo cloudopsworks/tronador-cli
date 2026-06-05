@@ -1,0 +1,101 @@
+name: Bug Report
+description: Report unexpected behavior in tronador-cli.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more detail you provide, the faster it can be fixed.
+        **Do not report security vulnerabilities here** — email [cristian@cloudopsworks.co](mailto:cristian@cloudopsworks.co) instead.
+
+  - type: input
+    id: cli_version
+    attributes:
+      label: CLI version
+      description: Output of `tronador-cli version` (or `tronador-cli --version`).
+      placeholder: "e.g. v1.4.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os_platform
+    attributes:
+      label: OS / architecture
+      description: Where did you run the command?
+      options:
+        - Linux x86_64
+        - Linux arm64
+        - macOS x86_64 (Intel)
+        - macOS arm64 (Apple Silicon)
+        - Windows x86_64
+        - FreeBSD
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected subcommand / area
+      description: Which part of the CLI is misbehaving?
+      options:
+        - "aws — resource tagging / metadata"
+        - "aws — S3 remediation"
+        - "aws — EC2 / VPC"
+        - "aws — secrets / KMS"
+        - "aws — IAM"
+        - "repos — template upgrade / migration"
+        - "repos — CICD metadata"
+        - "repos — push helpers"
+        - "config / credentials"
+        - "install / packaging"
+        - "version / update check"
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command run
+      description: The full command that triggered the bug, with flags. Redact credentials and account IDs.
+      placeholder: "tronador-cli aws tag apply --profile my-profile --region us-east-1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include relevant error output. Do **not** paste AWS credentials, account IDs, or other secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: >
+        Anything else that helps narrow down the problem — config snippets (redacted),
+        related issues, or a link to a workflow run.
+    validations:
+      required: false

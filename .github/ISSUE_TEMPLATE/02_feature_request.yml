@@ -8,8 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the suggestion. A well-described proposal makes it much easier to evaluate and prioritize.
-        Check [existing issues](https://github.com/cloudopsworks/tronador-cli/issues) first to avoid duplicates.
+        Thanks for the suggestion. For significant changes, consider opening a discussion first to align on scope before writing code.
 
   - type: dropdown
     id: area
@@ -17,15 +16,19 @@ body:
       label: Feature area
       description: Which part of the CLI would this affect?
       options:
-        - New AWS resource type support
-        - Tagging behavior / strategies
-        - New CLI command or flag
-        - Configuration / runtime behavior
-        - Output format (JSON, table, etc.)
-        - Authentication / credential handling
-        - Performance / scalability
-        - Documentation
-        - Developer experience / tooling
+        - "aws — resource tagging / metadata"
+        - "aws — S3 remediation"
+        - "aws — EC2 / VPC"
+        - "aws — secrets / KMS"
+        - "aws — IAM"
+        - "repos — template upgrade / migration"
+        - "repos — CICD metadata"
+        - "repos — push helpers"
+        - "install / packaging (Homebrew, Chocolatey, .deb/.rpm/.apk, installer scripts)"
+        - "config / credentials"
+        - "cross-platform support (new OS or architecture)"
+        - "new subcommand or flag"
+        - "developer experience / docs / tooling"
         - Other
     validations:
       required: true
@@ -36,7 +39,7 @@ body:
       label: Problem or motivation
       description: |
         What gap or pain point does this address? Concrete examples help.
-        Example: "There is no way to tag RDS clusters — only EC2 instances are currently supported."
+        Example: "There is no way to filter `aws tag` results by region — the command always processes every configured region."
     validations:
       required: true
 
@@ -44,7 +47,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: Describe the behavior, command, or flag change you would like to see.
+      description: Describe the behavior, flag, or subcommand change you would like to see.
     validations:
       required: true
 
@@ -60,6 +63,6 @@ body:
     id: additional
     attributes:
       label: Additional context
-      description: Links, AWS documentation, related issues, or anything else that supports the proposal.
+      description: Links, prior art, related issues, or anything else that supports the proposal.
     validations:
       required: false
