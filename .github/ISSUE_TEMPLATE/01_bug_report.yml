@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report unexpected behavior in the application.
+description: Report unexpected behavior in tronador-cli.
 title: "[Bug]: "
 labels: ["bug", "triage"]
 assignees: []
@@ -8,30 +8,30 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to file a bug report. Please be as specific as possible — it speeds up the fix significantly.
+        Thanks for taking the time to file a bug report. The more detail you provide, the faster it can be fixed.
+        **Do not report security vulnerabilities here** — email [cristian@cloudopsworks.co](mailto:cristian@cloudopsworks.co) instead.
 
   - type: input
-    id: service_version
+    id: cli_version
     attributes:
-      label: Service version
-      description: >
-        The version of the running service. Found in the `VERSION` file, the container image tag,
-        or the `version` field returned by the `/health` endpoint.
+      label: CLI version
+      description: Output of `tronador-cli version` (or `tronador-cli --version`).
       placeholder: "e.g. v1.4.2"
     validations:
       required: true
 
   - type: dropdown
-    id: environment
+    id: os_platform
     attributes:
-      label: Environment
-      description: Where did you observe the bug?
+      label: OS / architecture
+      description: Where did you run the command?
       options:
-        - Local / development machine
-        - dev
-        - uat
-        - prod
-        - demo
+        - Linux x86_64
+        - Linux arm64
+        - macOS x86_64 (Intel)
+        - macOS arm64 (Apple Silicon)
+        - Windows x86_64
+        - FreeBSD
         - Other
     validations:
       required: true
@@ -39,15 +39,30 @@ body:
   - type: dropdown
     id: component
     attributes:
-      label: Component
-      description: Which part of the service is affected?
+      label: Affected subcommand / area
+      description: Which part of the CLI is misbehaving?
       options:
-        - API / request handling
-        - Business logic / data processing
-        - Configuration / startup
-        - Health / readiness check
-        - Observability (logs, metrics, tracing)
+        - "aws — resource tagging / metadata"
+        - "aws — S3 remediation"
+        - "aws — EC2 / VPC"
+        - "aws — secrets / KMS"
+        - "aws — IAM"
+        - "repos — template upgrade / migration"
+        - "repos — CICD metadata"
+        - "repos — push helpers"
+        - "config / credentials"
+        - "install / packaging"
+        - "version / update check"
         - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command run
+      description: The full command that triggered the bug, with flags. Redact credentials and account IDs.
+      placeholder: "tronador-cli aws tag apply --profile my-profile --region us-east-1"
     validations:
       required: true
 
@@ -55,19 +70,7 @@ body:
     id: description
     attributes:
       label: Description
-      description: A clear and concise description of what the bug is.
-    validations:
-      required: true
-
-  - type: textarea
-    id: steps_to_reproduce
-    attributes:
-      label: Steps to reproduce
-      description: Minimal steps that reliably trigger the bug.
-      placeholder: |
-        1. Send POST /api/v1/resource with body {...}
-        2. Observe response status 500
-        3. Check logs for error message
+      description: A clear description of what went wrong.
     validations:
       required: true
 
@@ -82,7 +85,8 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: Include relevant log lines or error messages. Do **not** paste secrets or credentials.
+      description: Include relevant error output. Do **not** paste AWS credentials, account IDs, or other secrets.
+      render: shell
     validations:
       required: true
 
@@ -91,7 +95,7 @@ body:
     attributes:
       label: Additional context
       description: >
-        Anything else that helps narrow down the problem — request/response examples,
-        relevant configuration flags, a workflow run URL, or a link to a related issue.
+        Anything else that helps narrow down the problem — config snippets (redacted),
+        related issues, or a link to a workflow run.
     validations:
       required: false
