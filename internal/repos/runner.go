@@ -430,10 +430,14 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 			return err
 		}
 	}
-	for _, file := range []string{"AGENTS.md", "CLAUDE.md", "README-TEMPLATE.md", ".helmignore", ".dockerignore"} {
+	rootTemplateFiles := []string{"AGENTS.md", "CLAUDE.md", "README-TEMPLATE.md", ".helmignore", ".dockerignore"}
+	for _, file := range rootTemplateFiles {
 		if err := r.copyFileIfExists(r.path(r.Config.TemplateDirectory, file), r.path(file)); err != nil {
 			return err
 		}
+	}
+	if err := r.gitAdd(context.Background(), rootTemplateFiles...); err != nil {
+		return err
 	}
 
 	if templateVersion != "" {
