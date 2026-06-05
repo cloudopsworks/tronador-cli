@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -274,6 +275,65 @@ func TestCopyIssueTemplatesOnlyCopiesMissingImplementationForms(t *testing.T) {
 	}
 }
 
+func TestVersionedTemplateCommitIncludesRootTemplateFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1\n")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".golang"), "")
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "build.yml"), "name: old\n")
+	mustWrite(t, filepath.Join(dir, "Makefile"), "old\n")
+	mustWrite(t, filepath.Join(dir, ".gitignore"), "old\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: new\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "new\n")
+	mustWrite(t, filepath.Join(dir, ".template", "AGENTS.md"), "agents\n")
+	mustWrite(t, filepath.Join(dir, ".template", "CLAUDE.md"), "claude\n")
+	mustWrite(t, filepath.Join(dir, ".template", "README-TEMPLATE.md"), "readme template\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".helmignore"), "helm\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".dockerignore"), "docker\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v5.10.2\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	tmpl := Template{Name: "go", Versioned: true}
+	state := RepositoryState{
+		WorkDir:       dir,
+		BlueprintPath: ".cloudopsworks",
+		VersionFile:   ".cloudopsworks/_VERSION",
+		Version:       "v5.10.1",
+	}
+	if err := runner.applyVersionedTemplate(tmpl, state, "v5.10.2"); err != nil {
+		t.Fatalf("applyVersionedTemplate() error = %v", err)
+	}
+	if err := runner.Push(context.Background(), tmpl, state); err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+
+	tracked := runGit(t, dir, "ls-tree", "-r", "--name-only", "HEAD")
+	for _, path := range []string{"AGENTS.md", "CLAUDE.md", "README-TEMPLATE.md", ".helmignore", ".dockerignore"} {
+		if !strings.Contains(tracked, path+"\n") {
+			t.Fatalf("HEAD does not track copied template root file %s; tracked files:\n%s", path, tracked)
+		}
+	}
+	status := runGit(t, dir, "status", "--short")
+	for _, path := range []string{"AGENTS.md", "CLAUDE.md", "README-TEMPLATE.md", ".helmignore", ".dockerignore"} {
+		if strings.Contains(status, "?? "+path) {
+			t.Fatalf("copied template root file %s was left untracked; status:\n%s", path, status)
+		}
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -291,6 +351,17 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
 }
 
 type cloneWritingGitClient struct{}
