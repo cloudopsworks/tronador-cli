@@ -123,7 +123,7 @@
       "marker": ".terraform-module",
       "repository": "cloudopsworks/terraform-module-template",
       "merge": true,
-      "versioned": false,
+      "versioned": true,
       "cicd": false,
       "boilerplate": true,
       "boilerplatePathPre510": ".cloudopsworks",
