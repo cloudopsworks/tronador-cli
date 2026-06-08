@@ -27,6 +27,26 @@ func TestDefaultConfigIncludesFutureMigrationSlots(t *testing.T) {
 	}
 }
 
+func TestTerraformModuleTemplateConfigMatchesMakefileVersionedBehavior(t *testing.T) {
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	tmpl, ok := cfg.FindTemplate("terraform-module")
+	if !ok {
+		t.Fatalf("expected terraform-module template in default config")
+	}
+	if !tmpl.Versioned {
+		t.Fatalf("terraform-module template must be versioned so upgrades copy .cloudopsworks/_VERSION")
+	}
+	if tmpl.CICD {
+		t.Fatalf("terraform-module template must not enable CICD footer updates")
+	}
+	if !tmpl.Boilerplate {
+		t.Fatalf("terraform-module template must keep boilerplate handling enabled")
+	}
+}
+
 func TestDetectActiveTemplateUsesBlueprintLayout(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
@@ -197,6 +217,45 @@ func TestUpgradeVersionCleansTemplateWorkspaceAfterResolutionFailure(t *testing.
 	}
 	if exists(filepath.Join(dir, ".template")) {
 		t.Fatalf("UpgradeVersion() left .template workspace after failure")
+	}
+}
+
+func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v1.6.27\n")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".terraform-module"), "")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: new\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "new\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v1.6.31\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	tmpl, state, err := runner.ActiveTemplate()
+	if err != nil {
+		t.Fatalf("ActiveTemplate() error = %v", err)
+	}
+	templateVersion, err := runner.EvalTemplateVersion()
+	if err != nil {
+		t.Fatalf("EvalTemplateVersion() error = %v", err)
+	}
+	if tmpl.Versioned {
+		err = runner.applyVersionedTemplate(tmpl, state, templateVersion)
+	} else {
+		err = runner.applyUnversionedTemplate()
+	}
+	if err != nil {
+		t.Fatalf("apply template route error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks", "_VERSION")); got != "v1.6.31\n" {
+		t.Fatalf(".cloudopsworks/_VERSION = %q, want template version v1.6.31", got)
 	}
 }
 
