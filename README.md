@@ -13,7 +13,7 @@
 # tronador-cli [![Latest Release](https://img.shields.io/github/release/cloudopsworks/tronador-cli.svg?style=for-the-badge)](https://github.com/cloudopsworks/tronador-cli/releases/latest) [![Last Updated](https://img.shields.io/github/last-commit/cloudopsworks/tronador-cli.svg?style=for-the-badge)](https://github.com/cloudopsworks/tronador-cli/commits)
 
 
-A cross-platform CLI for CloudOps Works Tronador workflows, AWS resource automation, and repository template lifecycle management.
+A cross-platform CLI for CloudOps Works Tronador workflows, AWS resource automation, IaC module auditing, and repository template lifecycle management.
 
 
 ---
@@ -41,19 +41,59 @@ It's 100% Open Source and licensed under the [APACHE2](LICENSE).
 
 ## Introduction
 
-- **AWS resource automation**: Apply consistent organization metadata, remediate S3/EC2 resources, copy secrets, and remove default VPCs.
-- **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador-cli repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
+- **AWS resource automation**: Apply consistent organization metadata, remediate S3/EC2 security controls, copy Secrets Manager secrets, and remove default VPCs.
+- **Infrastructure-as-code module auditing**: Run `tronador iac module` in `.cloudopsworks/.iac` workspaces to report Terragrunt module source pins, detect missing Terraform `git::` prefixes, and optionally update module refs safely.
+- **Binary naming**: Published release automation produces the clean `tronador` executable; plain local `go build` from this repository still emits `tronador-cli` unless `-o tronador` is passed.
+- **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
+- **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), and [repository lifecycle commands](docs/repos-command.md).
 - **Config-driven upgrade paths**: Repository templates and migration plans are loaded from JSON, so future upgrade paths such as `5.11` and `5.12` can be added without rewriting command dispatch code.
-- **Release packages**: GoReleaser publishes archives plus native Linux packages (`.deb`, `.rpm`, `.apk`), Homebrew casks, Chocolatey packages, and shell/PowerShell installers from the same release pipeline.
+- **Release packages**: GoReleaser publishes archives plus native Linux packages (`.deb`, `.rpm`, `.apk`), Homebrew casks, Chocolatey packages, and shell/PowerShell installers from the same release pipeline; release package names remain `tronador-cli` while the executable is `tronador`.
 - **Cross-platform support**: Linux, macOS, Windows, and FreeBSD builds are produced from a static `CGO_ENABLED=0` binary.
 
 ## Usage
 
 
 
+### Command Documentation
+
+Start with the command index in [docs/commands.md](docs/commands.md). Dedicated operator guides are available for:
+
+- [AWS command](docs/aws-command.md) — tagging, secret copy, default VPC removal, and security remediation.
+- [IaC command](docs/iac-command.md) — `.cloudopsworks/.iac`-guarded module source version checks and updates.
+- [Repos command](docs/repos-command.md) — repository template lifecycle workflows.
+
+### Binary Names
+
+Published releases expose the executable as `tronador`. The repository and package name remains `tronador-cli`. A plain local `go build` from the repository root creates `./tronador-cli`; use `go build -o tronador .` when you want a local binary that matches release automation.
+
+Global flags available from the root command:
+
+- `--dry-run` — show supported changes without applying them.
+- `-v, --verbose` — enable verbose output.
+
+### AWS Commands
+
+`tronador aws` provides AWS automation subcommands. All AWS subcommands share profile, region, and assume-role flags documented in [docs/aws-command.md](docs/aws-command.md).
+
+- `aws tag` — tag supported AWS resources with organization metadata.
+- `aws copysecret` — copy Secrets Manager secrets within an account, across regions, or across accounts.
+- `aws remove-default-vpc` — remove default VPCs across regions, with optional region exclusions.
+- `aws remediation s3` — enforce SSL/TLS-only S3 bucket access.
+- `aws remediation ec2` — remove unrestricted rules from default security groups.
+
+### Infrastructure-as-Code Commands
+
+`tronador iac` commands run only when `--workdir` contains `.cloudopsworks/.iac`.
+
+- `iac module` — scan `terragrunt.hcl` files for direct GitHub module sources with `?ref=` pins, report latest semantic-version tags, flag missing `git::` prefixes, and optionally mutate eligible sources.
+- Compatibility aliases: `iac module-versions` and `iac module_versions`.
+- `--path` limits module discovery without changing marker validation; relative paths resolve under `--workdir` and paths outside `--workdir` are rejected.
+
+See [docs/iac-command.md](docs/iac-command.md) for supported source forms, mutation flags, dry-run behavior, and CI reporting options.
+
 ### Repository Template Commands
 
-`tronador-cli repos` ports the supported public Tronador `make repos/*` targets into the CLI. `tronador-cli repo` is an alias for the same command tree.
+`tronador repos` ports the supported public Tronador `make repos/*` targets into the CLI. `tronador repo` is an alias for the same command tree.
 
 - `repos available` / `repos avail` — list latest compatible template tags.
 - `repos template init` and `repos template <kind>` — pull configured template repositories.
@@ -71,6 +111,11 @@ propagated.
 The command uses the embedded JSON catalog at `internal/repos/default_config.json` by default. Override it with `--config path/to/repos-config.json` when testing new repository types or future migration plans.
 
 For the full command mapping and architecture notes, see [docs/repos-command.md](docs/repos-command.md).
+
+### Version and Completion
+
+- `tronador version` — print the release binary version.
+- `tronador completion <shell>` — generate Cobra shell completion scripts.
 
 ### Make Command Support
 
@@ -97,6 +142,12 @@ make clean
 ```bash
 # Build for current platform
 make build
+
+# Plain Go source build; outputs ./tronador-cli because of the module directory name
+go build .
+
+# Local build matching the release executable name
+go build -o tronador .
 
 # Build for all platforms
 make build-all
@@ -135,8 +186,9 @@ goreleaser release --snapshot --clean --skip=before --skip=publish --skip=sign
 
 For installed binaries:
 
-- AWS credentials with the required permissions for `tronador-cli aws ...` commands.
-- GitHub authentication through `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth login` when running `tronador-cli repos` commands that query GitHub or set repository defaults.
+- AWS credentials with the required permissions for `tronador aws ...` commands.
+- GitHub authentication through `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth login` when running `tronador repos` commands or `tronador iac module` version checks that query GitHub tags.
+- IaC workspaces must contain `.cloudopsworks/.iac` before `tronador iac ...` commands will run.
 
 For source builds:
 
@@ -168,7 +220,7 @@ sudo dnf install ./tronador-cli-<version>-1.<arch>.rpm
 sudo apk add --allow-untrusted ./tronador-cli_<version>_<arch>.apk
 ```
 
-Direct zip archives remain available for every supported OS/architecture through GitHub Releases.
+Direct zip archives remain available for every supported OS/architecture through GitHub Releases. Release archives contain the `tronador` executable.
 
 For development builds from source:
 
@@ -176,15 +228,37 @@ For development builds from source:
 git clone https://github.com/cloudopsworks/tronador-cli.git
 cd tronador-cli
 make build
+
+# Plain Go output name from this checkout
+go build .          # ./tronador-cli
+
+# Release-style executable name
+go build -o tronador .
 ```
 
 
 ## Examples
 
+#### Audit IaC module sources
+
+```bash
+# Report module versions in an IaC workspace
+tronador iac module --workdir ../my-iac-workspace
+
+# Scan one environment path while marker validation remains at --workdir
+tronador iac module --workdir ../my-iac-workspace --path env/dev
+
+# Preview latest ref upgrades and missing git:: prefix normalization
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --dry-run
+
+# Apply eligible ref upgrades and git:: prefix fixes
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade
+```
+
 #### Tag AWS Resources
 
 ```bash
-tronador-cli aws tag \
+tronador aws tag \
   --organization "MyOrg" \
   --organization-unit "DevOps" \
   --application-name "WebApp" \
@@ -192,33 +266,61 @@ tronador-cli aws tag \
   --target resources
 ```
 
+#### Copy an AWS secret
+
+```bash
+# Copy within the same account and region
+tronador aws copysecret --source my-secret --dest my-secret-copy
+
+# Copy to another region
+tronador aws copysecret --source my-secret --dest my-secret-copy --dest-region us-west-2
+```
+
 #### Remove Default VPCs
 
 ```bash
-tronador-cli aws remove-default-vpc \
+tronador aws remove-default-vpc \
   --exclude-regions "us-west-2,eu-west-1"
+```
+
+#### Remediate AWS security controls
+
+```bash
+# Preview S3 SSL/TLS enforcement policy changes
+tronador aws remediation s3 --dry-run
+
+# Preview EC2 default security group remediation in a region
+tronador aws remediation ec2 --region us-east-1 --dry-run
 ```
 
 #### Upgrade repository templates
 
 ```bash
 # Show available template versions for the detected repository type
-tronador-cli repos available --workdir ../my-service
+tronador repos available --workdir ../my-service
 
 # Run the default full upgrade workflow using the latest tag in the current major/minor line
-tronador-cli repos upgrade --workdir ../my-service
+tronador repos upgrade --workdir ../my-service
 
 # Run the same full workflow against an explicit tag or branch
-tronador-cli repos upgrade v5.10.12 --workdir ../my-service
+tronador repos upgrade v5.10.12 --workdir ../my-service
 
 # Run the same full workflow against the latest tag in the current major line
-tronador-cli repos upgrade major --workdir ../my-service
+tronador repos upgrade major --workdir ../my-service
 
 # Run the same full workflow from the template repository master branch tip
-tronador-cli repos upgrade master --workdir ../my-service
+tronador repos upgrade master --workdir ../my-service
 ```
 
 `repos upgrade` intentionally exposes a single public workflow. Internal Makefile stages such as fetch, eval, migrate, and stack are handled inside the command instead of being separate subcommands. Public workflows clean up their temporary `.template` checkout when they finish or fail.
+
+#### Version and help
+
+```bash
+tronador version
+tronador iac module --help
+tronador aws remediation --help
+```
 
 
 
