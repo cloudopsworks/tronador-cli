@@ -24,6 +24,8 @@ name remains `tronador-cli`; a plain `go build` from this checkout emits
 | `tronador aws` | AWS tagging, secret copy, default VPC cleanup, and remediation helpers. | [AWS command](aws-command.md) |
 | `tronador iac` | Infrastructure-as-code helpers guarded by `.cloudopsworks/.iac`. | [IaC command](iac-command.md) |
 | `tronador repos` / `repo` | Repository template lifecycle workflows ported from Tronador Make targets. | [Repos command](repos-command.md) |
+| `tronador readme` | Generate, lint, initialize, and manage README generator assets. | [README/docs command](readme-docs-command.md) |
+| `tronador docs` | Generate Make target docs, Terraform docs, and copyright headers. | [README/docs command](readme-docs-command.md) |
 | `tronador version` | Print the release binary version. | This page |
 | `tronador completion` | Generate shell completion scripts from Cobra. | Cobra-generated help |
 
@@ -47,4 +49,20 @@ shell-specific target:
 tronador completion --help
 tronador completion zsh --help
 tronador completion bash --help
+```
+
+## `readme` and `docs`
+
+README and documentation generation commands are documented in
+[README/docs command](readme-docs-command.md).
+
+Quick examples:
+
+```bash
+tronador readme init --workdir .
+tronador readme assets sync --project --workdir .
+tronador readme build --workdir .
+tronador readme lint --workdir .
+tronador docs targets --workdir . --all
+tronador docs terraform --workdir ./terraform-module
 ```

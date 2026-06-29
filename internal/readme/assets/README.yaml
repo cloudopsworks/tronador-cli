@@ -1,0 +1,45 @@
+name: <project name>
+
+#logo: logo/logo.jpg
+badges:
+  - name: Latest Release
+    image: https://img.shields.io/github/release/<owner/repo>.svg?style=for-the-badge
+    url: https://github.com/<owner/repo>/releases/latest
+  - name: Last Updated
+    image: https://img.shields.io/github/last-commit/<owner/repo>.svg?style=for-the-badge
+    url: https://github.com/<owner/repo>/commits
+
+license: "APACHE2"
+
+copyrights:
+  - name: "Cloud Ops Works LLC"
+    url: "https://cloudopsworks.co"
+    year: "2021"
+
+github_repo: <owner/repo>
+
+
+description: |-
+  <description>.
+
+# Introduction to the project
+introduction: |-
+#  This is an introduction.
+
+# How to use this project
+usage: |-
+
+# Example usage
+examples: |-
+
+# How to get started quickly
+quickstart: |-
+
+# Uncomment to include terraform generated docs (optional)
+#include:
+#  - "docs/targets.md"
+#  - "docs/terraform.md"
+
+contributors:
+  - name: "<contributor name>"
+    github: "<github id>"
