@@ -12,13 +12,13 @@ import (
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "tronador-cli",
-	Short: "A CLI tool for AWS resource management",
-	Long: `Tronador CLI is a command-line tool for managing AWS resources.
-It provides functionality for tagging AWS resources with organization metadata.
+	Short: "A CLI tool for CloudOps Works Tronador workflows",
+	Long: `Tronador CLI is a command-line tool for CloudOps Works Tronador workflows.
+It provides AWS resource automation, infrastructure-as-code helpers, repository
+template lifecycle workflows, and README/documentation generation commands.
 
-This tool supports various AWS resource types including EC2 instances, S3 buckets,
-VPCs, IAM roles, and many others with both Resource Groups Tagging API and
-native service discovery fallback mechanisms.`,
+Installed releases expose the executable as tronador while this repository and
+Go module remain named tronador-cli.`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

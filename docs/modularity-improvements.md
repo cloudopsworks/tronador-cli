@@ -69,7 +69,7 @@ make build-all
 ### Enhanced CLI Commands:
 ```bash
 # Tag AWS resources with consistent configuration
-tronador-cli aws tag --organization "MyOrg" --organization-unit "DevOps" --application-name "WebApp" --application-type "Service"
+tronador aws tag --organization "MyOrg" --organization-unit "DevOps" --application-name "WebApp" --application-type "Service"
 
 # Remove default VPCs with consistent configuration
-tronador-cli aws remove-default-vpc --exclude-regions "us-west-2,eu-west-1"
+tronador aws remove-default-vpc --exclude-regions "us-west-2,eu-west-1"
