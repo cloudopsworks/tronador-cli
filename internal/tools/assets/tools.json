@@ -3,7 +3,7 @@
     {
       "name": "gomplate",
       "executable": "gomplate",
-      "default_version": "3.10.0",
+      "default_version": "5.1.0",
       "version_env_vars": ["TRONADOR_GOMPLATE_VERSION", "GOMPLATE_VERSION"],
       "url_template": "https://github.com/hairyhenderson/gomplate/releases/download/v{version}/gomplate_{os}-{arch}{ext}",
       "format": "binary"
@@ -11,7 +11,7 @@
     {
       "name": "gh",
       "executable": "gh",
-      "default_version": "2.80.0",
+      "default_version": "2.95.0",
       "version_env_vars": ["TRONADOR_GH_VERSION", "GH_VERSION"],
       "format": "tar.gz",
       "archive_binary_path": "*/bin/gh",
@@ -37,7 +37,7 @@
     {
       "name": "gitversion",
       "executable": "gitversion",
-      "default_version": "6.4.0",
+      "default_version": "6.7.0",
       "version_env_vars": ["TRONADOR_GITVERSION_VERSION", "GITVERSION_VERSION"],
       "format": "tar.gz",
       "archive_binary_path": "gitversion",
@@ -59,7 +59,7 @@
     {
       "name": "yq",
       "executable": "yq",
-      "default_version": "4.47.2",
+      "default_version": "4.53.3",
       "version_env_vars": ["TRONADOR_YQ_VERSION", "YQ_VERSION"],
       "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}",
       "format": "binary"
