@@ -1,0 +1,68 @@
+{
+  "tools": [
+    {
+      "name": "gomplate",
+      "executable": "gomplate",
+      "default_version": "5.1.0",
+      "version_env_vars": ["TRONADOR_GOMPLATE_VERSION", "GOMPLATE_VERSION"],
+      "url_template": "https://github.com/hairyhenderson/gomplate/releases/download/v{version}/gomplate_{os}-{arch}{ext}",
+      "format": "binary"
+    },
+    {
+      "name": "gh",
+      "executable": "gh",
+      "default_version": "2.95.0",
+      "version_env_vars": ["TRONADOR_GH_VERSION", "GH_VERSION"],
+      "format": "tar.gz",
+      "archive_binary_path": "*/bin/gh",
+      "platform_overrides": {
+        "darwin": {
+          "url_template": "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_macOS_{arch}.zip",
+          "format": "zip"
+        },
+        "linux": {
+          "url_template": "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_linux_{arch}.tar.gz",
+          "format": "tar.gz"
+        }
+      }
+    },
+    {
+      "name": "boilerplate",
+      "executable": "boilerplate",
+      "default_version": "0.15.0",
+      "version_env_vars": ["TRONADOR_BOILERPLATE_VERSION", "BOILERPLATE_VERSION"],
+      "url_template": "https://github.com/gruntwork-io/boilerplate/releases/download/v{version}/boilerplate_{os}_{arch}{ext}",
+      "format": "binary"
+    },
+    {
+      "name": "gitversion",
+      "executable": "gitversion",
+      "default_version": "6.7.0",
+      "version_env_vars": ["TRONADOR_GITVERSION_VERSION", "GITVERSION_VERSION"],
+      "format": "tar.gz",
+      "archive_binary_path": "gitversion",
+      "platform_overrides": {
+        "darwin/amd64": {
+          "url_template": "https://github.com/gittools/gitversion/releases/download/{version}/gitversion-osx-x64-{version}.tar.gz"
+        },
+        "darwin/arm64": {
+          "url_template": "https://github.com/gittools/gitversion/releases/download/{version}/gitversion-osx-arm64-{version}.tar.gz"
+        },
+        "linux/amd64": {
+          "url_template": "https://github.com/gittools/gitversion/releases/download/{version}/gitversion-linux-x64-{version}.tar.gz"
+        },
+        "linux/arm64": {
+          "url_template": "https://github.com/gittools/gitversion/releases/download/{version}/gitversion-linux-arm64-{version}.tar.gz"
+        }
+      }
+    },
+    {
+      "name": "yq",
+      "executable": "yq",
+      "default_version": "4.53.3",
+      "version_env_vars": ["TRONADOR_YQ_VERSION", "YQ_VERSION"],
+      "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}",
+      "format": "binary"
+    }
+  ]
+}
