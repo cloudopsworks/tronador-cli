@@ -149,7 +149,7 @@ func (r *Runner) Build(ctx context.Context) error {
 		fmt.Fprintf(r.Opts.Stdout, "DRY-RUN: %s %s\n", gomplate, strings.Join(args, " "))
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, gomplate, args...)
+	cmd := exec.CommandContext(ctx, gomplate, args...) // nosemgrep: go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
 	cmd.Dir = r.Opts.WorkDir
 	cmd.Env = env
 	cmd.Stdout = r.Opts.Stdout
