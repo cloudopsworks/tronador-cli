@@ -230,6 +230,7 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v1.6.27\n")
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".terraform-module"), "")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: new\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates: []\n")
 	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v1.6.31\n")
@@ -256,6 +257,9 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks", "_VERSION")); got != "v1.6.31\n" {
 		t.Fatalf(".cloudopsworks/_VERSION = %q, want template version v1.6.31", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates: []\n" {
+		t.Fatalf("dependabot config = %q, want template configuration", got)
 	}
 }
 
@@ -331,6 +335,110 @@ func TestCopyIssueTemplatesOnlyCopiesMissingImplementationForms(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(dir, ".github", "PULL_REQUEST_TEMPLATE.md")); got != "## Local PR\n" {
 		t.Fatalf("PULL_REQUEST_TEMPLATE.md was overwritten: %q", got)
+	}
+}
+
+func TestCopyDependabotIfExistsCopiesMissingConfiguration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates:\n  - package-ecosystem: gomod\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyDependabotIfExists(context.Background()); err != nil {
+		t.Fatalf("copyDependabotIfExists() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates:\n  - package-ecosystem: gomod\n" {
+		t.Fatalf("copied dependabot config = %q", got)
+	}
+	tracked := runGit(t, dir, "diff", "--cached", "--name-only")
+	if !strings.Contains(tracked, ".github/dependabot.yml\n") {
+		t.Fatalf("copied dependabot config was not staged: %s", tracked)
+	}
+}
+
+func TestCopyDependabotIfExistsPreservesExistingConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "template\n")
+	mustWrite(t, filepath.Join(dir, ".github", "dependabot.yml"), "local\n\x00")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyDependabotIfExists(context.Background()); err != nil {
+		t.Fatalf("copyDependabotIfExists() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "local\n\x00" {
+		t.Fatalf("existing dependabot config changed: %q", got)
+	}
+}
+
+func TestCopyDependabotIfExistsSkipsMissingTemplateConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyDependabotIfExists(context.Background()); err != nil {
+		t.Fatalf("copyDependabotIfExists() error = %v", err)
+	}
+	if exists(filepath.Join(dir, ".github", "dependabot.yml")) {
+		t.Fatal("dependabot config was created without a template source")
+	}
+}
+
+func TestCopyDependabotIfExistsReportsCopyFailureWithoutPartialOutput(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "template\n")
+	if err := os.WriteFile(filepath.Join(dir, ".github"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write blocking .github path: %v", err)
+	}
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	err = runner.copyDependabotIfExists(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "copy .github/dependabot.yml") {
+		t.Fatalf("copyDependabotIfExists() error = %v, want copy failure", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github")); got != "not a directory" {
+		t.Fatalf("blocking path changed after copy failure: %q", got)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".github", ".tronador-copy-*"))
+	if err != nil {
+		t.Fatalf("glob temporary files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("copy failure left temporary files: %v", matches)
+	}
+}
+
+func TestUnversionedTemplateUpgradeRouteCopiesDependabotConfiguration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: build\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates: []\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "all:\n\t@true\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.applyUnversionedTemplate(); err != nil {
+		t.Fatalf("applyUnversionedTemplate() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates: []\n" {
+		t.Fatalf("dependabot config = %q", got)
 	}
 }
 

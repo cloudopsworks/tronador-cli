@@ -425,6 +425,9 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.copyDependabotIfExists(context.Background()); err != nil {
+		return err
+	}
 	for _, file := range []string{"Makefile", ".gitignore"} {
 		if err := r.copyFile(r.path(r.Config.TemplateDirectory, file), r.path(file)); err != nil {
 			return err
@@ -503,6 +506,9 @@ func (r *Runner) applyUnversionedTemplate() error {
 	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.copyDependabotIfExists(context.Background()); err != nil {
+		return err
+	}
 	if err := r.gitAdd(context.Background(), ".github/workflows"); err != nil {
 		return err
 	}
@@ -575,6 +581,24 @@ func (r *Runner) copyPullRequestTemplateIfExists(ctx context.Context) error {
 		return err
 	}
 	return r.gitAdd(ctx, dst)
+}
+
+func (r *Runner) copyDependabotIfExists(ctx context.Context) error {
+	const rel = ".github/dependabot.yml"
+	src := r.path(r.Config.TemplateDirectory, rel)
+	if !exists(src) {
+		return nil
+	}
+	fmt.Fprintln(r.Opts.Stdout, "Copying missing Dependabot configuration")
+	dst := r.path(rel)
+	if pathExists(dst) {
+		fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", rel)
+		return nil
+	}
+	if err := r.copyFileAtomically(src, dst); err != nil {
+		return fmt.Errorf("copy %s: %w", rel, err)
+	}
+	return r.gitAdd(ctx, rel)
 }
 
 // reservedIssueTemplatePrefixes lists the filename prefixes that are
