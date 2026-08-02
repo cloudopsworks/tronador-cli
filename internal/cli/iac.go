@@ -12,6 +12,8 @@ var (
 	iacWorkDir               string
 	iacModuleVersionsPath    string
 	iacModuleVersionsUpgrade bool
+	iacModuleVersionsAlpha   bool
+	iacModuleVersionsBeta    bool
 	iacModuleVersionsFixGit  bool
 	iacModuleVersionsReport  bool
 	iacModuleVersionsComment string
@@ -50,6 +52,8 @@ When --path is set, module discovery starts there without changing --workdir.`,
 				WorkDir:             iacWorkDir,
 				SearchPath:          iacModuleVersionsPath,
 				Upgrade:             iacModuleVersionsUpgrade,
+				AllowAlpha:          iacModuleVersionsAlpha,
+				AllowBeta:           iacModuleVersionsBeta,
 				FixPrefix:           iacModuleVersionsFixGit,
 				DryRun:              commandDryRun(cmd),
 				ReportGitHubActions: iacModuleVersionsReport,
@@ -64,6 +68,8 @@ When --path is set, module discovery starts there without changing --workdir.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&iacModuleVersionsUpgrade, "upgrade", "u", false, "Update eligible ?ref= pins to latest semantic version tags and fix missing git:: prefixes")
+	cmd.Flags().BoolVar(&iacModuleVersionsAlpha, "alpha", false, "Allow alpha prerelease tags when selecting an update")
+	cmd.Flags().BoolVar(&iacModuleVersionsBeta, "beta", false, "Allow beta prerelease tags when selecting an update")
 	cmd.Flags().BoolVar(&iacModuleVersionsFixGit, "fix-prefix", false, "Add missing git:: prefixes to eligible GitHub HTTPS module sources without changing refs")
 	cmd.Flags().StringVarP(&iacModuleVersionsPath, "path", "p", "", "Module discovery path relative to --workdir, or an in-workdir absolute path")
 	cmd.Flags().BoolVarP(&iacModuleVersionsReport, "report-ghaction", "r", false, "Emit GitHub Actions warning annotations for findings")
