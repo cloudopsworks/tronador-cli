@@ -1,6 +1,7 @@
 package repos
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -115,6 +116,64 @@ func (r *Runner) copyFileAtomically(src, dst string) error {
 	tmpPath = ""
 	cleanup = false
 	return nil
+}
+
+// writeFileIfChanged atomically writes content when it differs from the
+// existing file. It returns whether the destination bytes changed.
+func (r *Runner) writeFileIfChanged(path string, content []byte, mode os.FileMode) (bool, error) {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return false, fmt.Errorf("refusing to replace symlink: %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+
+	existing, err := os.ReadFile(path)
+	if err == nil {
+		if bytes.Equal(existing, content) {
+			return false, nil
+		}
+		if info, statErr := os.Stat(path); statErr != nil {
+			return false, statErr
+		} else {
+			mode = info.Mode().Perm()
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+
+	if r.Opts.DryRun {
+		fmt.Fprintf(r.Opts.Stdout, "DRY-RUN write %s\n", path)
+		return true, nil
+	}
+
+	parent := filepath.Dir(path)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return false, err
+	}
+	tmp, err := os.CreateTemp(parent, ".tronador-write-*")
+	if err != nil {
+		return false, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(content); err != nil {
+		_ = tmp.Close()
+		return false, err
+	}
+	if err := tmp.Chmod(mode.Perm()); err != nil {
+		_ = tmp.Close()
+		return false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func mkdirAllTracked(path string, mode os.FileMode) ([]string, error) {
