@@ -60,7 +60,16 @@ store implementation issue forms with a disabled suffix such as
 implementation repository while still skipping reserved `98_*` and `99_*`
 template-only issue forms. `.github/dependabot.yml` follows the same
 non-destructive rule: it is copied when present in the template and absent from
-the implementation repository, and is left unchanged when already present.
+the implementation repository, and is left unchanged when already present. The
+repository's `auto-assign.yml` configuration is also copied only when the
+destination is missing, so local reviewer and assignee settings are preserved.
+The template `.gitignore` is merged through a stable managed block delimited by
+`# BEGIN TRONADOR TEMPLATE MANAGED BLOCK` and
+`# END TRONADOR TEMPLATE MANAGED BLOCK`. A valid existing block is replaced with
+the current template content while all bytes outside it remain unchanged. An
+unmarked or malformed destination is treated entirely as user-owned and receives
+a new managed block appended to it. Unchanged merge results are not rewritten or
+staged.
 
 The Makefile's `repos/upgrade/fetch`, `repos/upgrade/eval`,
 `repos/upgrade/stack`, and `repos/migrate/*` targets are internal workflow

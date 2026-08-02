@@ -109,7 +109,10 @@ See [docs/iac-command.md](docs/iac-command.md) for supported source forms, mutat
 including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
 when missing; `.github/dependabot.yml` is copied only when the template has it
 and the implementation repository does not; reserved `98_*` and `99_*` template-
-only issue forms are never propagated.
+only issue forms are never propagated. Existing `auto-assign.yml` configuration
+is preserved. Template `.gitignore` content is managed in a marker-delimited
+block while user content outside the block is preserved; an unmarked or malformed
+file is treated as user-owned and receives a fresh managed block.
 
 The command uses the embedded JSON catalog at `internal/repos/default_config.json` by default. Override it with `--config path/to/repos-config.json` when testing new repository types or future migration plans.
 
