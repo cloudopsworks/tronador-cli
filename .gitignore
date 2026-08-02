@@ -62,3 +62,6 @@ tronador/
 .omc/
 .omx/
 .ai/
+
+#### Tronador CLI ###
+tronador-cli
