@@ -107,8 +107,9 @@ See [docs/iac-command.md](docs/iac-command.md) for supported source forms, mutat
 
 `repos upgrade` preserves implementation-owned GitHub templates: issue templates
 including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
-when missing; reserved `98_*` and `99_*` template-only issue forms are never
-propagated.
+when missing; `.github/dependabot.yml` is copied only when the template has it
+and the implementation repository does not; reserved `98_*` and `99_*` template-
+only issue forms are never propagated.
 
 The command uses the embedded JSON catalog at `internal/repos/default_config.json` by default. Override it with `--config path/to/repos-config.json` when testing new repository types or future migration plans.
 
@@ -276,6 +277,9 @@ tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --dry
 
 # Apply eligible ref upgrades and git:: prefix fixes
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade
+
+# Allow alpha and beta prereleases when selecting updates
+tronador iac module --workdir ../my-iac-workspace --upgrade --alpha --beta
 ```
 
 #### Tag AWS Resources
