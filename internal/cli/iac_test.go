@@ -39,3 +39,12 @@ func TestIACModuleKeepsModuleVersionsAliases(t *testing.T) {
 		t.Fatalf("aliases did not resolve to primary command")
 	}
 }
+
+func TestIACModuleExposesPrereleaseChannelFlags(t *testing.T) {
+	cmd := newIACModuleVersionsCommand()
+	for _, name := range []string{"alpha", "beta"} {
+		if cmd.Flag(name) == nil {
+			t.Fatalf("iac module flag --%s is missing", name)
+		}
+	}
+}
