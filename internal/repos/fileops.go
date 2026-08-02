@@ -47,6 +47,114 @@ func (r *Runner) copyFile(src, dst string) error {
 	return closeErr
 }
 
+func (r *Runner) copyFileAtomically(src, dst string) error {
+	if r.Opts.DryRun {
+		fmt.Fprintf(r.Opts.Stdout, "DRY-RUN cp %s %s\n", src, dst)
+		return nil
+	}
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("copyFile source is a directory: %s", src)
+	}
+
+	parent := filepath.Dir(dst)
+	createdDirs, err := mkdirAllTracked(parent, 0o755)
+	if err != nil {
+		return err
+	}
+	cleanup := true
+	defer func() {
+		if !cleanup {
+			return
+		}
+		removeEmptyDirs(createdDirs)
+	}()
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(parent, ".tronador-copy-*")
+	if err != nil {
+		_ = in.Close()
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	_, copyErr := io.Copy(tmp, in)
+	inCloseErr := in.Close()
+	if copyErr != nil {
+		_ = tmp.Close()
+		return copyErr
+	}
+	if inCloseErr != nil {
+		_ = tmp.Close()
+		return inCloseErr
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if pathExists(dst) {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return err
+	}
+	tmpPath = ""
+	cleanup = false
+	return nil
+}
+
+func mkdirAllTracked(path string, mode os.FileMode) ([]string, error) {
+	missing := make([]string, 0)
+	current := filepath.Clean(path)
+	for {
+		info, err := os.Stat(current)
+		if err == nil {
+			if !info.IsDir() {
+				return nil, fmt.Errorf("path is not a directory: %s", current)
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		missing = append(missing, current)
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	if err := os.MkdirAll(path, mode); err != nil {
+		return nil, err
+	}
+	return missing, nil
+}
+
+func removeEmptyDirs(paths []string) {
+	for index := len(paths) - 1; index >= 0; index-- {
+		_ = os.Remove(paths[index])
+	}
+}
+
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
 func (r *Runner) copyDirIfExists(src, dst string) error {
 	if !exists(src) {
 		return nil

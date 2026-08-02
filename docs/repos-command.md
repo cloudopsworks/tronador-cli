@@ -58,7 +58,9 @@ repository does not already have the destination file. Template repositories may
 store implementation issue forms with a disabled suffix such as
 `01_bug_report.yml.disabled`; the upgrade strips that suffix when copying into an
 implementation repository while still skipping reserved `98_*` and `99_*`
-template-only issue forms.
+template-only issue forms. `.github/dependabot.yml` follows the same
+non-destructive rule: it is copied when present in the template and absent from
+the implementation repository, and is left unchanged when already present.
 
 The Makefile's `repos/upgrade/fetch`, `repos/upgrade/eval`,
 `repos/upgrade/stack`, and `repos/migrate/*` targets are internal workflow
