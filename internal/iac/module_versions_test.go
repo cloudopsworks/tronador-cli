@@ -25,6 +25,15 @@ type discardCommenter struct{}
 
 func (discardCommenter) CommentPR(context.Context, string, string, string) error { return nil }
 
+type recordingCommenter struct {
+	body string
+}
+
+func (c *recordingCommenter) CommentPR(_ context.Context, _, _, body string) error {
+	c.body = body
+	return nil
+}
+
 func TestModuleVersionsRequiresIACMarker(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "env", "terragrunt.hcl"), `terraform {
@@ -51,7 +60,7 @@ func TestReportModeAcceptsMissingGitPrefixWithoutMutating(t *testing.T) {
 	runner := newTestRunner(t, ModuleVersionsOptions{
 		WorkDir:   dir,
 		Stdout:    &out,
-		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.1.0"}},
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.1.0", "v2.0.0"}},
 	})
 	if err := runner.ModuleVersions(context.Background()); err != nil {
 		t.Fatalf("ModuleVersions() error = %v", err)
@@ -60,10 +69,173 @@ func TestReportModeAcceptsMissingGitPrefixWithoutMutating(t *testing.T) {
 		t.Fatalf("report mode mutated file:\n%s", got)
 	}
 	output := out.String()
-	for _, want := range []string{"Missing git:: prefix", "outdated", "Latest:  v1.1.0"} {
+	for _, want := range []string{"Missing git:: prefix", "Next patch: none", "Next minor: v1.1.0", "Next major: v2.0.0"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestUpgradeSelectsRequestedReleaseTier(t *testing.T) {
+	tests := []struct {
+		name  string
+		minor bool
+		major bool
+		want  string
+	}{
+		{name: "patch by default", want: "v1.2.9"},
+		{name: "minor", minor: true, want: "v1.4.2"},
+		{name: "major", major: true, want: "v3.1.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := newIACWorkspace(t)
+			path := filepath.Join(dir, "env", "terragrunt.hcl")
+			writeFile(t, path, `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3"
+}
+`)
+
+			runner := newTestRunner(t, ModuleVersionsOptions{
+				WorkDir:   dir,
+				Upgrade:   true,
+				Minor:     tt.minor,
+				Major:     tt.major,
+				TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.2.4", "v1.2.9", "v1.3.0", "v1.4.2", "v2.0.0", "v3.1.0"}},
+			})
+			if err := runner.ModuleVersions(context.Background()); err != nil {
+				t.Fatalf("ModuleVersions() error = %v", err)
+			}
+			if got := ParseModuleSource(sourceFromTestFile(t, path)).Ref; got != tt.want {
+				t.Fatalf("updated ref = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentPrereleaseCanPromoteToStablePatch(t *testing.T) {
+	dir := newIACWorkspace(t)
+	path := filepath.Join(dir, "env", "terragrunt.hcl")
+	writeFile(t, path, `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3-alpha.1"
+}
+`)
+
+	runner := newTestRunner(t, ModuleVersionsOptions{
+		WorkDir:   dir,
+		Upgrade:   true,
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.2.3", "v1.3.0"}},
+	})
+	if err := runner.ModuleVersions(context.Background()); err != nil {
+		t.Fatalf("ModuleVersions() error = %v", err)
+	}
+	if got := ParseModuleSource(sourceFromTestFile(t, path)).Ref; got != "v1.2.3" {
+		t.Fatalf("updated ref = %s, want v1.2.3", got)
+	}
+}
+
+func TestDefaultPatchUpgradeDoesNotJumpToBroaderRelease(t *testing.T) {
+	dir := newIACWorkspace(t)
+	path := filepath.Join(dir, "env", "terragrunt.hcl")
+	original := `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3"
+}
+`
+	writeFile(t, path, original)
+
+	var out bytes.Buffer
+	runner := newTestRunner(t, ModuleVersionsOptions{
+		WorkDir:   dir,
+		Upgrade:   true,
+		Stdout:    &out,
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.3.0", "v2.0.0"}},
+	})
+	if err := runner.ModuleVersions(context.Background()); err != nil {
+		t.Fatalf("ModuleVersions() error = %v", err)
+	}
+	if got := readFile(t, path); got != original {
+		t.Fatalf("default patch upgrade jumped to a broader release:\n%s", got)
+	}
+	for _, want := range []string{"Next patch: none", "Next minor: v1.3.0", "Next major: v2.0.0", "no patch upgrade target"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestGitHubReportUsesSelectedTierTarget(t *testing.T) {
+	dir := newIACWorkspace(t)
+	path := filepath.Join(dir, "env", "terragrunt.hcl")
+	writeFile(t, path, `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3"
+}
+`)
+
+	var out bytes.Buffer
+	commenter := &recordingCommenter{}
+	runner := newTestRunner(t, ModuleVersionsOptions{
+		WorkDir:             dir,
+		Upgrade:             true,
+		Minor:               true,
+		ReportGitHubActions: true,
+		CommentPRNumber:     "7",
+		Stdout:              &out,
+		TagLister:           fakeTagLister{"cloudopsworks/terraform-module": {"v1.2.4", "v1.4.2", "v2.0.0"}},
+		Commenter:           commenter,
+	})
+	if err := runner.ModuleVersions(context.Background()); err != nil {
+		t.Fatalf("ModuleVersions() error = %v", err)
+	}
+	for _, want := range []string{"Latest: v1.4.2", "Next minor: v1.4.2"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if !strings.Contains(commenter.body, "Latest: v1.4.2") {
+		t.Fatalf("PR comment used the wrong target: %s", commenter.body)
+	}
+}
+
+func TestNonSemverRefIsNotAutomaticallyRewritten(t *testing.T) {
+	dir := newIACWorkspace(t)
+	path := filepath.Join(dir, "env", "terragrunt.hcl")
+	original := `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=main"
+}
+`
+	writeFile(t, path, original)
+
+	var out bytes.Buffer
+	runner := newTestRunner(t, ModuleVersionsOptions{
+		WorkDir:   dir,
+		Upgrade:   true,
+		Stdout:    &out,
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v2.0.0"}},
+	})
+	if err := runner.ModuleVersions(context.Background()); err != nil {
+		t.Fatalf("ModuleVersions() error = %v", err)
+	}
+	if got := readFile(t, path); got != original {
+		t.Fatalf("non-SemVer ref was rewritten:\n%s", got)
+	}
+	if !strings.Contains(out.String(), "not a semantic version") {
+		t.Fatalf("non-SemVer ref was not reported:\n%s", out.String())
+	}
+}
+
+func TestUpgradeTierOptionsValidation(t *testing.T) {
+	dir := newIACWorkspace(t)
+	for name, opts := range map[string]ModuleVersionsOptions{
+		"minor without upgrade": {WorkDir: dir, Minor: true},
+		"major without upgrade": {WorkDir: dir, Major: true},
+		"minor and major":       {WorkDir: dir, Upgrade: true, Minor: true, Major: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewRunner(opts); err == nil {
+				t.Fatal("NewRunner() succeeded for invalid upgrade tier options")
+			}
+		})
 	}
 }
 
@@ -78,14 +250,14 @@ func TestUpgradeUpdatesRefAndAddsMissingGitPrefix(t *testing.T) {
 	runner := newTestRunner(t, ModuleVersionsOptions{
 		WorkDir:   dir,
 		Upgrade:   true,
-		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.2.3"}},
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.0.1", "v1.2.3"}},
 	})
 	if err := runner.ModuleVersions(context.Background()); err != nil {
 		t.Fatalf("ModuleVersions() error = %v", err)
 	}
 	got := readFile(t, path)
 	want := `terraform {
-  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3"
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.0.1"
 }
 `
 	if got != want {
@@ -100,7 +272,7 @@ func TestUpgradeSelectsAllowedPrereleaseChannels(t *testing.T) {
 		allowBeta  bool
 		want       string
 	}{
-		{name: "stable only", want: "v1.2.1"},
+		{name: "stable only", want: "v1.2.0"},
 		{name: "alpha", allowAlpha: true, want: "v1.3.0-alpha.2"},
 		{name: "beta", allowBeta: true, want: "v1.3.0-beta.2"},
 		{name: "alpha and beta", allowAlpha: true, allowBeta: true, want: "v1.3.0-beta.2"},
@@ -118,6 +290,7 @@ func TestUpgradeSelectsAllowedPrereleaseChannels(t *testing.T) {
 			runner := newTestRunner(t, ModuleVersionsOptions{
 				WorkDir:    dir,
 				Upgrade:    true,
+				Minor:      true,
 				AllowAlpha: tt.allowAlpha,
 				AllowBeta:  tt.allowBeta,
 				TagLister: fakeTagLister{"cloudopsworks/terraform-module": {
@@ -429,4 +602,15 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("ReadFile(%s): %v", path, err)
 	}
 	return string(data)
+}
+
+func sourceFromTestFile(t *testing.T, path string) string {
+	t.Helper()
+	for _, line := range strings.Split(readFile(t, path), "\n") {
+		if source, ok := sourceFromLine(line); ok {
+			return source
+		}
+	}
+	t.Fatalf("no source found in %s", path)
+	return ""
 }

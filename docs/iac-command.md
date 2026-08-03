@@ -50,14 +50,27 @@ Unsupported or unparseable sources are reported instead of guessed.
 ### Version lookup
 
 For each supported GitHub source, the command lists repository tags through the
-GitHub API and selects the highest eligible semantic-version tag. Stable tags
-always qualify. Alpha and beta prerelease tags qualify only when enabled with
-`--alpha` or `--beta`; their optional dot-separated suffixes must be numeric.
-Other prerelease channels are ignored. SemVer precedence is used after
-filtering, so a later allowed prerelease can be selected over an older stable
-release, while a stable release beats a prerelease of the same version.
-Findings such as outdated refs or missing prefixes are report results and do not
-by themselves cause a non-zero exit code.
+GitHub API and calculates three independent upgrade targets:
+
+- **Patch**: the highest eligible tag in the current major and minor series.
+- **Minor**: the highest eligible tag in a later minor series within the current
+  major.
+- **Major**: the highest eligible tag in a later major series.
+
+Without `--upgrade`, all available targets are reported and files are not
+changed. With `-u, --upgrade`, the patch target is selected by default. Use
+`--minor` or `--major` with `--upgrade` to select the corresponding broader
+target; those flags are mutually exclusive. If the selected tier has no target,
+the command leaves the ref unchanged and reports any broader targets that are
+available.
+
+Stable tags always qualify. Alpha and beta prerelease tags qualify only when
+enabled with `--alpha` or `--beta`; their optional dot-separated suffixes must
+be numeric. Other prerelease channels are ignored. SemVer precedence is used
+after filtering, so a current prerelease can promote to a stable tag at the
+same version. Non-SemVer refs are reported but are never automatically
+rewritten. Findings such as outdated refs or missing prefixes are report results
+and do not by themselves cause a non-zero exit code.
 
 Operational failures, such as an invalid workdir, missing `.cloudopsworks/.iac`,
 out-of-scope `--path`, file read/write errors, or unhandled tag lookup failures,
@@ -69,7 +82,9 @@ return non-zero.
 | --- | --- |
 | `--workdir <dir>` | IaC workspace root. Defaults to `.` and must contain `.cloudopsworks/.iac`. |
 | `-p, --path <dir>` | Module discovery path relative to `--workdir`, or an absolute path inside `--workdir`. |
-| `-u, --upgrade` | Update eligible `?ref=` pins to the latest semantic-version tag and also add missing `git::` prefixes. |
+| `-u, --upgrade` | Update eligible `?ref=` pins to the highest eligible patch target (same major/minor) and also add missing `git::` prefixes. |
+| `--minor` | With `--upgrade`, select the highest eligible later minor target in the current major series. Mutually exclusive with `--major`. |
+| `--major` | With `--upgrade`, select the highest eligible later major target. Mutually exclusive with `--minor`. |
 | `--alpha` | Allow alpha prerelease tags when selecting an update. |
 | `--beta` | Allow beta prerelease tags when selecting an update. |
 | `--fix-prefix` | Add missing `git::` prefixes for eligible GitHub HTTPS sources without changing refs. |
@@ -85,23 +100,31 @@ Report module status for the whole workspace:
 tronador iac module --workdir ../my-iac-workspace
 ```
 
-Scan only one environment folder while still validating the workspace marker at
-`--workdir`:
+Report all available patch, minor, and major targets for one environment folder
+while still validating the workspace marker at `--workdir`:
 
 ```bash
 tronador iac module --workdir ../my-iac-workspace --path env/dev
 ```
 
-Preview ref upgrades and prefix fixes without writing files:
+Preview the default patch upgrades and prefix fixes without writing files:
 
 ```bash
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --dry-run
 ```
 
-Apply latest ref upgrades and normalize missing `git::` prefixes:
+Apply the default patch ref upgrades and normalize missing `git::` prefixes:
 
 ```bash
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade
+```
+
+Apply the latest eligible minor or major target instead of the default patch
+target:
+
+```bash
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --minor
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --major
 ```
 
 Allow alpha and beta prereleases when applying updates:
