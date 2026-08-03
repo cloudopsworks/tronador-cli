@@ -93,6 +93,55 @@ func TestUpgradeUpdatesRefAndAddsMissingGitPrefix(t *testing.T) {
 	}
 }
 
+func TestUpgradeSelectsAllowedPrereleaseChannels(t *testing.T) {
+	tests := []struct {
+		name       string
+		allowAlpha bool
+		allowBeta  bool
+		want       string
+	}{
+		{name: "stable only", want: "v1.2.1"},
+		{name: "alpha", allowAlpha: true, want: "v1.3.0-alpha.2"},
+		{name: "beta", allowBeta: true, want: "v1.3.0-beta.2"},
+		{name: "alpha and beta", allowAlpha: true, allowBeta: true, want: "v1.3.0-beta.2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := newIACWorkspace(t)
+			path := filepath.Join(dir, "env", "terragrunt.hcl")
+			writeFile(t, path, `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.0"
+}
+`)
+
+			runner := newTestRunner(t, ModuleVersionsOptions{
+				WorkDir:    dir,
+				Upgrade:    true,
+				AllowAlpha: tt.allowAlpha,
+				AllowBeta:  tt.allowBeta,
+				TagLister: fakeTagLister{"cloudopsworks/terraform-module": {
+					"v1.2.1", "v1.3.0-alpha.1", "v1.3.0-alpha.2", "v1.3.0-beta.1", "v1.3.0-beta.2",
+					"v1.3.0-rc.1", "v1.3.0-preview.1", "v1.3.0-beta-2", "v1.3.0-alpha.foo",
+				}},
+			})
+			if err := runner.ModuleVersions(context.Background()); err != nil {
+				t.Fatalf("ModuleVersions() error = %v", err)
+			}
+			var got string
+			for _, line := range strings.Split(readFile(t, path), "\n") {
+				if source, ok := sourceFromLine(line); ok {
+					got = ParseModuleSource(source).Ref
+					break
+				}
+			}
+			if got != tt.want {
+				t.Fatalf("updated ref = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpgradeAddsMissingGitPrefixWhenRefAlreadyCurrent(t *testing.T) {
 	dir := newIACWorkspace(t)
 	path := filepath.Join(dir, "env", "terragrunt.hcl")
@@ -275,6 +324,51 @@ func TestLatestSemverTagSortsNumerically(t *testing.T) {
 	tags := []string{"v1.9.0", "v1.10.0", "v1.2.10", "not-semver", "2.0.0"}
 	if got := LatestSemverTag(tags); got != "2.0.0" {
 		t.Fatalf("LatestSemverTag() = %s, want 2.0.0", got)
+	}
+}
+
+func TestLatestSemverTagWithChannelsUsesSemverPrecedence(t *testing.T) {
+	tags := []string{
+		"v1.2.1",
+		"v1.3.0-alpha.1",
+		"v1.3.0-alpha.2",
+		"v1.3.0-beta.1",
+		"v1.3.0-beta.2",
+		"v1.3.0",
+		"v1.4.0-rc.1",
+		"v9.9.9+build.1",
+	}
+
+	if got := LatestSemverTag(tags); got != "v1.3.0" {
+		t.Fatalf("LatestSemverTag() = %s, want v1.3.0", got)
+	}
+	if got := LatestSemverTagWithChannels(tags, true, false); got != "v1.3.0" {
+		t.Fatalf("alpha selection = %s, want v1.3.0", got)
+	}
+	if got := LatestSemverTagWithChannels([]string{"v1.2.1", "v1.3.0-alpha.2"}, true, false); got != "v1.3.0-alpha.2" {
+		t.Fatalf("alpha selection = %s, want v1.3.0-alpha.2", got)
+	}
+	if got := LatestSemverTagWithChannels([]string{"v1.2.1", "v1.3.0-beta.2"}, false, true); got != "v1.3.0-beta.2" {
+		t.Fatalf("beta selection = %s, want v1.3.0-beta.2", got)
+	}
+	if got := LatestSemverTagWithChannels(tags, true, true); got != "v1.3.0" {
+		t.Fatalf("both-channel selection = %s, want v1.3.0", got)
+	}
+}
+
+func TestLatestSemverTagWithChannelsRejectsNonExactChannels(t *testing.T) {
+	tags := []string{
+		"v01.3.0",
+		"v1.3.0-alpha.01",
+		"v1.3.0-alpha.foo",
+		"v1.3.0-beta-2",
+		"v1.3.0-rc.1",
+		"v1.3.0-preview.1",
+		"v1.3.0-a.1",
+		"v1.3.0-b.1",
+	}
+	if got := LatestSemverTagWithChannels(tags, true, true); got != "" {
+		t.Fatalf("invalid prerelease selection = %s, want empty", got)
 	}
 }
 
