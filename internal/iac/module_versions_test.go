@@ -57,10 +57,14 @@ func TestReportModeAcceptsMissingGitPrefixWithoutMutating(t *testing.T) {
 	writeFile(t, path, original)
 
 	var out bytes.Buffer
+	commenter := &recordingCommenter{}
 	runner := newTestRunner(t, ModuleVersionsOptions{
-		WorkDir:   dir,
-		Stdout:    &out,
-		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.1.0", "v2.0.0"}},
+		WorkDir:             dir,
+		Stdout:              &out,
+		TagLister:           fakeTagLister{"cloudopsworks/terraform-module": {"v1.0.0", "v1.1.0", "v2.0.0"}},
+		ReportGitHubActions: true,
+		CommentPRNumber:     "7",
+		Commenter:           commenter,
 	})
 	if err := runner.ModuleVersions(context.Background()); err != nil {
 		t.Fatalf("ModuleVersions() error = %v", err)
@@ -69,10 +73,13 @@ func TestReportModeAcceptsMissingGitPrefixWithoutMutating(t *testing.T) {
 		t.Fatalf("report mode mutated file:\n%s", got)
 	}
 	output := out.String()
-	for _, want := range []string{"Missing git:: prefix", "Next patch: none", "Next minor: v1.1.0", "Next major: v2.0.0"} {
+	for _, want := range []string{"Missing git:: prefix", "Next patch: none", "Next minor: v1.1.0", "Next major: v2.0.0", "updates-available", "Latest: v2.0.0"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
+	}
+	if !strings.Contains(commenter.body, "Latest: v2.0.0") {
+		t.Fatalf("PR comment omitted the available broader target: %s", commenter.body)
 	}
 }
 
@@ -187,13 +194,34 @@ func TestGitHubReportUsesSelectedTierTarget(t *testing.T) {
 	if err := runner.ModuleVersions(context.Background()); err != nil {
 		t.Fatalf("ModuleVersions() error = %v", err)
 	}
-	for _, want := range []string{"Latest: v1.4.2", "Next minor: v1.4.2"} {
+	for _, want := range []string{"Latest: v2.0.0", "Selected minor: v1.4.2", "Next minor: v1.4.2"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
 	}
-	if !strings.Contains(commenter.body, "Latest: v1.4.2") {
+	if !strings.Contains(commenter.body, "Latest: v2.0.0") || !strings.Contains(commenter.body, "Selected minor: v1.4.2") {
 		t.Fatalf("PR comment used the wrong target: %s", commenter.body)
+	}
+}
+
+func TestBuildMetadataCurrentRefCanBeUpgraded(t *testing.T) {
+	dir := newIACWorkspace(t)
+	path := filepath.Join(dir, "env", "terragrunt.hcl")
+	writeFile(t, path, `terraform {
+  source = "git::https://github.com/cloudopsworks/terraform-module.git//main?ref=v1.2.3%2Bbuild.7"
+}
+`)
+
+	runner := newTestRunner(t, ModuleVersionsOptions{
+		WorkDir:   dir,
+		Upgrade:   true,
+		TagLister: fakeTagLister{"cloudopsworks/terraform-module": {"v1.2.4"}},
+	})
+	if err := runner.ModuleVersions(context.Background()); err != nil {
+		t.Fatalf("ModuleVersions() error = %v", err)
+	}
+	if got := ParseModuleSource(sourceFromTestFile(t, path)).Ref; got != "v1.2.4" {
+		t.Fatalf("updated ref = %s, want v1.2.4", got)
 	}
 }
 
