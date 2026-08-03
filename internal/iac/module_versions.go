@@ -70,6 +70,7 @@ type moduleResult struct {
 	Entry                ModuleEntry
 	Info                 SourceInfo
 	Targets              versionTargets
+	LatestTag            string
 	SelectedTag          string
 	HasCurrentSemver     bool
 	HasEligibleSemverTag bool
@@ -104,6 +105,7 @@ type semverTag struct {
 	Tag                 string
 	Major, Minor, Patch int
 	Prerelease          []string
+	Build               []string
 }
 
 const (
@@ -116,7 +118,7 @@ const (
 
 var (
 	sourceLineRe = regexp.MustCompile(`^(\s*source\s*=\s*)(["'])([^"']+)(["'])(.*)$`)
-	semverTagRe  = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+	semverTagRe  = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
 	refQueryRe   = regexp.MustCompile(`([?&]ref=)([^&]+)`)
 )
 
@@ -362,7 +364,7 @@ func (r *Runner) processEntry(ctx context.Context, entry ModuleEntry) moduleResu
 		if !currentOK {
 			result.Status = "non-semver-current-ref"
 		} else {
-			result.Targets, result.HasEligibleSemverTag = findVersionTargets(current, tags, r.opts.AllowAlpha, r.opts.AllowBeta)
+			result.Targets, result.LatestTag, result.HasEligibleSemverTag = findVersionTargets(current, tags, r.opts.AllowAlpha, r.opts.AllowBeta)
 			result.SelectedTag = result.Targets.selected(r.opts.Minor, r.opts.Major)
 			result.UpgradeNeeded = result.SelectedTag != ""
 			switch {
@@ -436,7 +438,8 @@ func (r *Runner) printResult(ctx context.Context, result moduleResult) {
 		fmt.Fprintf(r.opts.Stdout, "    Selected: %s\n", result.SelectedTag)
 		r.reportGitHubAction(ctx, result, "outdated")
 	} else if result.Targets.any() {
-		fmt.Fprintf(r.opts.Stdout, "ℹ️  Module in %s has no %s upgrade target; broader releases are available.\n", rel, selectedScope(r.opts.Minor, r.opts.Major))
+		fmt.Fprintf(r.opts.Stdout, "ℹ️  Module in %s has no %s upgrade target; other release-tier targets are available.\n", rel, selectedScope(r.opts.Minor, r.opts.Major))
+		r.reportGitHubAction(ctx, result, "updates-available")
 	} else {
 		fmt.Fprintf(r.opts.Stdout, "✅ Module in %s is up to date.\n", rel)
 	}
@@ -473,8 +476,9 @@ func selectedScope(minor, major bool) string {
 	}
 }
 
-func findVersionTargets(current semverTag, tags []string, allowAlpha, allowBeta bool) (versionTargets, bool) {
+func findVersionTargets(current semverTag, tags []string, allowAlpha, allowBeta bool) (versionTargets, string, bool) {
 	var targets versionTargets
+	latest := ""
 	hasEligible := false
 	for _, raw := range tags {
 		candidate, ok := parseSemverTag(raw)
@@ -485,6 +489,7 @@ func findVersionTargets(current semverTag, tags []string, allowAlpha, allowBeta 
 		if compareSemverTags(candidate, current) <= 0 {
 			continue
 		}
+		latest = higherSemverTag(latest, candidate)
 		switch {
 		case candidate.Major == current.Major && candidate.Minor == current.Minor:
 			targets.Patch = higherSemverTag(targets.Patch, candidate)
@@ -494,7 +499,7 @@ func findVersionTargets(current semverTag, tags []string, allowAlpha, allowBeta 
 			targets.Major = higherSemverTag(targets.Major, candidate)
 		}
 	}
-	return targets, hasEligible
+	return targets, latest, hasEligible
 }
 
 func higherSemverTag(existing string, candidate semverTag) string {
@@ -517,7 +522,10 @@ func (r *Runner) reportGitHubAction(ctx context.Context, result moduleResult, re
 		return
 	}
 	rel := r.rel(result.Entry.File)
-	body := fmt.Sprintf("🚨 Module in %s is %s: %s | %s | Current: %s | Latest: %s", rel, reason, rel, result.Info.Repository, result.Info.Ref, result.SelectedTag)
+	body := fmt.Sprintf("🚨 Module in %s is %s: %s | %s | Current: %s | Latest: %s", rel, reason, rel, result.Info.Repository, result.Info.Ref, result.LatestTag)
+	if result.SelectedTag != "" {
+		body += fmt.Sprintf(" | Selected %s: %s", selectedScope(r.opts.Minor, r.opts.Major), result.SelectedTag)
+	}
 	fmt.Fprintf(r.opts.Stdout, "::warning:: %s\n", body)
 	if r.opts.CommentPRNumber != "" {
 		if err := r.opts.Commenter.CommentPR(ctx, r.opts.WorkDir, r.opts.CommentPRNumber, body); err != nil {
@@ -676,10 +684,16 @@ func parseSemverTag(tag string) (semverTag, bool) {
 	if parts[4] != "" {
 		parsed.Prerelease = strings.Split(parts[4], ".")
 	}
+	if parts[5] != "" {
+		parsed.Build = strings.Split(parts[5], ".")
+	}
 	return parsed, true
 }
 
 func isEligibleSemverTag(tag semverTag, allowAlpha, allowBeta bool) bool {
+	if len(tag.Build) > 0 {
+		return false
+	}
 	if len(tag.Prerelease) == 0 {
 		return true
 	}
