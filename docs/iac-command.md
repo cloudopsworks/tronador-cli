@@ -50,7 +50,12 @@ Unsupported or unparseable sources are reported instead of guessed.
 ### Version lookup
 
 For each supported GitHub source, the command lists repository tags through the
-GitHub API and selects the highest semantic-version tag matching `v?MAJOR.MINOR.PATCH`.
+GitHub API and selects the highest eligible semantic-version tag. Stable tags
+always qualify. Alpha and beta prerelease tags qualify only when enabled with
+`--alpha` or `--beta`; their optional dot-separated suffixes must be numeric.
+Other prerelease channels are ignored. SemVer precedence is used after
+filtering, so a later allowed prerelease can be selected over an older stable
+release, while a stable release beats a prerelease of the same version.
 Findings such as outdated refs or missing prefixes are report results and do not
 by themselves cause a non-zero exit code.
 
@@ -65,6 +70,8 @@ return non-zero.
 | `--workdir <dir>` | IaC workspace root. Defaults to `.` and must contain `.cloudopsworks/.iac`. |
 | `-p, --path <dir>` | Module discovery path relative to `--workdir`, or an absolute path inside `--workdir`. |
 | `-u, --upgrade` | Update eligible `?ref=` pins to the latest semantic-version tag and also add missing `git::` prefixes. |
+| `--alpha` | Allow alpha prerelease tags when selecting an update. |
+| `--beta` | Allow beta prerelease tags when selecting an update. |
 | `--fix-prefix` | Add missing `git::` prefixes for eligible GitHub HTTPS sources without changing refs. |
 | `--dry-run` | Analyze and print intended mutations without writing files. |
 | `-r, --report-ghaction` | Emit GitHub Actions warning annotations for outdated modules. |
@@ -95,6 +102,12 @@ Apply latest ref upgrades and normalize missing `git::` prefixes:
 
 ```bash
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade
+```
+
+Allow alpha and beta prereleases when applying updates:
+
+```bash
+tronador iac module --workdir ../my-iac-workspace --upgrade --alpha --beta
 ```
 
 Only add missing `git::` prefixes without changing `?ref=` pins:

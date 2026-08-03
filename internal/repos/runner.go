@@ -329,6 +329,11 @@ type StackOptions struct {
 	V510Plus     string
 }
 
+const (
+	gitignoreManagedStartMarker = "# BEGIN TRONADOR TEMPLATE MANAGED BLOCK"
+	gitignoreManagedEndMarker   = "# END TRONADOR TEMPLATE MANAGED BLOCK"
+)
+
 // Stack applies the fetched template into the target repository and commits it.
 // It is an internal full-upgrade workflow step, not a public CLI subcommand.
 func (r *Runner) Stack(ctx context.Context, opts StackOptions) error {
@@ -425,7 +430,13 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
 		return err
 	}
-	for _, file := range []string{"Makefile", ".gitignore"} {
+	if err := r.copyDependabotIfExists(context.Background()); err != nil {
+		return err
+	}
+	if err := r.mergeGitignoreIfExists(context.Background()); err != nil {
+		return err
+	}
+	for _, file := range []string{"Makefile"} {
 		if err := r.copyFile(r.path(r.Config.TemplateDirectory, file), r.path(file)); err != nil {
 			return err
 		}
@@ -458,7 +469,7 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 				return err
 			}
 		}
-		for _, file := range []string{"labeler.yml", "auto-label.yml", "auto-assign.yml", "gitversion.yaml", "gitversion_gitflow.yaml", "gitversion_githubflow.yaml"} {
+		for _, file := range []string{"labeler.yml", "auto-label.yml", "gitversion.yaml", "gitversion_gitflow.yaml", "gitversion_githubflow.yaml"} {
 			if err := r.copyFileIfExists(r.path(r.Config.TemplateDirectory, ".cloudopsworks", file), r.path(".cloudopsworks", file)); err != nil {
 				return err
 			}
@@ -476,7 +487,10 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 		if err := r.copyFileIfExists(r.path(r.Config.TemplateDirectory, ".cloudopsworks/Makefile"), r.path(".cloudopsworks/Makefile")); err != nil {
 			return err
 		}
-		if err := r.gitAdd(context.Background(), ".cloudopsworks"); err != nil {
+		if err := r.copyAutoAssignIfExists(context.Background()); err != nil {
+			return err
+		}
+		if err := r.gitAddCloudopsworks(context.Background()); err != nil {
 			return err
 		}
 	} else {
@@ -489,8 +503,11 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 				return err
 			}
 		}
+		if err := r.copyAutoAssignIfExists(context.Background()); err != nil {
+			return err
+		}
 	}
-	return r.gitAdd(context.Background(), ".gitignore", ".github/workflows")
+	return r.gitAdd(context.Background(), ".github/workflows")
 }
 
 func (r *Runner) applyUnversionedTemplate() error {
@@ -503,15 +520,194 @@ func (r *Runner) applyUnversionedTemplate() error {
 	if err := r.copyPullRequestTemplateIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.mergeGitignoreIfExists(context.Background()); err != nil {
+		return err
+	}
+	if err := r.copyAutoAssignIfExists(context.Background()); err != nil {
+		return err
+	}
+	if err := r.copyDependabotIfExists(context.Background()); err != nil {
+		return err
+	}
 	if err := r.gitAdd(context.Background(), ".github/workflows"); err != nil {
 		return err
 	}
 	if exists(r.path(".cloudopsworks")) {
-		if err := r.gitAdd(context.Background(), ".cloudopsworks"); err != nil {
+		if err := r.gitAddCloudopsworks(context.Background()); err != nil {
 			return err
 		}
 	}
 	return r.copyFile(r.path(r.Config.TemplateDirectory, "Makefile"), r.path("Makefile"))
+}
+
+func (r *Runner) mergeGitignoreIfExists(ctx context.Context) error {
+	src := r.path(r.Config.TemplateDirectory, ".gitignore")
+	if !exists(src) {
+		return nil
+	}
+	templateContent, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read template .gitignore: %w", err)
+	}
+	managedBlock, err := buildGitignoreManagedBlock(templateContent)
+	if err != nil {
+		return fmt.Errorf("build managed .gitignore block: %w", err)
+	}
+
+	dst := r.path(".gitignore")
+	existing, err := os.ReadFile(dst)
+	switch {
+	case err == nil:
+	case errors.Is(err, os.ErrNotExist):
+		existing = nil
+	default:
+		return fmt.Errorf("read .gitignore: %w", err)
+	}
+	merged := mergeGitignoreContent(existing, managedBlock)
+	changed, err := r.writeFileIfChanged(dst, merged, 0o644)
+	if err != nil {
+		return fmt.Errorf("write .gitignore: %w", err)
+	}
+	if !changed {
+		fmt.Fprintln(r.Opts.Stdout, "Not modifying .gitignore")
+		return nil
+	}
+	return r.gitAdd(ctx, ".gitignore")
+}
+
+func buildGitignoreManagedBlock(templateContent []byte) ([]byte, error) {
+	if start, end, ok := findGitignoreManagedBlock(templateContent); ok {
+		body := templateContent[start+len(gitignoreManagedStartMarker) : end-len(gitignoreManagedEndMarker)]
+		body = trimOneLineEnding(body)
+		body = trimTrailingLineEnding(body)
+		return formatGitignoreManagedBlock(body), nil
+	}
+	if bytes.Contains(templateContent, []byte(gitignoreManagedStartMarker)) || bytes.Contains(templateContent, []byte(gitignoreManagedEndMarker)) {
+		return nil, fmt.Errorf("template contains malformed managed markers")
+	}
+	return formatGitignoreManagedBlock(templateContent), nil
+}
+
+func mergeGitignoreContent(existing, managedBlock []byte) []byte {
+	if start, end, ok := findGitignoreManagedBlock(existing); ok {
+		replacement := managedBlock
+		if startsWithLineEnding(existing[end:]) {
+			replacement = trimTrailingLineEnding(replacement)
+		}
+		merged := make([]byte, 0, len(existing)-end+start+len(replacement))
+		merged = append(merged, existing[:start]...)
+		merged = append(merged, replacement...)
+		merged = append(merged, existing[end:]...)
+		return merged
+	}
+	merged := make([]byte, 0, len(existing)+1+len(managedBlock))
+	merged = append(merged, existing...)
+	if len(merged) > 0 && merged[len(merged)-1] != '\n' {
+		merged = append(merged, '\n')
+	}
+	merged = append(merged, managedBlock...)
+	return merged
+}
+
+func findGitignoreManagedBlock(content []byte) (start, end int, ok bool) {
+	startMarker := []byte(gitignoreManagedStartMarker)
+	endMarker := []byte(gitignoreManagedEndMarker)
+	starts := make([]int, 0, 1)
+	var pairs [][2]int
+	for lineStart := 0; lineStart < len(content); {
+		lineEnd := bytes.IndexByte(content[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(content) - lineStart
+		}
+		line := content[lineStart : lineStart+lineEnd]
+		if bytes.HasSuffix(line, []byte("\r")) {
+			line = line[:len(line)-1]
+		}
+		switch {
+		case bytes.Equal(line, startMarker):
+			starts = append(starts, lineStart)
+		case bytes.Equal(line, endMarker) && len(starts) > 0:
+			start := starts[len(starts)-1]
+			starts = starts[:len(starts)-1]
+			pairs = append(pairs, [2]int{start, lineStart + len(line)})
+		}
+		lineStart += lineEnd
+		if lineStart < len(content) {
+			lineStart++
+		}
+	}
+	if len(pairs) == 0 {
+		return 0, 0, false
+	}
+	last := pairs[len(pairs)-1]
+	return last[0], last[1], true
+}
+
+func formatGitignoreManagedBlock(body []byte) []byte {
+	block := make([]byte, 0, len(body)+len(gitignoreManagedStartMarker)+len(gitignoreManagedEndMarker)+4)
+	block = append(block, gitignoreManagedStartMarker...)
+	block = append(block, '\n')
+	block = append(block, body...)
+	if len(block) == 0 || block[len(block)-1] != '\n' {
+		block = append(block, '\n')
+	}
+	block = append(block, gitignoreManagedEndMarker...)
+	block = append(block, '\n')
+	return block
+}
+
+func trimOneLineEnding(content []byte) []byte {
+	if bytes.HasPrefix(content, []byte("\r\n")) {
+		return content[2:]
+	}
+	if bytes.HasPrefix(content, []byte("\n")) {
+		return content[1:]
+	}
+	return content
+}
+
+func trimTrailingLineEnding(content []byte) []byte {
+	if bytes.HasSuffix(content, []byte("\r\n")) {
+		return content[:len(content)-2]
+	}
+	if bytes.HasSuffix(content, []byte("\n")) {
+		return content[:len(content)-1]
+	}
+	return content
+}
+
+func startsWithLineEnding(content []byte) bool {
+	return bytes.HasPrefix(content, []byte("\r\n")) || bytes.HasPrefix(content, []byte("\n"))
+}
+
+func (r *Runner) gitAddCloudopsworks(ctx context.Context) error {
+	root := r.path(".cloudopsworks")
+	if !exists(root) {
+		return nil
+	}
+	paths := make([]string, 0)
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(r.Opts.WorkDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == ".cloudopsworks/auto-assign.yml" {
+			return nil
+		}
+		paths = append(paths, rel)
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Strings(paths)
+	return r.gitAdd(ctx, paths...)
 }
 
 func (r *Runner) copyIssueTemplatesIfExists(ctx context.Context) error {
@@ -575,6 +771,46 @@ func (r *Runner) copyPullRequestTemplateIfExists(ctx context.Context) error {
 		return err
 	}
 	return r.gitAdd(ctx, dst)
+}
+
+func (r *Runner) copyDependabotIfExists(ctx context.Context) error {
+	const rel = ".github/dependabot.yml"
+	src := r.path(r.Config.TemplateDirectory, rel)
+	if !exists(src) {
+		return nil
+	}
+	fmt.Fprintln(r.Opts.Stdout, "Copying missing Dependabot configuration")
+	dst := r.path(rel)
+	if pathExists(dst) {
+		fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", rel)
+		return nil
+	}
+	if err := r.copyFileAtomically(src, dst); err != nil {
+		return fmt.Errorf("copy %s: %w", rel, err)
+	}
+	return r.gitAdd(ctx, rel)
+}
+
+func (r *Runner) copyAutoAssignIfExists(ctx context.Context) error {
+	for _, rel := range []string{".cloudopsworks/auto-assign.yml", ".github/auto-assign.yml"} {
+		src := r.path(r.Config.TemplateDirectory, rel)
+		if !exists(src) {
+			continue
+		}
+		dst := r.path(rel)
+		if pathExists(dst) {
+			fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", rel)
+			continue
+		}
+		fmt.Fprintf(r.Opts.Stdout, "Copying missing %s\n", rel)
+		if err := r.copyFileAtomically(src, dst); err != nil {
+			return fmt.Errorf("copy %s: %w", rel, err)
+		}
+		if err := r.gitAdd(ctx, rel); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // reservedIssueTemplatePrefixes lists the filename prefixes that are

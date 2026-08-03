@@ -1,0 +1,673 @@
+package project
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	toolspkg "tronador-cli/internal/tools"
+)
+
+func TestDetectsEveryRegisteredMarker(t *testing.T) {
+	registry := DefaultRegistry()
+	for _, profile := range registry.Profiles {
+		profile := profile
+		t.Run(profile.ID, func(t *testing.T) {
+			workdir := t.TempDir()
+			markerDir := filepath.Join(workdir, ".cloudopsworks")
+			if err := os.MkdirAll(markerDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(markerDir, profile.Markers[0].Name), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			detection, err := registry.Detect(workdir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if detection.ProfileID != profile.ID || detection.Marker != filepath.ToSlash(filepath.Join(".cloudopsworks", profile.Markers[0].Name)) {
+				t.Fatalf("detection = %+v, want %s/%s", detection, profile.ID, profile.Markers[0].Name)
+			}
+		})
+	}
+}
+
+func TestDetectRejectsUnknownAmbiguousDirectoryAndSymlinkMarkers(t *testing.T) {
+	registry := DefaultRegistry()
+	unknown, err := registry.Detect(t.TempDir())
+	if err == nil || codeOf(err) != "project_implementation_unknown" || unknown.ProfileID != "" {
+		t.Fatalf("unknown detection = %+v, err=%v", unknown, err)
+	}
+
+	ambiguous := t.TempDir()
+	markerDir := filepath.Join(ambiguous, ".cloudopsworks")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{".golang", ".python"} {
+		if err := os.WriteFile(filepath.Join(markerDir, marker), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := registry.Detect(ambiguous); err == nil || codeOf(err) != "project_implementation_ambiguous" {
+		t.Fatalf("ambiguous error = %v", err)
+	}
+
+	invalidDir := t.TempDir()
+	invalidMarkerDir := filepath.Join(invalidDir, ".cloudopsworks")
+	if err := os.MkdirAll(filepath.Join(invalidMarkerDir, ".golang"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Detect(invalidDir); err == nil || codeOf(err) != "project_marker_invalid" {
+		t.Fatalf("directory marker error = %v", err)
+	}
+
+	if runtime.GOOS != "windows" {
+		symlinkDir := t.TempDir()
+		symlinkMarkerDir := filepath.Join(symlinkDir, ".cloudopsworks")
+		if err := os.MkdirAll(symlinkMarkerDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(symlinkDir, "target")
+		if err := os.WriteFile(target, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(symlinkMarkerDir, ".golang")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := registry.Detect(symlinkDir); err == nil || codeOf(err) != "project_marker_invalid" {
+			t.Fatalf("symlink marker error = %v", err)
+		}
+	}
+}
+
+func TestDescribeMatchesCapabilityMatrix(t *testing.T) {
+	registry := DefaultRegistry()
+	wants := map[string][]string{
+		"androidsdk": {"init", "version"}, "docker": {"init", "version"}, "dotnet": {"init", "version"},
+		"flutter": {"init", "version"}, "go": {"init", "version"}, "java": {"init", "version"},
+		"node": {"init", "version"}, "python": {"init", "version"}, "rust": {"init", "version"}, "xcode": {"init", "version"},
+		"terraform-module": {"format", "init", "lint"}, "terragrunt": {"clean", "clean-inputs", "format", "init", "lint"},
+	}
+	for id, want := range wants {
+		profile, ok := registry.Profile(id)
+		if !ok {
+			t.Fatalf("profile %s missing", id)
+		}
+		got := profile.CapabilityIDs()
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("%s capabilities = %v, want %v", id, got, want)
+		}
+	}
+}
+
+func TestDescribeIncludesFlagAndArgumentSchemas(t *testing.T) {
+	workdir := fixture(t, ".terraform-module")
+	runner := mustRunner(t, Options{WorkDir: workdir})
+	detection, err := runner.Detect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptions, err := runner.Describe(detection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, description := range descriptions {
+		if description.ID != "init" {
+			continue
+		}
+		if len(description.Arguments) != 1 || description.Arguments[0].Name != "provider" || !description.Arguments[0].Required {
+			t.Fatalf("init arguments = %+v", description.Arguments)
+		}
+		if flagNamed(description.Flags, "engine") || !flagNamed(description.Flags, "allow-network") || !flagNamed(description.Flags, "dry-run") {
+			t.Fatalf("init flags = %+v", description.Flags)
+		}
+		return
+	}
+	t.Fatal("terraform init description missing")
+}
+
+func TestPlanRejectsNamespaceAndProviderInjection(t *testing.T) {
+	workdir := fixture(t, ".terraform-module")
+	runner := mustRunner(t, Options{WorkDir: workdir})
+	if _, _, err := runner.Plan("terraform-module", []string{"init"}); err == nil || codeOf(err) != "project_capability_unsupported" {
+		t.Fatalf("namespace error = %v", err)
+	} else if !strings.Contains(err.Error(), "do not include an implementation namespace") {
+		t.Fatalf("namespace error lacks migration hint: %v", err)
+	}
+	if _, _, err := runner.Plan("init", []string{"aws/credentials"}); err == nil || codeOf(err) != "project_argument_invalid" {
+		t.Fatalf("provider injection error = %v", err)
+	}
+	detection, plan, err := runner.Plan("init", []string{"aws"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detection.ProfileID != "terraform-module" || len(plan.ToolCalls) != 2 || plan.ToolCalls[0].ToolName != "boilerplate" || !contains(plan.ToolCalls[0].Arguments, "provider=aws") || plan.ToolCalls[1].ToolName != "git" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(plan.Steps) != 3 || plan.Steps[0].Action != "remove-file" || contains(plan.ToolCalls[0].Arguments, "init") {
+		t.Fatalf("terraform init steps = %+v", plan.Steps)
+	}
+}
+
+func TestDryRunDoesNotResolveOrExecuteTools(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	called := false
+	runner := mustRunner(t, Options{WorkDir: workdir, DryRun: true, ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+		called = true
+		return ToolExecution{}, errors.New("must not execute")
+	}})
+	result, err := runner.Run(context.Background(), "init", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || !result.DryRun || len(result.Tools) != 0 {
+		t.Fatalf("dry-run result = %+v, called=%v", result, called)
+	}
+}
+
+func TestVersionUsesTypedGitVersionAndNeverCreatesTags(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	gitversion := executable(t, "gitversion")
+	called := []ToolCall{}
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": gitversion}, NoInstallTools: true,
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			called = append(called, call)
+			return ToolExecution{Stdout: `{"SemVer":"2.4.6"}`}, nil
+		},
+	})
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "2.4.6" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6\n" {
+		t.Fatalf("version result = %+v", result)
+	}
+	if len(called) != 1 || called[0].ToolName != "gitversion" || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
+		t.Fatalf("typed calls = %+v", called)
+	}
+}
+
+func TestVersionUpdatesProfileMetadata(t *testing.T) {
+	cases := []struct {
+		profile string
+		name    string
+		before  string
+		after   string
+	}{
+		{profile: "docker", name: "package.json", before: "{\n  \"version\": \"0.1.0\"\n}\n", after: "{\n  \"version\": \"2.4.6\"\n}\n"},
+		{profile: "dotnet", name: "app.csproj", before: "<Project>\n  <Version>0.1.0</Version>\n</Project>\n", after: "<Project>\n  <Version>2.4.6</Version>\n</Project>\n"},
+		{profile: "flutter", name: "pubspec.yaml", before: "name: app\nversion: 0.1.0\n", after: "name: app\nversion: 2.4.6\n"},
+		{profile: "java", name: "pom.xml", before: "<project>\n  <version>0.1.0</version>\n</project>\n", after: "<project>\n  <version>2.4.6</version>\n</project>\n"},
+		{profile: "node", name: "package.json", before: "{\n  \"version\": \"0.1.0\",\n  \"name\": \"app\"\n}\n", after: "{\n  \"version\": \"2.4.6\",\n  \"name\": \"app\"\n}\n"},
+		{profile: "python", name: "pyproject.toml", before: "[project]\nversion = \"0.1.0\"\n", after: "[project]\nversion = \"2.4.6\"\n"},
+		{profile: "rust", name: "Cargo.toml", before: "[package]\nversion = \"0.1.0\"\n", after: "[package]\nversion = \"2.4.6\"\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.profile, func(t *testing.T) {
+			workdir := fixture(t, markerForProfile(t, tc.profile))
+			if err := os.WriteFile(filepath.Join(workdir, tc.name), []byte(tc.before), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(_ context.Context, _ ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"SemVer":"2.4.6"}`}, nil
+				},
+			})
+			if _, err := runner.Run(context.Background(), "version", nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(mustRead(t, filepath.Join(workdir, tc.name))); got != tc.after {
+				t.Fatalf("metadata = %q, want %q", got, tc.after)
+			}
+		})
+	}
+}
+
+func TestAutoEngineRejectsBothExplicitCandidates(t *testing.T) {
+	runner := mustRunner(t, Options{
+		WorkDir: fixture(t, ".terraform-module"), NoInstallTools: true,
+		Engine: "auto",
+		ToolPaths: map[string]string{
+			"terraform": executable(t, "terraform"),
+			"tofu":      executable(t, "tofu"),
+		},
+	})
+	if _, err := runner.Run(context.Background(), "format", nil); err == nil || codeOf(err) != "project_tool_selection_ambiguous" {
+		t.Fatalf("auto engine error = %v", err)
+	}
+}
+
+func TestToolExitStatusIsPreserved(t *testing.T) {
+	runner := mustRunner(t, Options{
+		WorkDir: fixture(t, ".terraform-module"), ToolPaths: map[string]string{"terraform": executable(t, "terraform")},
+		NoInstallTools: true, Engine: "terraform",
+		ExecuteTool: func(_ context.Context, _ ToolCall) (ToolExecution, error) {
+			return ToolExecution{ExitStatus: 7, Stderr: "validation failed\n"}, nil
+		},
+	})
+	_, err := runner.Run(context.Background(), "format", nil)
+	if err == nil || codeOf(err) != "project_operation_failed" {
+		t.Fatalf("operation error = %v", err)
+	}
+	var projectErr *Error
+	if !errors.As(err, &projectErr) || projectErr.ExitStatus != 7 {
+		t.Fatalf("operation error status = %+v, want 7", projectErr)
+	}
+}
+
+func TestTerraformPipelineAndTerragruntConfirmation(t *testing.T) {
+	workdir := fixture(t, ".terraform-module")
+	terraform := executable(t, "terraform")
+	called := []ToolCall{}
+	runner := mustRunner(t, Options{WorkDir: workdir, ToolPaths: map[string]string{"terraform": terraform}, NoInstallTools: true, Engine: "terraform", ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+		called = append(called, call)
+		return ToolExecution{}, nil
+	}})
+	if _, err := runner.Run(context.Background(), "format", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(called) != 1 || called[0].ToolName != "terraform" || strings.Join(called[0].Arguments, " ") != "fmt" {
+		t.Fatalf("terraform calls = %+v", called)
+	}
+
+	terragruntDir := fixture(t, ".iac")
+	terragrunt := executable(t, "terragrunt")
+	terragruntRunner := mustRunner(t, Options{WorkDir: terragruntDir, ToolPaths: map[string]string{"terragrunt": terragrunt}, NoInstallTools: true})
+	if _, err := terragruntRunner.Run(context.Background(), "clean", nil); err == nil || codeOf(err) != "project_confirmation_required" {
+		t.Fatalf("confirmation error = %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(terragruntDir, ".terraform"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cacheDir := filepath.Join(terragruntDir, "nested", ".terragrunt-cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"tfplan.out", "plan.tfplan", ".terraform.lock.hcl"} {
+		fullPath := filepath.Join(terragruntDir, "nested", path)
+		if err := os.WriteFile(fullPath, []byte("generated"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terragruntRunner.Opts.Yes = true
+	if _, err := terragruntRunner.Run(context.Background(), "clean", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(terragruntDir, ".terraform")); err != nil {
+		t.Fatalf("non-target Terraform directory was removed, err=%v", err)
+	}
+	if _, err := os.Stat(cacheDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Terragrunt cache still exists, err=%v", err)
+	}
+	for _, path := range []string{"tfplan.out", "plan.tfplan", ".terraform.lock.hcl"} {
+		if _, err := os.Stat(filepath.Join(terragruntDir, "nested", path)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("generated path %s still exists, err=%v", path, err)
+		}
+	}
+}
+
+func TestApplicationInitUsesEachTemplatePipeline(t *testing.T) {
+	cases := map[string][]string{
+		"androidsdk": {"repository-owner"},
+		"docker":     {"repository-owner", "gitversion-major", "package-name", "package-version"},
+		"dotnet":     {"repository-owner", "gitversion-major", "rename-solution", "rename-main-project", "rename-test-project", "rename-integration-project", "rename-main-project-file", "rename-test-project-file", "rename-integration-project-file", "dotnet-project-path", "dotnet-assembly-name", "dotnet-assembly-version", "dotnet-version", "dotnet-test-reference", "dotnet-integration-reference", "rewrite-solution"},
+		"flutter":    {"repository-owner", "gitversion-full", "flutter-name", "flutter-version"},
+		"go":         {"repository-owner", "remove-go-module", "go-mod-init", "go-mod-tidy", "rewrite-go-imports"},
+		"java":       {"repository-owner", "gitversion-major", "maven-artifact", "maven-version"},
+		"node":       {"repository-owner", "gitversion-major", "package-name", "package-version"},
+		"python":     {"repository-owner", "gitversion-major", "python-metadata"},
+		"rust":       {"repository-owner", "rust-metadata", "rewrite-rust-imports"},
+		"xcode":      {"repository-owner"},
+	}
+	for profile, wantIDs := range cases {
+		t.Run(profile, func(t *testing.T) {
+			workdir := fixture(t, markerForProfile(t, profile))
+			runner := mustRunner(t, Options{WorkDir: workdir})
+			_, plan, err := runner.Plan("init", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotIDs := make([]string, len(plan.Steps))
+			for i, step := range plan.Steps {
+				gotIDs[i] = step.ID
+				if step.Call != nil && (step.Call.ToolName == "boilerplate" || step.Call.ToolName == "terraform" || step.Call.ToolName == "tofu" || step.Call.ToolName == "terragrunt") {
+					t.Fatalf("application init unexpectedly dispatches infrastructure tool: %+v", step.Call)
+				}
+			}
+			if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+				t.Fatalf("steps = %v, want %v", gotIDs, wantIDs)
+			}
+		})
+	}
+}
+
+func TestApplicationInitExecutesCapturedValuesAndNativeSteps(t *testing.T) {
+	workdir := fixture(t, ".docker")
+	if err := os.WriteFile(filepath.Join(workdir, "package.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := []ToolCall{}
+	project := filepath.Base(workdir)
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			calls = append(calls, call)
+			switch call.ToolName {
+			case "gh":
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			case "gitversion":
+				return ToolExecution{Stdout: "1.2.3\n"}, nil
+			default:
+				return ToolExecution{}, nil
+			}
+		},
+	})
+	result, err := runner.Run(context.Background(), "init", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 4 || calls[0].ToolName != "gh" || calls[1].ToolName != "gitversion" || calls[2].ToolName != "yq" || calls[3].ToolName != "yq" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !contains(calls[2].Arguments, ".name = \"@cloudopsworks/"+project+"\"") || !contains(calls[3].Arguments, ".version = \"1.2.3\"") {
+		t.Fatalf("captured arguments = %+v", calls)
+	}
+	if len(result.Steps) != 4 || len(result.Calls) != 4 {
+		t.Fatalf("result pipeline = %+v", result)
+	}
+}
+
+func TestApplicationInitEnforcesTheTemplateNetworkStep(t *testing.T) {
+	called := false
+	runner := mustRunner(t, Options{
+		WorkDir: fixture(t, ".android"), NoInstallTools: true,
+		ExecuteTool: func(_ context.Context, _ ToolCall) (ToolExecution, error) {
+			called = true
+			return ToolExecution{}, nil
+		},
+	})
+	_, err := runner.Run(context.Background(), "init", nil)
+	if err == nil || codeOf(err) != "project_network_not_allowed" || called {
+		t.Fatalf("network policy error = %v, called=%v", err, called)
+	}
+}
+
+func TestGoInitRunsTypedGoCommandsAndRewritesSources(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	if err := os.WriteFile(filepath.Join(workdir, "go.mod"), []byte("module hello-service\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(workdir, "main.go")
+	if err := os.WriteFile(source, []byte("package main\nimport _ \"hello-service/internal\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := []ToolCall{}
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq"), "go": executable(t, "go")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			calls = append(calls, call)
+			if call.ToolName == "gh" {
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			}
+			return ToolExecution{}, nil
+		},
+	})
+	if _, err := runner.Run(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 3 || calls[1].ToolName != "go" || strings.Join(calls[1].Arguments, " ") != "mod init "+filepath.Base(workdir) || strings.Join(calls[2].Arguments, " ") != "mod tidy" {
+		t.Fatalf("go calls = %+v", calls)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, "go.mod")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("go.mod was not removed, err=%v", err)
+	}
+	if got := string(mustRead(t, source)); !strings.Contains(got, filepath.Base(workdir)+"/internal") {
+		t.Fatalf("source was not rewritten: %q", got)
+	}
+}
+
+func TestPythonAndRustInitUseNativeMetadataActions(t *testing.T) {
+	pythonDir := fixture(t, ".python")
+	if err := os.WriteFile(filepath.Join(pythonDir, "pyproject.toml"), []byte("[project]\nname = \"template\"\nversion = \"0.1.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pythonRunner := mustRunner(t, Options{
+		WorkDir: pythonDir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			if call.ToolName == "gh" {
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			}
+			return ToolExecution{Stdout: "1.2.3\n"}, nil
+		},
+	})
+	if _, err := pythonRunner.Run(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	pythonMetadata := string(mustRead(t, filepath.Join(pythonDir, "pyproject.toml")))
+	if !strings.Contains(pythonMetadata, "name = \""+filepath.Base(pythonDir)+"\"") || !strings.Contains(pythonMetadata, "version = \"1.2.3\"") {
+		t.Fatalf("python metadata = %q", pythonMetadata)
+	}
+
+	rustDir := fixture(t, ".rust")
+	if err := os.WriteFile(filepath.Join(rustDir, "Cargo.toml"), []byte("[package]\nname = \"hello-api\"\nversion = \"0.1.0\"\n\n[[bin]]\nname = \"hello-api\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rustSource := filepath.Join(rustDir, "main.rs")
+	if err := os.WriteFile(rustSource, []byte("fn main() { hello_api::run(); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rustRunner := mustRunner(t, Options{
+		WorkDir: rustDir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			if call.ToolName == "gh" {
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			}
+			return ToolExecution{}, nil
+		},
+	})
+	if _, err := rustRunner.Run(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	rustMetadata := string(mustRead(t, filepath.Join(rustDir, "Cargo.toml")))
+	if !strings.Contains(rustMetadata, "name = \""+filepath.Base(rustDir)+"\"") || !strings.Contains(string(mustRead(t, rustSource)), strings.ReplaceAll(filepath.Base(rustDir), "-", "_")+"::") {
+		t.Fatalf("rust metadata/source = %q / %q", rustMetadata, string(mustRead(t, rustSource)))
+	}
+}
+
+func TestApplicationInitRejectsSymlinkedMetadataOutsideWorkdir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	workdir := fixture(t, ".python")
+	external := filepath.Join(t.TempDir(), "pyproject.toml")
+	original := "[project]\nname = \"external\"\nversion = \"0.1.0\"\n"
+	if err := os.WriteFile(external, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(workdir, "pyproject.toml")); err != nil {
+		t.Fatal(err)
+	}
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			if call.ToolName == "gh" {
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			}
+			return ToolExecution{Stdout: "1.2.3\n"}, nil
+		},
+	})
+	if _, err := runner.Run(context.Background(), "init", nil); err == nil || codeOf(err) != "project_operation_failed" {
+		t.Fatalf("symlinked metadata error = %v", err)
+	}
+	if got := string(mustRead(t, external)); got != original {
+		t.Fatalf("external metadata was modified: %q", got)
+	}
+}
+
+func TestTerraformAndTerragruntInitUseTemplateBodies(t *testing.T) {
+	terraformDir := fixture(t, ".terraform-module")
+	tempProvider := filepath.Join(terraformDir, "provider.temp.tf")
+	if err := os.WriteFile(tempProvider, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boilerplate := executable(t, "boilerplate")
+	terraformCalls := []ToolCall{}
+	runner := mustRunner(t, Options{WorkDir: terraformDir, ToolPaths: map[string]string{"boilerplate": boilerplate, "git": executable(t, "git")}, NoInstallTools: true, ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+		terraformCalls = append(terraformCalls, call)
+		return ToolExecution{}, nil
+	}})
+	if _, err := runner.Run(context.Background(), "init", []string{"aws"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(terraformCalls) != 2 || terraformCalls[0].ToolName != "boilerplate" || terraformCalls[1].ToolName != "git" || contains(terraformCalls[0].Arguments, "init") || contains(terraformCalls[0].Arguments, "tofu") || contains(terraformCalls[0].Arguments, "terraform") || !contains(terraformCalls[1].Arguments, ".cloudopsworks/.provider") {
+		t.Fatalf("terraform init calls = %+v", terraformCalls)
+	}
+	if _, err := os.Stat(tempProvider); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("provider temp file remains, err=%v", err)
+	}
+
+	terragruntDir := fixture(t, ".iac")
+	for _, path := range []string{".inputs", ".inputs_mod", ".cloudopsworks/.inputs_cicd", ".inputs_state"} {
+		full := filepath.Join(terragruntDir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("inputs"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	terragruntCalls := []ToolCall{}
+	terragruntRunner := mustRunner(t, Options{WorkDir: terragruntDir, ToolPaths: map[string]string{"boilerplate": boilerplate, "terragrunt": executable(t, "terragrunt")}, NoInstallTools: true, ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+		terragruntCalls = append(terragruntCalls, call)
+		return ToolExecution{}, nil
+	}})
+	if _, err := terragruntRunner.Run(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(terragruntCalls) != 2 || terragruntCalls[0].ToolName != "boilerplate" || strings.Join(terragruntCalls[0].Arguments, " ") != strings.Join([]string{"--template-url", ".cloudopsworks/boilerplate/main", "--output-folder", ".", "--var-file=.inputs", "--var-file=.inputs_mod", "--var-file=.cloudopsworks/.inputs_cicd", "--var-file=.inputs_state", "--var=iac_project=" + filepath.Base(terragruntDir), "--disable-dependency-prompt"}, " ") || strings.Join(terragruntCalls[1].Arguments, " ") != "hcl format --exclude-dir .cloudopsworks" {
+		t.Fatalf("terragrunt init calls = %+v", terragruntCalls)
+	}
+}
+
+func TestTerragruntInitStopsBeforeFormattingWhenBoilerplateFails(t *testing.T) {
+	workdir := fixture(t, ".iac")
+	calls := []ToolCall{}
+	runner := mustRunner(t, Options{WorkDir: workdir, ToolPaths: map[string]string{"boilerplate": executable(t, "boilerplate"), "terragrunt": executable(t, "terragrunt")}, NoInstallTools: true, ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+		calls = append(calls, call)
+		if call.ToolName == "boilerplate" {
+			return ToolExecution{ExitStatus: 9, Stderr: "render failed"}, nil
+		}
+		return ToolExecution{}, nil
+	}})
+	_, err := runner.Run(context.Background(), "init", nil)
+	if err == nil || codeOf(err) != "project_operation_failed" {
+		t.Fatalf("failure = %v", err)
+	}
+	if len(calls) != 1 || calls[0].ToolName != "boilerplate" {
+		t.Fatalf("calls after failure = %+v", calls)
+	}
+}
+
+func TestAutoEngineDefaultsToOpenTofu(t *testing.T) {
+	pathDir := t.TempDir()
+	t.Setenv("PATH", pathDir)
+	provisioner, err := toolspkg.NewProvisioner(toolspkg.Options{ToolsDir: t.TempDir(), WorkDir: t.TempDir(), SkipInstall: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := mustRunner(t, Options{WorkDir: fixture(t, ".terraform-module"), NoInstallTools: true, Engine: "auto"})
+	got, err := runner.selectEngine(provisioner)
+	if err != nil || got != "tofu" {
+		t.Fatalf("default engine = %q, err=%v", got, err)
+	}
+	defaultRunner := mustRunner(t, Options{WorkDir: fixture(t, ".terraform-module")})
+	if defaultRunner.Opts.Engine != "tofu" {
+		t.Fatalf("runner default engine = %q, want tofu", defaultRunner.Opts.Engine)
+	}
+}
+
+func fixture(t *testing.T, marker string) string {
+	t.Helper()
+	workdir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workdir, ".cloudopsworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, ".cloudopsworks", marker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return workdir
+}
+
+func markerForProfile(t *testing.T, profileID string) string {
+	t.Helper()
+	profile, ok := DefaultRegistry().Profile(profileID)
+	if !ok {
+		t.Fatalf("profile %s missing", profileID)
+	}
+	return profile.Markers[0].Name
+}
+
+func executable(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func mustRunner(t *testing.T, opts Options) *Runner {
+	t.Helper()
+	runner, err := NewRunner(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func codeOf(err error) string {
+	var projectErr *Error
+	if errors.As(err, &projectErr) {
+		return projectErr.Code
+	}
+	return ""
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func flagNamed(values []FlagDefinition, want string) bool {
+	for _, value := range values {
+		if value.Name == want {
+			return true
+		}
+	}
+	return false
+}

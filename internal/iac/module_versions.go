@@ -20,6 +20,8 @@ type ModuleVersionsOptions struct {
 	WorkDir             string
 	SearchPath          string
 	Upgrade             bool
+	AllowAlpha          bool
+	AllowBeta           bool
 	FixPrefix           bool
 	DryRun              bool
 	ReportGitHubActions bool
@@ -73,9 +75,9 @@ type moduleResult struct {
 }
 
 type semverTag struct {
-	Tag          string
-	Major, Minor int
-	Patch        int
+	Tag                 string
+	Major, Minor, Patch int
+	Prerelease          []string
 }
 
 const (
@@ -88,7 +90,7 @@ const (
 
 var (
 	sourceLineRe = regexp.MustCompile(`^(\s*source\s*=\s*)(["'])([^"']+)(["'])(.*)$`)
-	semverTagRe  = regexp.MustCompile(`^v?([0-9]+)\.([0-9]+)\.([0-9]+)$`)
+	semverTagRe  = regexp.MustCompile(`^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
 	refQueryRe   = regexp.MustCompile(`([?&]ref=)([^&]+)`)
 )
 
@@ -323,7 +325,7 @@ func (r *Runner) processEntry(ctx context.Context, entry ModuleEntry) moduleResu
 		result.LookupErr = err
 		result.Status = "tag-lookup-failed"
 	} else {
-		result.LatestTag = LatestSemverTag(tags)
+		result.LatestTag = LatestSemverTagWithChannels(tags, r.opts.AllowAlpha, r.opts.AllowBeta)
 		switch {
 		case result.LatestTag == "":
 			result.Status = "no-semver-tags"
@@ -523,36 +525,136 @@ func looksLikeRegistryAddress(source string) bool {
 	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 }
 
-// LatestSemverTag returns the highest v?-prefixed x.y.z tag, matching the hook's
-// semver-only filtering behavior.
+// LatestSemverTag returns the highest stable v?-prefixed x.y.z tag.
 func LatestSemverTag(tags []string) string {
+	return LatestSemverTagWithChannels(tags, false, false)
+}
+
+// LatestSemverTagWithChannels returns the highest eligible semantic-version tag.
+// Stable tags are always eligible; alpha and beta prereleases are eligible only
+// when their corresponding channel is enabled. Prereleases from other channels
+// are never eligible.
+func LatestSemverTagWithChannels(tags []string, allowAlpha, allowBeta bool) string {
 	matches := make([]semverTag, 0, len(tags))
 	for _, tag := range tags {
-		parts := semverTagRe.FindStringSubmatch(tag)
-		if parts == nil {
+		parsed, ok := parseSemverTag(tag)
+		if !ok || !isEligibleSemverTag(parsed, allowAlpha, allowBeta) {
 			continue
 		}
-		major, _ := strconv.Atoi(parts[1])
-		minor, _ := strconv.Atoi(parts[2])
-		patch, _ := strconv.Atoi(parts[3])
-		matches = append(matches, semverTag{Tag: tag, Major: major, Minor: minor, Patch: patch})
+		matches = append(matches, parsed)
 	}
 	if len(matches) == 0 {
 		return ""
 	}
 	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].Major != matches[j].Major {
-			return matches[i].Major < matches[j].Major
-		}
-		if matches[i].Minor != matches[j].Minor {
-			return matches[i].Minor < matches[j].Minor
-		}
-		if matches[i].Patch != matches[j].Patch {
-			return matches[i].Patch < matches[j].Patch
+		if cmp := compareSemverTags(matches[i], matches[j]); cmp != 0 {
+			return cmp < 0
 		}
 		return matches[i].Tag < matches[j].Tag
 	})
 	return matches[len(matches)-1].Tag
+}
+
+func parseSemverTag(tag string) (semverTag, bool) {
+	parts := semverTagRe.FindStringSubmatch(tag)
+	if parts == nil {
+		return semverTag{}, false
+	}
+	major, errMajor := strconv.Atoi(parts[1])
+	minor, errMinor := strconv.Atoi(parts[2])
+	patch, errPatch := strconv.Atoi(parts[3])
+	if errMajor != nil || errMinor != nil || errPatch != nil {
+		return semverTag{}, false
+	}
+	parsed := semverTag{Tag: tag, Major: major, Minor: minor, Patch: patch}
+	if parts[4] != "" {
+		parsed.Prerelease = strings.Split(parts[4], ".")
+	}
+	return parsed, true
+}
+
+func isEligibleSemverTag(tag semverTag, allowAlpha, allowBeta bool) bool {
+	if len(tag.Prerelease) == 0 {
+		return true
+	}
+	channel := tag.Prerelease[0]
+	if (channel != "alpha" || !allowAlpha) && (channel != "beta" || !allowBeta) {
+		return false
+	}
+	for _, identifier := range tag.Prerelease[1:] {
+		if !isSemverNumericIdentifier(identifier) {
+			return false
+		}
+	}
+	return true
+}
+
+func isSemverNumericIdentifier(identifier string) bool {
+	if identifier == "" || (len(identifier) > 1 && identifier[0] == '0') {
+		return false
+	}
+	for _, char := range identifier {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func compareSemverTags(a, b semverTag) int {
+	if a.Major != b.Major {
+		return compareInts(a.Major, b.Major)
+	}
+	if a.Minor != b.Minor {
+		return compareInts(a.Minor, b.Minor)
+	}
+	if a.Patch != b.Patch {
+		return compareInts(a.Patch, b.Patch)
+	}
+	if len(a.Prerelease) == 0 && len(b.Prerelease) == 0 {
+		return 0
+	}
+	if len(a.Prerelease) == 0 {
+		return 1
+	}
+	if len(b.Prerelease) == 0 {
+		return -1
+	}
+	for index := 0; index < len(a.Prerelease) && index < len(b.Prerelease); index++ {
+		if cmp := compareSemverIdentifiers(a.Prerelease[index], b.Prerelease[index]); cmp != 0 {
+			return cmp
+		}
+	}
+	return compareInts(len(a.Prerelease), len(b.Prerelease))
+}
+
+func compareInts(a, b int) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareSemverIdentifiers(a, b string) int {
+	aNumeric := isSemverNumericIdentifier(a)
+	bNumeric := isSemverNumericIdentifier(b)
+	if aNumeric && bNumeric {
+		if len(a) != len(b) {
+			return compareInts(len(a), len(b))
+		}
+		return strings.Compare(a, b)
+	}
+	if aNumeric != bNumeric {
+		if aNumeric {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 
 func replaceRefValue(source, ref string) string {

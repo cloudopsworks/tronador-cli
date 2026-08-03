@@ -63,6 +63,42 @@
       "version_env_vars": ["TRONADOR_YQ_VERSION", "YQ_VERSION"],
       "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}",
       "format": "binary"
+    },
+    {
+      "name": "go",
+      "executable": "go",
+      "format": "unavailable"
+    },
+    {
+      "name": "git",
+      "executable": "git",
+      "format": "unavailable"
+    },
+    {
+      "name": "terraform",
+      "executable": "terraform",
+      "default_version": "1.11.1",
+      "version_env_vars": ["TRONADOR_TERRAFORM_VERSION", "TERRAFORM_VERSION"],
+      "url_template": "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}_{arch}.zip",
+      "format": "zip",
+      "archive_binary_path": "terraform"
+    },
+    {
+      "name": "tofu",
+      "executable": "tofu",
+      "default_version": "1.11.4",
+      "version_env_vars": ["TRONADOR_TOFU_VERSION", "TOFU_VERSION"],
+      "url_template": "https://github.com/opentofu/opentofu/releases/download/v{version}/tofu_{version}_{os}_{arch}.zip",
+      "format": "zip",
+      "archive_binary_path": "tofu"
+    },
+    {
+      "name": "terragrunt",
+      "executable": "terragrunt",
+      "default_version": "1.1.2",
+      "version_env_vars": ["TRONADOR_TERRAGRUNT_VERSION", "TERRAGRUNT_VERSION"],
+      "url_template": "https://github.com/gruntwork-io/terragrunt/releases/download/v{version}/terragrunt_{os}_{arch}{ext}",
+      "format": "binary"
     }
   ]
 }
