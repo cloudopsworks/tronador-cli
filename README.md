@@ -46,7 +46,8 @@ It's 100% Open Source and licensed under the [APACHE2](LICENSE).
 - **Binary naming**: Published release automation produces the clean `tronador` executable; plain local `go build` from this repository still emits `tronador-cli` unless `-o tronador` is passed.
 - **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
 - **README and docs generation**: Port Tronador `readme/*` and `docs/*` Makefile targets into the CLI with `tronador readme` and `tronador docs`, including GitHub-backed runtime template asset sync.
-- **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [repository lifecycle commands](docs/repos-command.md), and [README/docs commands](docs/readme-docs-command.md).
+- **Implicit project capabilities**: Detect implementation markers and run namespace-free `init`, `version`, `lint`, `format`, and cleanup capabilities through CLI-native typed pipelines with `tronador project`.
+- **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [project capabilities](docs/project-command.md), [repository lifecycle commands](docs/repos-command.md), and [README/docs commands](docs/readme-docs-command.md).
 - **Config-driven upgrade paths**: Repository templates and migration plans are loaded from JSON, so future upgrade paths such as `5.11` and `5.12` can be added without rewriting command dispatch code.
 - **Release packages**: GoReleaser publishes archives plus native Linux packages (`.deb`, `.rpm`, `.apk`), Homebrew casks, Chocolatey packages, and shell/PowerShell installers from the same release pipeline; release package names remain `tronador-cli` while the executable is `tronador`.
 - **Cross-platform support**: Linux, macOS, Windows, and FreeBSD builds are produced from a static `CGO_ENABLED=0` binary.
@@ -61,6 +62,7 @@ Start with the command index in [docs/commands.md](docs/commands.md). Dedicated 
 
 - [AWS command](docs/aws-command.md) — tagging, secret copy, default VPC removal, and security remediation.
 - [IaC command](docs/iac-command.md) — `.cloudopsworks/.iac`-guarded module source version checks and updates.
+- [Project command](docs/project-command.md) — detection-driven, namespace-free capabilities and typed tool pipelines.
 - [Repos command](docs/repos-command.md) — repository template lifecycle workflows.
 - [README/docs command](docs/readme-docs-command.md) — generated README files, Make target docs, Terraform docs, copyright headers, and runtime template assets.
 
@@ -108,15 +110,25 @@ See [docs/iac-command.md](docs/iac-command.md) for supported source forms, mutat
 `repos upgrade` preserves implementation-owned GitHub templates: issue templates
 including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
 when missing; `.github/dependabot.yml` is copied only when the template has it
-and the implementation repository does not; reserved `98_*` and `99_*` template-
-only issue forms are never propagated. Existing `auto-assign.yml` configuration
-is preserved. Template `.gitignore` content is managed in a marker-delimited
-block while user content outside the block is preserved; an unmarked or malformed
-file is treated as user-owned and receives a fresh managed block.
+and the implementation repository does not; reserved `98_*` and `99_*`
+template-only issue forms are never propagated. Existing `auto-assign.yml`
+configuration is preserved. The template `.gitignore` content is managed in a
+marker-delimited block while user content outside the block is preserved; an
+unmarked or malformed file is treated as user-owned and receives a fresh managed
+block.
 
 The command uses the embedded JSON catalog at `internal/repos/default_config.json` by default. Override it with `--config path/to/repos-config.json` when testing new repository types or future migration plans.
 
 For the full command mapping and architecture notes, see [docs/repos-command.md](docs/repos-command.md).
+
+
+### Implicit Project Capabilities
+
+`tronador project` detects a supported implementation from `.cloudopsworks/`
+and runs namespace-free capabilities such as `init`, `version`, `lint`, and
+`format` through CLI-native typed tool pipelines. See
+[docs/project-command.md](docs/project-command.md) for detection, tool flags,
+and safety behavior.
 
 
 ### README and Documentation Commands
@@ -133,7 +145,7 @@ For the full command mapping and architecture notes, see [docs/repos-command.md]
 
 README tool provisioning is per-tool and on-demand: `readme build`, `readme lint`, and `readme deps` resolve gomplate from `--gomplate`, `PATH`, then `~/.cloudopsworks/tronador/gomplate`, and only download the requested gomplate release when it is missing. The provisioner downloads direct upstream GitHub release assets and does not use `tronador-packages`.
 
-Tool metadata is JSON-driven instead of hardcoded in Go. The binary ships an embedded `tools.json` with default definitions for `gomplate`, `gh`, `boilerplate`, `gitversion`, and `yq`. Runtime overrides can be supplied from `~/.cloudopsworks/tronador/tools.json`, project `.cloudopsworks/tronador/tools.json`, project `.tronador/tools.json`, `TRONADOR_TOOLS_CONFIG`, or `--tools-config`; overrides merge field-by-field by tool name.
+Tool metadata is JSON-driven instead of hardcoded in Go. The binary ships an embedded `tools.json` with default definitions for `gomplate`, `gh`, `boilerplate`, `gitversion`, `yq`, `go`, `git`, `terraform`, `tofu`, and `terragrunt`. Runtime overrides can be supplied from `~/.cloudopsworks/tronador/tools.json`, project `.cloudopsworks/tronador/tools.json`, project `.tronador/tools.json`, `TRONADOR_TOOLS_CONFIG`, or `--tools-config`; overrides merge field-by-field by tool name.
 
 README generator assets resolve in this order: flags, environment variables, project-local `.tronador/readme`, user config, GitHub sync cache, shared install paths, then embedded fallback assets. Template refresh remains explicit through `readme assets sync` when you want to refresh templates from GitHub.
 
