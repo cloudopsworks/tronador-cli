@@ -64,7 +64,7 @@ tronador/
 .omx/
 .ai/
 # END TRONADOR TEMPLATE MANAGED BLOCK
-
+.ouroboros
 
 # Tronador Go app
 tronador-cli
