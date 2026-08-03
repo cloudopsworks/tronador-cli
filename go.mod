@@ -3,7 +3,7 @@ module tronador-cli
 go 1.26.3
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.8
+	github.com/aws/aws-sdk-go-v2 v1.43.2
 	github.com/aws/aws-sdk-go-v2/config v1.32.19
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.18
 	github.com/aws/aws-sdk-go-v2/service/acm v1.39.1
@@ -42,7 +42,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/signin v1.1.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.18 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.1 // indirect
-	github.com/aws/smithy-go v1.26.0 // indirect
+	github.com/aws/smithy-go v1.27.5 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/cli/safeexec v1.0.1 // indirect
 	github.com/cli/shurcooL-graphql v0.0.4 // indirect
