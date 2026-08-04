@@ -115,7 +115,7 @@ Maintainers use the `cw-release` skill to drive the full release lifecycle (bran
 
 Open a GitHub Issue with:
 
-1. `tronador-cli --version` output
+1. `tronador version` output
 2. OS and architecture
 3. The exact command you ran
 4. Expected vs. actual behaviour

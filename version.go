@@ -11,7 +11,7 @@ var (
 
 func buildVersion() string {
 	// Keep main.commit as a live GoReleaser ldflag target while preserving the
-	// existing `tronador-cli version` output shape of printing only the version.
+	// existing `tronador version` output shape of printing only the version.
 	_ = strings.TrimSpace(commit)
 
 	value := strings.TrimSpace(version)

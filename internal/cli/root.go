@@ -11,7 +11,7 @@ import (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "tronador-cli",
+	Use:   "tronador",
 	Short: "A CLI tool for CloudOps Works Tronador workflows",
 	Long: `Tronador CLI is a command-line tool for CloudOps Works Tronador workflows.
 It provides AWS resource automation, infrastructure-as-code helpers, repository

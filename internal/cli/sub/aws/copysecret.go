@@ -25,16 +25,16 @@ across accounts using assume role authentication, or across regions.
 
 Examples:
   # Copy secret within the same account and region
-  tronador-cli aws copysecret --source my-secret --dest my-secret-copy
+  tronador aws copysecret --source my-secret --dest my-secret-copy
 
   # Copy secret across regions in the same account
-  tronador-cli aws copysecret --source my-secret --dest my-secret-copy --dest-region us-west-2
+  tronador aws copysecret --source my-secret --dest my-secret-copy --dest-region us-west-2
 
   # Copy secret across accounts using assume role
-  tronador-cli aws copysecret --source my-secret --dest my-secret-copy --dest-assume-role-arn arn:aws:iam::123456789012:role/MyRole
+  tronador aws copysecret --source my-secret --dest my-secret-copy --dest-assume-role-arn arn:aws:iam::123456789012:role/MyRole
 
   # Copy secret across accounts and regions
-  tronador-cli aws copysecret --source my-secret --dest my-secret-copy --dest-assume-role-arn arn:aws:iam::123456789012:role/MyRole --dest-region us-west-2
+  tronador aws copysecret --source my-secret --dest my-secret-copy --dest-assume-role-arn arn:aws:iam::123456789012:role/MyRole --dest-region us-west-2
 
 Note: If --dest parameter is omitted, the destination secret will have the same name as the source.
 If the destination secret already exists, a new version will be created instead of overwriting the current version.`,
