@@ -50,9 +50,12 @@ files and optionally update ?ref= pins or normalize missing git:: prefixes.
 The command refuses to run unless --workdir contains .cloudopsworks/.iac.
 When --path is set, module discovery starts there without changing --workdir.
 
-Without --upgrade, the command reports the next patch, minor, and major
-semantic-version targets without changing files. With --upgrade, patch is
+Without --upgrade, the command reports available patch, minor, and major
+semantic-version targets without changing files; unavailable tiers are omitted.
+With --upgrade, patch is
 selected by default; use --minor or --major to select a broader release tier.
+When --major has no eligible major target, it falls back to the highest eligible
+minor target in the current major version line.
 The --minor and --major flags require --upgrade and are mutually exclusive.`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
