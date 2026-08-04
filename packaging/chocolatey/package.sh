@@ -84,7 +84,7 @@ cat > "$pkg_root/tronador-cli.nuspec" <<NUSPEC
     <docsUrl>https://github.com/cloudopsworks/tronador-cli/blob/master/docs/installation.md</docsUrl>
     <bugTrackerUrl>https://github.com/cloudopsworks/tronador-cli/issues</bugTrackerUrl>
     <tags>tronador cli cloudopsworks aws devops</tags>
-    <summary>CLI tool for CloudOps Works Tronador workflows and AWS automation.</summary>
+    <summary>CLI tool for CloudOps Works Tronador workflows and AWS automation</summary>
     <description>tronador-cli provides repository and AWS automation commands for CloudOps Works Tronador workflows.</description>
     <releaseNotes>https://github.com/cloudopsworks/tronador-cli/releases/tag/${release_tag}</releaseNotes>
   </metadata>
