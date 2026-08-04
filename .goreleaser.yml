@@ -52,7 +52,7 @@ nfpms:
     vendor: CloudOps Works LLC
     homepage: https://github.com/cloudopsworks/tronador-cli
     maintainer: CloudOps Works <info@cloudopsworks.co>
-    description: CLI tool for CloudOps Works Tronador workflows and AWS automation.
+    description: CLI tool for CloudOps Works Tronador workflows and AWS automation
     license: Apache-2.0
     section: utils
     priority: optional
@@ -94,7 +94,7 @@ homebrew_casks:
         enabled: true
         draft: false
     directory: Casks
-    description: CLI tool for CloudOps Works Tronador workflows and AWS automation.
+    description: CLI tool for CloudOps Works Tronador workflows and AWS automation
     homepage: https://github.com/cloudopsworks/tronador-cli
     license: Apache-2.0
     binaries:
