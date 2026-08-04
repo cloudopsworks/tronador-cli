@@ -1,6 +1,7 @@
 package project
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -259,6 +260,138 @@ func TestToolExitStatusIsPreserved(t *testing.T) {
 	var projectErr *Error
 	if !errors.As(err, &projectErr) || projectErr.ExitStatus != 7 {
 		t.Fatalf("operation error status = %+v, want 7", projectErr)
+	}
+}
+
+func TestExecuteToolPropagatesStdinAndStreamsCapturedOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell process fixture is POSIX-specific")
+	}
+	var stdout, stderr bytes.Buffer
+	workdir := t.TempDir()
+	tool := shellExecutable(t, "stdio-tool", `input=$(cat)
+printf 'stdout:%s\n' "$input"
+printf 'stderr:%s\n' "$input" >&2`)
+	runner := mustRunner(t, Options{
+		WorkDir: workdir,
+		Stdin:   strings.NewReader("payload\n"),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+
+	execution, err := runner.executeTool(context.Background(), ToolCall{ResolvedExecutable: tool, WorkingDirectory: workdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.Stdout != "stdout:payload\n" || execution.Stderr != "stderr:payload\n" || execution.ExitStatus != 0 {
+		t.Fatalf("execution = %+v", execution)
+	}
+	if stdout.String() != execution.Stdout || stderr.String() != execution.Stderr {
+		t.Fatalf("streamed output = %q/%q, captured = %q/%q", stdout.String(), stderr.String(), execution.Stdout, execution.Stderr)
+	}
+}
+
+func TestTerragruntInitStreamsRealToolOutputOnceAndPreservesCaptures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell process fixture is POSIX-specific")
+	}
+	workdir := fixture(t, ".iac")
+	boilerplate := shellExecutable(t, "boilerplate", `input=$(cat)
+printf 'boilerplate stdout:%s\n' "$input"
+printf 'boilerplate stderr:%s\n' "$input" >&2`)
+	terragrunt := shellExecutable(t, "terragrunt", `printf 'terragrunt stdout\n'
+printf 'terragrunt stderr\n' >&2`)
+	var stdout, stderr bytes.Buffer
+	runner := mustRunner(t, Options{
+		WorkDir: workdir,
+		Stdin:   strings.NewReader("pipeline-input\n"),
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		ToolPaths: map[string]string{
+			"boilerplate": boilerplate,
+			"terragrunt":  terragrunt,
+		},
+		NoInstallTools: true,
+	})
+
+	result, err := runner.Run(context.Background(), "init", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantStdout := "boilerplate stdout:pipeline-input\nterragrunt stdout\nproject terragrunt init completed\n"
+	wantStderr := "boilerplate stderr:pipeline-input\nterragrunt stderr\n"
+	if stdout.String() != wantStdout || stderr.String() != wantStderr {
+		t.Fatalf("streamed output = %q/%q, want %q/%q", stdout.String(), stderr.String(), wantStdout, wantStderr)
+	}
+	if result.Stdout != "boilerplate stdout:pipeline-input\nterragrunt stdout\n" || result.Stderr != wantStderr {
+		t.Fatalf("captured result output = %q/%q", result.Stdout, result.Stderr)
+	}
+	if strings.Count(stdout.String(), "boilerplate stdout:") != 1 || strings.Count(stderr.String(), "boilerplate stderr:") != 1 {
+		t.Fatal("child output was duplicated")
+	}
+}
+
+func TestTerragruntInitPreservesRealToolExitStatusAndOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell process fixture is POSIX-specific")
+	}
+	workdir := fixture(t, ".iac")
+	boilerplate := shellExecutable(t, "boilerplate", `printf 'boilerplate stdout\n'
+printf 'boilerplate stderr\n' >&2`)
+	terragrunt := shellExecutable(t, "terragrunt", `printf 'terragrunt stdout\n'
+printf 'terragrunt stderr\n' >&2
+exit 23`)
+	var stdout, stderr bytes.Buffer
+	runner := mustRunner(t, Options{
+		WorkDir: workdir,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+		ToolPaths: map[string]string{
+			"boilerplate": boilerplate,
+			"terragrunt":  terragrunt,
+		},
+		NoInstallTools: true,
+	})
+
+	_, err := runner.Run(context.Background(), "init", nil)
+	if err == nil {
+		t.Fatal("failing Terragrunt unexpectedly succeeded")
+	}
+	var projectErr *Error
+	if !errors.As(err, &projectErr) || projectErr.ExitStatus != 23 {
+		t.Fatalf("project error = %+v, want exit status 23", err)
+	}
+	if projectErr.Stdout != "terragrunt stdout\n" || projectErr.Stderr != "terragrunt stderr\n" {
+		t.Fatalf("project error output = %q/%q", projectErr.Stdout, projectErr.Stderr)
+	}
+	if stdout.String() != "boilerplate stdout\nterragrunt stdout\n" || stderr.String() != "boilerplate stderr\nterragrunt stderr\n" {
+		t.Fatalf("streamed failure output = %q/%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestJSONExecutionDoesNotStreamChildOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell process fixture is POSIX-specific")
+	}
+	var stdout, stderr bytes.Buffer
+	workdir := t.TempDir()
+	tool := shellExecutable(t, "json-tool", `printf 'child stdout\n'
+printf 'child stderr\n' >&2`)
+	runner := mustRunner(t, Options{
+		WorkDir: workdir,
+		JSON:    true,
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	execution, err := runner.executeTool(context.Background(), ToolCall{ResolvedExecutable: tool, WorkingDirectory: workdir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("JSON execution leaked child output: %q/%q", stdout.String(), stderr.String())
+	}
+	if execution.Stdout != "child stdout\n" || execution.Stderr != "child stderr\n" {
+		t.Fatalf("captured child output = %+v", execution)
 	}
 }
 
@@ -623,6 +756,16 @@ func executable(t *testing.T, name string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte("fake"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func shellExecutable(t *testing.T, name, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	contents := "#!/bin/sh\nset -eu\n" + body + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return path
