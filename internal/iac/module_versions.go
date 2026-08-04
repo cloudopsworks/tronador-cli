@@ -93,11 +93,28 @@ func (t versionTargets) any() bool {
 func (t versionTargets) selected(minor, major bool) string {
 	switch {
 	case major:
+		if t.Major == "" {
+			return t.Minor
+		}
 		return t.Major
 	case minor:
 		return t.Minor
 	default:
 		return t.Patch
+	}
+}
+
+func (t versionTargets) selectedScope(minor, major bool) string {
+	switch {
+	case major:
+		if t.Major == "" && t.Minor != "" {
+			return "minor"
+		}
+		return "major"
+	case minor:
+		return "minor"
+	default:
+		return "patch"
 	}
 }
 
@@ -432,13 +449,13 @@ func (r *Runner) printResult(ctx context.Context, result moduleResult) {
 	printVersionTarget(r.opts.Stdout, "minor", result.Targets.Minor)
 	printVersionTarget(r.opts.Stdout, "major", result.Targets.Major)
 	if result.UpgradeNeeded {
-		scope := selectedScope(r.opts.Minor, r.opts.Major)
+		scope := result.Targets.selectedScope(r.opts.Minor, r.opts.Major)
 		fmt.Fprintf(r.opts.Stdout, "🚨 Module in %s is outdated for %s upgrades:\n", rel, scope)
 		fmt.Fprintf(r.opts.Stdout, "    Current: %s\n", result.Info.Ref)
 		fmt.Fprintf(r.opts.Stdout, "    Selected: %s\n", result.SelectedTag)
 		r.reportGitHubAction(ctx, result, "outdated")
 	} else if result.Targets.any() {
-		fmt.Fprintf(r.opts.Stdout, "ℹ️  Module in %s has no %s upgrade target; other release-tier targets are available.\n", rel, selectedScope(r.opts.Minor, r.opts.Major))
+		fmt.Fprintf(r.opts.Stdout, "ℹ️  Module in %s has no %s upgrade target; other release-tier targets are available.\n", rel, result.Targets.selectedScope(r.opts.Minor, r.opts.Major))
 		r.reportGitHubAction(ctx, result, "updates-available")
 	} else {
 		fmt.Fprintf(r.opts.Stdout, "✅ Module in %s is up to date.\n", rel)
@@ -458,22 +475,14 @@ func (r *Runner) printResult(ctx context.Context, result moduleResult) {
 }
 
 func printVersionTarget(w io.Writer, scope, tag string) {
+	tag = strings.TrimSpace(tag)
 	if tag == "" {
-		fmt.Fprintf(w, "    Next %s: none\n", scope)
+		return
+	}
+	if _, ok := parseSemverTag(tag); !ok {
 		return
 	}
 	fmt.Fprintf(w, "    Next %s: %s\n", scope, tag)
-}
-
-func selectedScope(minor, major bool) string {
-	switch {
-	case major:
-		return "major"
-	case minor:
-		return "minor"
-	default:
-		return "patch"
-	}
 }
 
 func findVersionTargets(current semverTag, tags []string, allowAlpha, allowBeta bool) (versionTargets, string, bool) {
@@ -524,7 +533,7 @@ func (r *Runner) reportGitHubAction(ctx context.Context, result moduleResult, re
 	rel := r.rel(result.Entry.File)
 	body := fmt.Sprintf("🚨 Module in %s is %s: %s | %s | Current: %s | Latest: %s", rel, reason, rel, result.Info.Repository, result.Info.Ref, result.LatestTag)
 	if result.SelectedTag != "" {
-		body += fmt.Sprintf(" | Selected %s: %s", selectedScope(r.opts.Minor, r.opts.Major), result.SelectedTag)
+		body += fmt.Sprintf(" | Selected %s: %s", result.Targets.selectedScope(r.opts.Minor, r.opts.Major), result.SelectedTag)
 	}
 	fmt.Fprintf(r.opts.Stdout, "::warning:: %s\n", body)
 	if r.opts.CommentPRNumber != "" {

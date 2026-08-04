@@ -62,7 +62,14 @@ changed. With `-u, --upgrade`, the patch target is selected by default. Use
 `--minor` or `--major` with `--upgrade` to select the corresponding broader
 target; those flags are mutually exclusive. If the selected tier has no target,
 the command leaves the ref unchanged and reports any broader targets that are
-available.
+available. Release-tier lines are printed only for concrete available semantic
+version tags; unavailable tiers are omitted. When no tier has a target, the
+surrounding status summary is still printed unchanged.
+
+When `--major` is selected for an upgrade and no eligible major target exists,
+the command falls back to the highest eligible minor target in the current
+major version line. If neither a major nor same-major minor target is available,
+the ref remains unchanged.
 
 Stable tags always qualify. Alpha and beta prerelease tags qualify only when
 enabled with `--alpha` or `--beta`; their optional dot-separated suffixes must
