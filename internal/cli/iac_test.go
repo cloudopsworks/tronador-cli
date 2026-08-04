@@ -42,9 +42,22 @@ func TestIACModuleKeepsModuleVersionsAliases(t *testing.T) {
 
 func TestIACModuleExposesPrereleaseChannelFlags(t *testing.T) {
 	cmd := newIACModuleVersionsCommand()
-	for _, name := range []string{"alpha", "beta"} {
+	for _, name := range []string{"alpha", "beta", "minor", "major"} {
 		if cmd.Flag(name) == nil {
 			t.Fatalf("iac module flag --%s is missing", name)
 		}
+	}
+}
+
+func TestIACModuleTierFlagsAreMutuallyExclusive(t *testing.T) {
+	t.Cleanup(func() {
+		iacModuleVersionsMinor = false
+		iacModuleVersionsMajor = false
+		iacModuleVersionsUpgrade = false
+	})
+	cmd := newIACModuleVersionsCommand()
+	cmd.SetArgs([]string{"--minor", "--major"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("parsing --minor and --major succeeded, want mutually-exclusive error")
 	}
 }

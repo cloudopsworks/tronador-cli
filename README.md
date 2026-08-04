@@ -42,7 +42,7 @@ It's 100% Open Source and licensed under the [APACHE2](LICENSE).
 ## Introduction
 
 - **AWS resource automation**: Apply consistent organization metadata, remediate S3/EC2 security controls, copy Secrets Manager secrets, and remove default VPCs.
-- **Infrastructure-as-code module auditing**: Run `tronador iac module` in `.cloudopsworks/.iac` workspaces to report Terragrunt module source pins, detect missing Terraform `git::` prefixes, and optionally update module refs safely.
+- **Infrastructure-as-code module auditing**: Run `tronador iac module` in `.cloudopsworks/.iac` workspaces to report Terragrunt module source pins, list patch/minor/major targets, detect missing Terraform `git::` prefixes, and optionally update module refs safely.
 - **Binary naming**: Published release automation produces the clean `tronador` executable; plain local `go build` from this repository still emits `tronador-cli` unless `-o tronador` is passed.
 - **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
 - **README and docs generation**: Port Tronador `readme/*` and `docs/*` Makefile targets into the CLI with `tronador readme` and `tronador docs`, including GitHub-backed runtime template asset sync.
@@ -89,7 +89,7 @@ Global flags available from the root command:
 
 `tronador iac` commands run only when `--workdir` contains `.cloudopsworks/.iac`.
 
-- `iac module` — scan `terragrunt.hcl` files for direct GitHub module sources with `?ref=` pins, report latest semantic-version tags, flag missing `git::` prefixes, and optionally mutate eligible sources.
+- `iac module` — scan `terragrunt.hcl` files for direct GitHub module sources with `?ref=` pins, report next patch/minor/major targets, flag missing `git::` prefixes, and optionally mutate the selected tier.
 - Compatibility aliases: `iac module-versions` and `iac module_versions`.
 - `--path` limits module discovery without changing marker validation; relative paths resolve under `--workdir` and paths outside `--workdir` are rejected.
 
@@ -284,14 +284,18 @@ go build -o tronador .
 # Report module versions in an IaC workspace
 tronador iac module --workdir ../my-iac-workspace
 
-# Scan one environment path while marker validation remains at --workdir
+# Report available patch, minor, and major targets for one environment path
 tronador iac module --workdir ../my-iac-workspace --path env/dev
 
-# Preview latest ref upgrades and missing git:: prefix normalization
+# Preview default patch upgrades and missing git:: prefix normalization
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --dry-run
 
-# Apply eligible ref upgrades and git:: prefix fixes
+# Apply the default patch target and git:: prefix fixes
 tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade
+
+# Select a broader release tier instead of the default patch target
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --minor
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --major
 
 # Allow alpha and beta prereleases when selecting updates
 tronador iac module --workdir ../my-iac-workspace --upgrade --alpha --beta
