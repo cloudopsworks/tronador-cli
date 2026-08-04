@@ -71,7 +71,7 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 		NoInstallTools: projectNoInstallTools, AllowNetwork: projectAllowNetwork,
 		ToolVersions: versions, ToolPaths: paths, Engine: projectEngine, Yes: projectYes,
 		JSON:   projectJSON,
-		DryRun: commandDryRun(cmd), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
+		DryRun: commandDryRun(cmd), Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 	})
 	if err != nil {
 		return emitProjectError(cmd, err)

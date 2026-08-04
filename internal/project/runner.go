@@ -31,6 +31,7 @@ type Options struct {
 	Yes            bool
 	DryRun         bool
 	JSON           bool
+	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
 	Registry       Registry
@@ -167,6 +168,9 @@ func NewRunner(opts Options) (*Runner, error) {
 	}
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
+	}
+	if opts.Stdin == nil {
+		opts.Stdin = os.Stdin
 	}
 	if opts.Registry.Profiles == nil {
 		opts.Registry = DefaultRegistry()
@@ -670,7 +674,9 @@ func (r *Runner) toolError(capability, name string, err error) *Error {
 
 func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution, error) {
 	if r.Opts.ExecuteTool != nil {
-		return r.Opts.ExecuteTool(ctx, call)
+		execution, err := r.Opts.ExecuteTool(ctx, call)
+		r.streamExecution(execution)
+		return execution, err
 	}
 	var stdout, stderr bytes.Buffer
 	command := call.ResolvedExecutable
@@ -679,8 +685,9 @@ func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution,
 	}
 	cmd := exec.CommandContext(ctx, command, call.Arguments...)
 	cmd.Dir = call.WorkingDirectory
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdin = r.Opts.Stdin
+	cmd.Stdout = io.MultiWriter(&stdout, r.toolOutput(r.Opts.Stdout))
+	cmd.Stderr = io.MultiWriter(&stderr, r.toolOutput(r.Opts.Stderr))
 	err := cmd.Run()
 	status := 0
 	if err != nil {
@@ -691,6 +698,25 @@ func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution,
 		}
 	}
 	return ToolExecution{Stdout: stdout.String(), Stderr: stderr.String(), ExitStatus: status}, err
+}
+
+func (r *Runner) toolOutput(writer io.Writer) io.Writer {
+	if r.Opts.JSON {
+		return io.Discard
+	}
+	return writer
+}
+
+func (r *Runner) streamExecution(execution ToolExecution) {
+	if r.Opts.JSON {
+		return
+	}
+	if execution.Stdout != "" {
+		_, _ = fmt.Fprint(r.Opts.Stdout, execution.Stdout)
+	}
+	if execution.Stderr != "" {
+		_, _ = fmt.Fprint(r.Opts.Stderr, execution.Stderr)
+	}
 }
 
 func resolvedPathByName(results []ResolvedToolResult, name string) (string, bool) {
@@ -723,12 +749,6 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 	execution, err := r.executeTool(ctx, call)
 	result.Stdout = execution.Stdout
 	result.Stderr = execution.Stderr
-	if !r.Opts.JSON && execution.Stdout != "" {
-		fmt.Fprint(r.Opts.Stdout, execution.Stdout)
-	}
-	if !r.Opts.JSON && execution.Stderr != "" {
-		fmt.Fprint(r.Opts.Stderr, execution.Stderr)
-	}
 	if err != nil {
 		status := execution.ExitStatus
 		if status == 0 {

@@ -191,12 +191,6 @@ func (r *Runner) executeSteps(ctx context.Context, detection Detection, plan Ope
 		execution, err := r.executeTool(ctx, call)
 		result.Stdout += execution.Stdout
 		result.Stderr += execution.Stderr
-		if !r.Opts.JSON && execution.Stdout != "" {
-			fmt.Fprint(r.Opts.Stdout, execution.Stdout)
-		}
-		if !r.Opts.JSON && execution.Stderr != "" {
-			fmt.Fprint(r.Opts.Stderr, execution.Stderr)
-		}
 		if err == nil && execution.ExitStatus != 0 {
 			err = fmt.Errorf("%s exited with status %d", call.ToolName, execution.ExitStatus)
 		}
