@@ -204,10 +204,10 @@ func TestVersionUpdatesProfileMetadata(t *testing.T) {
 		{profile: "docker", name: "package.json", before: "{\n  \"version\": \"0.1.0\"\n}\n", after: "{\n  \"version\": \"2.4.6\"\n}\n"},
 		{profile: "dotnet", name: "app.csproj", before: "<Project>\n  <Version>0.1.0</Version>\n</Project>\n", after: "<Project>\n  <Version>2.4.6</Version>\n</Project>\n"},
 		{profile: "flutter", name: "pubspec.yaml", before: "name: app\nversion: 0.1.0\n", after: "name: app\nversion: 2.4.6\n"},
-		{profile: "java", name: "pom.xml", before: "<project>\n  <version>0.1.0</version>\n</project>\n", after: "<project>\n  <version>2.4.6</version>\n</project>\n"},
+		{profile: "java", name: "pom.xml", before: "<project>\n  <parent><version>9.9.9</version></parent>\n  <version>0.1.0</version>\n  <dependencies><dependency><version>8.8.8</version></dependency></dependencies>\n</project>\n", after: "<project>\n  <parent><version>9.9.9</version></parent>\n  <version>2.4.6</version>\n  <dependencies><dependency><version>8.8.8</version></dependency></dependencies>\n</project>\n"},
 		{profile: "node", name: "package.json", before: "{\n  \"version\": \"0.1.0\",\n  \"name\": \"app\"\n}\n", after: "{\n  \"version\": \"2.4.6\",\n  \"name\": \"app\"\n}\n"},
 		{profile: "python", name: "pyproject.toml", before: "[project]\nversion = \"0.1.0\"\n", after: "[project]\nversion = \"2.4.6\"\n"},
-		{profile: "rust", name: "Cargo.toml", before: "[package]\nversion = \"0.1.0\"\n", after: "[package]\nversion = \"2.4.6\"\n"},
+		{profile: "rust", name: "Cargo.toml", before: "[package]\nversion = \"0.1.0\"\n\n[dependencies]\nother = { version = \"8.8.8\" }\n", after: "[package]\nversion = \"2.4.6\"\n\n[dependencies]\nother = { version = \"8.8.8\" }\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.profile, func(t *testing.T) {
@@ -473,6 +473,9 @@ func TestApplicationInitUsesEachTemplatePipeline(t *testing.T) {
 				if step.Call != nil && (step.Call.ToolName == "boilerplate" || step.Call.ToolName == "terraform" || step.Call.ToolName == "tofu" || step.Call.ToolName == "terragrunt") {
 					t.Fatalf("application init unexpectedly dispatches infrastructure tool: %+v", step.Call)
 				}
+				if step.Call != nil && step.Call.ToolName == "yq" {
+					t.Fatalf("application init still dispatches external yq: %+v", step.Call)
+				}
 			}
 			if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
 				t.Fatalf("steps = %v, want %v", gotIDs, wantIDs)
@@ -490,7 +493,7 @@ func TestApplicationInitExecutesCapturedValuesAndNativeSteps(t *testing.T) {
 	project := filepath.Base(workdir)
 	runner := mustRunner(t, Options{
 		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
-		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
 		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
 			calls = append(calls, call)
 			switch call.ToolName {
@@ -507,14 +510,57 @@ func TestApplicationInitExecutesCapturedValuesAndNativeSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 4 || calls[0].ToolName != "gh" || calls[1].ToolName != "gitversion" || calls[2].ToolName != "yq" || calls[3].ToolName != "yq" {
+	if len(calls) != 2 || calls[0].ToolName != "gh" || calls[1].ToolName != "gitversion" {
 		t.Fatalf("calls = %+v", calls)
 	}
-	if !contains(calls[2].Arguments, ".name = \"@cloudopsworks/"+project+"\"") || !contains(calls[3].Arguments, ".version = \"1.2.3\"") {
-		t.Fatalf("captured arguments = %+v", calls)
+	packageJSON := string(mustRead(t, filepath.Join(workdir, "package.json")))
+	if !strings.Contains(packageJSON, `"name":"@cloudopsworks/`+project+`"`) || !strings.Contains(packageJSON, `"version":"1.2.3"`) {
+		t.Fatalf("native metadata update = %q", packageJSON)
 	}
-	if len(result.Steps) != 4 || len(result.Calls) != 4 {
+	if len(result.Steps) != 4 || len(result.Calls) != 2 {
 		t.Fatalf("result pipeline = %+v", result)
+	}
+}
+
+func TestJavaInitUpdatesOnlyMavenProjectMetadata(t *testing.T) {
+	workdir := fixture(t, ".java")
+	pom := `<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent><groupId>example</groupId><version>9.9.9</version></parent>
+  <artifactId>template</artifactId>
+  <version>0.1.0</version>
+  <dependencies><dependency><version>8.8.8</version></dependency></dependencies>
+  <build><plugins><plugin><version>7.7.7</version></plugin></plugins></build>
+</project>
+`
+	if err := os.WriteFile(filepath.Join(workdir, "pom.xml"), []byte(pom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			if call.ToolName == "gh" {
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			}
+			return ToolExecution{Stdout: "1.2.3\n"}, nil
+		},
+	})
+	if _, err := runner.Run(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	updated := string(mustRead(t, filepath.Join(workdir, "pom.xml")))
+	project := filepath.Base(workdir)
+	for _, want := range []string{
+		"<artifactId>" + project + "</artifactId>",
+		"<version>1.2.3-SNAPSHOT</version>",
+		"<parent><groupId>example</groupId><version>9.9.9</version></parent>",
+		"<version>8.8.8</version>",
+		"<version>7.7.7</version>",
+	} {
+		if !strings.Contains(updated, want) {
+			t.Fatalf("pom.xml missing %q after native init: %s", want, updated)
+		}
 	}
 }
 
@@ -545,7 +591,7 @@ func TestGoInitRunsTypedGoCommandsAndRewritesSources(t *testing.T) {
 	calls := []ToolCall{}
 	runner := mustRunner(t, Options{
 		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
-		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq"), "go": executable(t, "go")},
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "go": executable(t, "go")},
 		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
 			calls = append(calls, call)
 			if call.ToolName == "gh" {
@@ -575,7 +621,7 @@ func TestPythonAndRustInitUseNativeMetadataActions(t *testing.T) {
 	}
 	pythonRunner := mustRunner(t, Options{
 		WorkDir: pythonDir, AllowNetwork: true, NoInstallTools: true,
-		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
 		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
 			if call.ToolName == "gh" {
 				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
@@ -601,7 +647,7 @@ func TestPythonAndRustInitUseNativeMetadataActions(t *testing.T) {
 	}
 	rustRunner := mustRunner(t, Options{
 		WorkDir: rustDir, AllowNetwork: true, NoInstallTools: true,
-		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion"), "yq": executable(t, "yq")},
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
 		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
 			if call.ToolName == "gh" {
 				return ToolExecution{Stdout: "cloudopsworks\n"}, nil

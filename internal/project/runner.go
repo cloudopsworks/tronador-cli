@@ -786,66 +786,49 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 }
 
 func updateProfileMetadata(workdir, profile, version string) error {
-	paths := []string{}
-	var pattern *regexp.Regexp
-	var replacement string
+	updates := []metadataUpdate{}
 	switch profile {
 	case "docker", "node":
-		paths = []string{"package.json"}
-		pattern = regexp.MustCompile(`(?m)^(\s*"version"\s*:\s*")[^"]*("\s*,?\s*)$`)
-		replacement = `${1}` + version + `${2}`
+		updates = append(updates, metadataUpdate{Format: "json", Path: "package.json", Selector: "version", Value: version, IgnoreMissing: true})
 	case "flutter":
-		paths = []string{"pubspec.yaml"}
-		pattern = regexp.MustCompile(`(?m)^(\s*version:\s*)[^\r\n]*$`)
-		replacement = `${1}` + version
+		updates = append(updates, metadataUpdate{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true})
 	case "java":
-		paths = []string{"pom.xml"}
-		pattern = regexp.MustCompile(`(?m)^(\s*<version>)[^<]*(</version>)`)
-		replacement = `${1}` + version + `${2}`
+		// Maven has many version elements (parent, dependencies, plugins). The
+		// project version is the direct /project/version element only.
+		updates = append(updates, metadataUpdate{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true})
 	case "python":
-		paths = []string{"pyproject.toml"}
-		pattern = regexp.MustCompile(`(?m)^(\s*version\s*=\s*")[^"]*("\s*)$`)
-		replacement = `${1}` + version + `${2}`
+		err := updateTOMLFields(workdir, "pyproject.toml", "[project]", []tomlField{{name: "version", value: version}})
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	case "rust":
-		paths = []string{"Cargo.toml"}
-		pattern = regexp.MustCompile(`(?m)^(\s*version\s*=\s*")[^"]*("\s*)$`)
-		replacement = `${1}` + version + `${2}`
+		err := updateTOMLFields(workdir, "Cargo.toml", "[package]", []tomlField{{name: "version", value: version}})
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
 	case "dotnet":
 		matches, err := filepath.Glob(filepath.Join(workdir, "*.csproj"))
 		if err != nil {
 			return wrapProjectError("project_operation_failed", "find .csproj metadata", err)
 		}
-		paths = matches
-		pattern = regexp.MustCompile(`(?m)^(\s*<Version>)[^<]*(</Version>)`)
-		replacement = `${1}` + version + `${2}`
-	default:
-		return nil
-	}
-	for _, relative := range paths {
-		if filepath.IsAbs(relative) {
-			var err error
-			relative, err = filepath.Rel(workdir, relative)
+		for _, path := range matches {
+			relative, err := filepath.Rel(workdir, path)
 			if err != nil {
 				return wrapProjectError("project_operation_failed", "resolve metadata path", err)
 			}
+			updates = append(updates, metadataUpdate{Format: "xml", Path: relative, Selector: "Project/PropertyGroup/Version", Value: version, IgnoreMissing: true})
+			// Minimal project fixtures and older templates may place Version
+			// directly under Project; support that shape without broad matching.
+			updates = append(updates, metadataUpdate{Format: "xml", Path: relative, Selector: "Project/Version", Value: version, IgnoreMissing: true})
 		}
-		path, err := safeProjectPath(workdir, relative)
-		if err != nil {
-			return wrapProjectError("project_operation_failed", "resolve metadata "+relative, err)
-		}
-		data, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return wrapProjectError("project_operation_failed", "read metadata "+path, err)
-		}
-		updated := pattern.ReplaceAll(data, []byte(replacement))
-		if bytes.Equal(updated, data) {
-			continue
-		}
-		if err := os.WriteFile(path, updated, 0o644); err != nil {
-			return wrapProjectError("project_operation_failed", "write metadata "+path, err)
+	default:
+		return nil
+	}
+	for _, update := range updates {
+		if err := updateMetadataFile(workdir, update); err != nil {
+			return wrapProjectError("project_operation_failed", "update metadata "+update.Path, err)
 		}
 	}
 	return nil

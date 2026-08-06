@@ -58,8 +58,10 @@ ordered typed plan. It never dispatches `make init`, nor does it infer an
 engine subcommand from the word `init`.
 
 - Application markers execute their template's `code/init` steps: repository
-  owner/version captures, metadata edits, .NET renames, Go module commands,
-  Python/Rust native metadata edits, and template-specific source rewrites.
+  owner/version captures, native JSON/YAML/XML/TOML metadata edits, .NET
+  renames, Go module commands, and template-specific source rewrites. These
+  structured-file mutations run in Go and do not require the external `yq`
+  executable.
 - Terraform modules remove `provider.temp.tf`, then run Boilerplate with the
   validated provider variable. They do not run `terraform init` or `tofu init`.
 - Terragrunt projects run Boilerplate with the existing `.inputs` var files,
@@ -69,3 +71,16 @@ engine subcommand from the word `init`.
 
 Dry-run output exposes each native and tool step, including its ordered
 arguments, so callers can inspect the polymorphic pipeline before mutation.
+
+### Native metadata updates
+
+Application initialization and versioning use format-aware Go libraries:
+
+- JSON uses a path-scoped update, preserving unrelated keys.
+- YAML uses `yaml.Node` traversal for dotted selectors.
+- XML uses token-based path matching, including attributes and sibling indexes.
+- TOML uses the `go-toml` parser AST to replace values in the selected table
+  without rewriting unrelated tables, comments, or formatting.
+
+The Java version selector is the exact `/project/version` element. Parent,
+dependency, plugin, and other nested Maven versions are not changed.
