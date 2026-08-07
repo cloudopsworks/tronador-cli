@@ -67,8 +67,8 @@ jobs:
   preview-destroy:
     needs:
       - preload
-    if: needs.code-build.outputs.has_preview == 'true'
-    runs-on: ${{ needs.code-build.outputs.runner_set }}
+    if: needs.preload.outputs.has_preview == 'true'
+    runs-on: ${{ needs.preload.outputs.runner_set }}
     steps:
       - name: Checkout w/Blueprint
         uses: cloudopsworks/blueprints/cd/checkout@v5.10
