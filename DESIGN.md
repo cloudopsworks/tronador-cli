@@ -542,7 +542,7 @@ candidate, an explicit engine flag selects one candidate, and an ambiguous
 
 | Logical requirement | Catalog candidates | Capabilities | Provisioning rule |
 |---|---|---|---|
-| application initializer | `gitversion`, `gh`, `yq` plus typed native/file steps | application `code/init` | reproduce each profile's target body; do not install legacy package helpers |
+| application initializer | `gitversion`, `gh` plus typed native/file steps | application `code/init` | reproduce each profile's target body with format-aware native Go metadata updates; do not install legacy package helpers |
 | version engine | `gitversion` | application `version` | direct versioned binary; Git metadata is input only |
 | IaC engine | `terraform`, `tofu` | Terraform `lint`, `format`; Terragrunt underlying validation | OpenTofu is the default; explicit selection resolves through PATH/cache/provisioner |
 | Terragrunt engine | `terragrunt` | Terragrunt HCL format and validation | direct versioned binary; its child IaC engine is resolved separately |

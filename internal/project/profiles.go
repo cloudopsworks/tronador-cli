@@ -170,7 +170,6 @@ func applicationInitBinding(profile string) CapabilityBinding {
 	tools := []ToolRequirement{
 		{Name: "gitversion", Executable: "gitversion", InstallPolicy: "provision", RequiredFor: []string{"init"}},
 		{Name: "gh", Executable: "gh", InstallPolicy: "provision", RequiredFor: []string{"init"}},
-		{Name: "yq", Executable: "yq", InstallPolicy: "provision", RequiredFor: []string{"init"}},
 	}
 	if profile == "go" {
 		// The template invokes the system Go tool directly; it does not install

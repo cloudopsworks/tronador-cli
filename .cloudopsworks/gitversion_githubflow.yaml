@@ -69,7 +69,7 @@ branches:
     pre-release-weight: 30000
   feature:
     mode: ManualDeployment
-    label: "{BranchName}"
+    label: alpha
     increment: Inherit
     prevent-increment:
       when-current-commit-tagged: false
@@ -95,6 +95,20 @@ branches:
       - release
       - feature
     is-source-branch-for: []
+    pre-release-weight: 30000
+  hotfix:
+    mode: ManualDeployment
+    label: beta
+    increment: Inherit
+    prevent-increment:
+      when-current-commit-tagged: false
+    regex: "^(hotfix|fix)(es)?[\\/-](?<BranchName>.+)"
+    source-branches:
+      - main
+      - support
+    is-source-branch-for: []
+    is-release-branch: true
+    is-main-branch: false
     pre-release-weight: 30000
   unknown:
     mode: ManualDeployment

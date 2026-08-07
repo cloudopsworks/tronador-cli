@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"unicode"
 )
@@ -32,8 +31,8 @@ func applicationInitSteps(
 	switch profile {
 	case "docker", "node":
 		steps = append(steps, majorVersion,
-			tool("package-name", "set the scoped package name", call("yq", "eval", "-i", "-oj", ".name = \"@{{owner}}/{{project}}\"", "package.json"), "", "", false),
-			tool("package-version", "set the package version", call("yq", "eval", "-i", "-oj", ".version = \"{{version}}\"", "package.json"), "", "", false),
+			native("package-name", "set the scoped package name", "update-metadata", map[string]string{"format": "json", "path": "package.json", "selector": "name", "value": "@{{owner}}/{{project}}"}),
+			native("package-version", "set the package version", "update-metadata", map[string]string{"format": "json", "path": "package.json", "selector": "version", "value": "{{version}}"}),
 		)
 	case "dotnet":
 		steps = append(steps, majorVersion,
@@ -44,18 +43,18 @@ func applicationInitSteps(
 			native("rename-main-project-file", "rename the .NET application project file", "rename", map[string]string{"source": project + "/HelloWorldApi.csproj", "destination": project + "/" + project + ".csproj"}),
 			native("rename-test-project-file", "rename the .NET test project file", "rename", map[string]string{"source": project + ".Tests/HelloWorldApi.Tests.csproj", "destination": project + ".Tests/" + project + ".Tests.csproj"}),
 			native("rename-integration-project-file", "rename the .NET integration project file", "rename", map[string]string{"source": project + ".Tests.Integration/HelloWorldApi.Tests.Integration.csproj", "destination": project + ".Tests.Integration/" + project + ".Tests.Integration.csproj"}),
-			tool("dotnet-project-path", "update the shared .NET project path", call("yq", "eval", "-i", ".dotnet.project_path = \"{{project}}\"", ".github/vars/inputs-global.yaml"), "", "", false),
-			tool("dotnet-assembly-name", "set the .NET assembly name", call("yq", "eval", "-i", "-px", "-ox", ".Project.PropertyGroup.AssemblyName = \"{{project}}\"", project+"/"+project+".csproj"), "", "", false),
-			tool("dotnet-assembly-version", "set the .NET assembly version", call("yq", "eval", "-i", "-px", "-ox", ".Project.PropertyGroup.AssemblyVersion = \"{{version}}\"", project+"/"+project+".csproj"), "", "", false),
-			tool("dotnet-version", "set the .NET package version", call("yq", "eval", "-i", "-px", "-ox", ".Project.PropertyGroup.Version = \"{{version}}\"", project+"/"+project+".csproj"), "", "", false),
-			tool("dotnet-test-reference", "update the .NET test project reference", call("yq", "eval", "-i", "-px", "-ox", ".Project.ItemGroup[1].ProjectReference.+@Include = \"../{{project}}/{{project}}.csproj\"", project+".Tests/"+project+".Tests.csproj"), "", "", false),
-			tool("dotnet-integration-reference", "update the .NET integration project reference", call("yq", "eval", "-i", "-px", "-ox", ".Project.ItemGroup[1].ProjectReference.+@Include = \"../{{project}}/{{project}}.csproj\"", project+".Tests.Integration/"+project+".Tests.Integration.csproj"), "", "", false),
+			native("dotnet-project-path", "update the shared .NET project path", "update-metadata", map[string]string{"format": "yaml", "path": ".github/vars/inputs-global.yaml", "selector": "dotnet.project_path", "value": "{{project}}"}),
+			native("dotnet-assembly-name", "set the .NET assembly name", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyName", "value": "{{project}}"}),
+			native("dotnet-assembly-version", "set the .NET assembly version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyVersion", "value": "{{version}}"}),
+			native("dotnet-version", "set the .NET package version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/Version", "value": "{{version}}"}),
+			native("dotnet-test-reference", "update the .NET test project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests/" + project + ".Tests.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj"}),
+			native("dotnet-integration-reference", "update the .NET integration project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests.Integration/" + project + ".Tests.Integration.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj"}),
 			native("rewrite-solution", "rewrite solution project names", "replace-text", map[string]string{"path": project + ".sln", "old": "HelloWorldApi", "new": project}),
 		)
 	case "flutter":
 		steps = append(steps, fullVersion,
-			tool("flutter-name", "set the Flutter package name", call("yq", "e", "-i", ".name = \"{{project}}\"", "pubspec.yaml"), "", "", false),
-			tool("flutter-version", "set the Flutter package version", call("yq", "e", "-i", ".version = \"{{version}}\"", "pubspec.yaml"), "", "", false),
+			native("flutter-name", "set the Flutter package name", "update-metadata", map[string]string{"format": "yaml", "path": "pubspec.yaml", "selector": "name", "value": "{{project}}"}),
+			native("flutter-version", "set the Flutter package version", "update-metadata", map[string]string{"format": "yaml", "path": "pubspec.yaml", "selector": "version", "value": "{{version}}"}),
 		)
 	case "go":
 		steps = append(steps,
@@ -66,8 +65,8 @@ func applicationInitSteps(
 		)
 	case "java":
 		steps = append(steps, majorVersion,
-			tool("maven-artifact", "set the Maven artifact identifier", call("yq", "eval", "-i", ".project.artifactId = \"{{project}}\"", "pom.xml"), "", "", false),
-			tool("maven-version", "set the Maven snapshot version", call("yq", "eval", "-i", ".project.version = \"{{version}}-SNAPSHOT\"", "pom.xml"), "", "", false),
+			native("maven-artifact", "set the Maven artifact identifier", "update-metadata", map[string]string{"format": "xml", "path": "pom.xml", "selector": "project/artifactId", "value": "{{project}}"}),
+			native("maven-version", "set the Maven snapshot version", "update-metadata", map[string]string{"format": "xml", "path": "pom.xml", "selector": "project/version", "value": "{{version}}-SNAPSHOT"}),
 		)
 	case "python":
 		steps = append(steps, majorVersion,
@@ -285,6 +284,10 @@ func parseStepCapture(parser, output string) (string, error) {
 
 func executeNativeAction(workdir, action string, params map[string]string) error {
 	switch action {
+	case "update-metadata":
+		return updateMetadataFile(workdir, metadataUpdate{
+			Format: params["format"], Path: params["path"], Selector: params["selector"], Attribute: params["attribute"], Value: params["value"],
+		})
 	case "remove-file":
 		path, err := safeProjectPath(workdir, params["path"])
 		if err != nil {
@@ -416,58 +419,4 @@ func fileMode(path string) os.FileMode {
 		return 0o644
 	}
 	return info.Mode().Perm()
-}
-
-type tomlField struct {
-	name  string
-	value string
-}
-
-func updateTOMLFields(workdir, relative, section string, fields []tomlField) error {
-	path, err := safeProjectPath(workdir, relative)
-	if err != nil {
-		return err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	start := -1
-	for i, line := range lines {
-		if strings.TrimSpace(line) == section {
-			start = i
-			break
-		}
-	}
-	if start == -1 {
-		return fmt.Errorf("TOML section %s not found in %s", section, relative)
-	}
-	end := len(lines)
-	for i := start + 1; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			end = i
-			break
-		}
-	}
-	for _, field := range fields {
-		pattern := regexp.MustCompile(`^(\s*)` + regexp.QuoteMeta(field.name) + `\s*=`)
-		found := false
-		for i := start + 1; i < end; i++ {
-			if matches := pattern.FindStringSubmatch(lines[i]); matches != nil {
-				lines[i] = matches[1] + field.name + ` = "` + field.value + `"`
-				found = true
-				break
-			}
-		}
-		if !found {
-			lines = append(lines, "")
-			copy(lines[start+2:end+1], lines[start+1:end])
-			lines[start+1] = field.name + ` = "` + field.value + `"`
-			end++
-		}
-	}
-	updated := strings.Join(lines, "\n")
-	return os.WriteFile(path, []byte(updated), fileMode(path))
 }
