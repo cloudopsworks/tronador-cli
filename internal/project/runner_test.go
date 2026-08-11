@@ -194,6 +194,136 @@ func TestVersionUsesTypedGitVersionAndNeverCreatesTags(t *testing.T) {
 	}
 }
 
+func TestVersionSuppressesGitVersionOutputButPreservesCapture(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell process fixture is POSIX-specific")
+	}
+	workdir := fixture(t, ".golang")
+	gitversion := shellExecutable(t, "gitversion", `printf '{"SemVer":"2.4.6"}\n'
+printf 'gitversion warning\n' >&2`)
+	var stdout, stderr bytes.Buffer
+	runner := mustRunner(t, Options{WorkDir: workdir, ToolPaths: map[string]string{"gitversion": gitversion}, NoInstallTools: true, Stdout: &stdout, Stderr: &stderr})
+
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "Generated version 2.4.6 in VERSION (tag_created=false)\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want no GitVersion output", stderr.String())
+	}
+	if result.Stdout != "{\"SemVer\":\"2.4.6\"}\n" || result.Stderr != "gitversion warning\n" {
+		t.Fatalf("captured output = %q/%q", result.Stdout, result.Stderr)
+	}
+}
+
+func TestVersionFailureReplaysCapturedGitVersionOutput(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	cases := []struct {
+		name      string
+		execution ToolExecution
+		err       error
+	}{
+		{name: "process error", execution: ToolExecution{Stdout: "stdout\n", Stderr: "stderr\n"}, err: errors.New("launch failed")},
+		{name: "non-zero exit", execution: ToolExecution{Stdout: "stdout\n", Stderr: "stderr\n", ExitStatus: 17}},
+		{name: "empty version", execution: ToolExecution{Stderr: "stderr\n"}},
+		{name: "invalid semver", execution: ToolExecution{Stdout: `{"SemVer":"not-a-version"}` + "\n", Stderr: "stderr\n"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var terminal bytes.Buffer
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true, Stdout: &terminal, Stderr: &terminal,
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) { return tc.execution, tc.err },
+			})
+			_, err := runner.Run(context.Background(), "version", nil)
+			if err == nil {
+				t.Fatal("version unexpectedly succeeded")
+			}
+			if got, want := terminal.String(), tc.execution.Stderr+tc.execution.Stdout; got != want {
+				t.Fatalf("terminal output = %q, want stderr then stdout %q", got, want)
+			}
+			var projectErr *Error
+			if !errors.As(err, &projectErr) || projectErr.Stdout != tc.execution.Stdout || projectErr.Stderr != tc.execution.Stderr {
+				t.Fatalf("error did not preserve capture: %+v", err)
+			}
+		})
+	}
+}
+
+func TestVersionJSONFailureDoesNotReplayGitVersionOutput(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	var terminal bytes.Buffer
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true, JSON: true, Stdout: &terminal, Stderr: &terminal,
+		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+			return ToolExecution{Stdout: "stdout\n", Stderr: "stderr\n", ExitStatus: 1}, nil
+		},
+	})
+	if _, err := runner.Run(context.Background(), "version", nil); err == nil {
+		t.Fatal("version unexpectedly succeeded")
+	}
+	if terminal.Len() != 0 {
+		t.Fatalf("JSON mode leaked GitVersion output: %q", terminal.String())
+	}
+}
+
+func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configName string
+	}{
+		{name: "absent"},
+		{name: "yaml", configName: "gitversion.yaml"},
+		{name: "yml", configName: "gitversion.yml"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := t.TempDir()
+			if tc.configName != "" {
+				config := filepath.Join(workdir, ".cloudopsworks", tc.configName)
+				if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(config, []byte("mode: Mainline\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, binding := range []CapabilityBinding{
+				{Operation: "generate-version"},
+				{Operation: "application-init"},
+			} {
+				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, step := range steps {
+					if step.Call == nil || step.Call.ToolName != "gitversion" {
+						continue
+					}
+					if !step.Call.SuppressOutput {
+						t.Fatalf("GitVersion call was not suppressed: %+v", step.Call)
+					}
+					if tc.configName == "" && contains(step.Call.Arguments, "-config") {
+						t.Fatalf("unexpected config flag: %+v", step.Call.Arguments)
+					}
+					if tc.configName != "" && !contains(step.Call.Arguments, filepath.Join(".cloudopsworks", tc.configName)) {
+						t.Fatalf("missing config path in %+v", step.Call.Arguments)
+					}
+				}
+			}
+			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(fullSteps) < 2 || fullSteps[1].Call == nil || !fullSteps[1].Call.SuppressOutput {
+				t.Fatalf("full-version call = %+v", fullSteps)
+			}
+		})
+	}
+}
+
 func TestVersionUpdatesProfileMetadata(t *testing.T) {
 	cases := []struct {
 		profile string
@@ -519,6 +649,47 @@ func TestApplicationInitExecutesCapturedValuesAndNativeSteps(t *testing.T) {
 	}
 	if len(result.Steps) != 4 || len(result.Calls) != 2 {
 		t.Fatalf("result pipeline = %+v", result)
+	}
+}
+
+func TestApplicationInitGitVersionFailuresReplayCapture(t *testing.T) {
+	cases := []struct {
+		name      string
+		profile   string
+		execution ToolExecution
+	}{
+		{name: "major non-zero exit", profile: "docker", execution: ToolExecution{Stdout: "stdout\n", Stderr: "stderr\n", ExitStatus: 5}},
+		{name: "full capture parse failure", profile: "flutter", execution: ToolExecution{Stdout: "\n", Stderr: "stderr\n"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, markerForProfile(t, tc.profile))
+			var terminal bytes.Buffer
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, AllowNetwork: true, NoInstallTools: true, Stdout: &terminal, Stderr: &terminal,
+				ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
+				ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+					if call.ToolName == "gh" {
+						return ToolExecution{Stdout: "owner\n"}, nil
+					}
+					if !call.SuppressOutput {
+						t.Fatalf("GitVersion call is not output-suppressed: %+v", call)
+					}
+					return tc.execution, nil
+				},
+			})
+			_, err := runner.Run(context.Background(), "init", nil)
+			if err == nil {
+				t.Fatal("init unexpectedly succeeded")
+			}
+			if got, want := terminal.String(), "owner\n"+tc.execution.Stderr+tc.execution.Stdout; got != want {
+				t.Fatalf("terminal output = %q, want %q", got, want)
+			}
+			var projectErr *Error
+			if !errors.As(err, &projectErr) || projectErr.Stdout != tc.execution.Stdout || projectErr.Stderr != tc.execution.Stderr {
+				t.Fatalf("error did not preserve capture: %+v", err)
+			}
+		})
 	}
 }
 
