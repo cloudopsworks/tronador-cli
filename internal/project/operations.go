@@ -25,8 +25,8 @@ func applicationInitSteps(
 	}
 	project := projectNameForProfile(profile, workdir)
 	version := "{{version}}"
-	majorVersion := tool("gitversion-major", "calculate the template's MajorMinorPatch version", call("gitversion", "-output", "json", "-showvariable", "MajorMinorPatch"), "version", "version", false)
-	fullVersion := tool("gitversion-full", "calculate the template's FullSemVer version", call("gitversion", "-output", "json", "-showvariable", "FullSemVer"), "version", "version", false)
+	majorVersion := tool("gitversion-major", "calculate the template's MajorMinorPatch version", gitVersionToolCall(workdir, "-output", "json", "-showvariable", "MajorMinorPatch"), "version", "version", false)
+	fullVersion := tool("gitversion-full", "calculate the template's FullSemVer version", gitVersionToolCall(workdir, "-output", "json", "-showvariable", "FullSemVer"), "version", "version", false)
 
 	switch profile {
 	case "docker", "node":
@@ -198,11 +198,17 @@ func (r *Runner) executeSteps(ctx context.Context, detection Detection, plan Ope
 			if status == 0 {
 				status = 1
 			}
+			if call.SuppressOutput {
+				r.printToolFailure(execution)
+			}
 			return Result{}, withDetection(operationStepError(plan.Capability, *step, err, execution.Stdout, execution.Stderr, status), detection)
 		}
 		if step.Capture != "" {
 			value, parseErr := parseStepCapture(step.CaptureParser, execution.Stdout)
 			if parseErr != nil {
+				if call.SuppressOutput {
+					r.printToolFailure(execution)
+				}
 				return Result{}, withDetection(operationStepError(plan.Capability, *step, parseErr, execution.Stdout, execution.Stderr, 1), detection)
 			}
 			vars[step.Capture] = value
@@ -211,6 +217,28 @@ func (r *Runner) executeSteps(ctx context.Context, detection Detection, plan Ope
 	result.Calls = actualCalls
 	result.Steps = steps
 	return result, nil
+}
+
+func gitVersionToolCall(workdir string, args ...string) ToolCall {
+	arguments := append([]string(nil), args...)
+	if configPath := gitVersionConfigPath(workdir); configPath != "" {
+		arguments = append(arguments, "-config", configPath)
+	}
+	return ToolCall{ToolName: "gitversion", Arguments: arguments, WorkingDirectory: workdir, SuppressOutput: true}
+}
+
+// gitVersionConfigPath reports the repo-local GitVersion config as a path
+// relative to workdir. GitVersion runs with workdir as its working directory,
+// so the relative form resolves identically and keeps command lines portable.
+func gitVersionConfigPath(workdir string) string {
+	for _, name := range []string{"gitversion.yaml", "gitversion.yml"} {
+		relative := filepath.Join(".cloudopsworks", name)
+		info, err := os.Stat(filepath.Join(workdir, relative))
+		if err == nil && info.Mode().IsRegular() {
+			return relative
+		}
+	}
+	return ""
 }
 
 func operationStepError(capability string, step OperationStep, cause error, stdout, stderr string, status int) *Error {

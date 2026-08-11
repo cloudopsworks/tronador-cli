@@ -56,6 +56,7 @@ type ToolCall struct {
 	ResolvedExecutable string   `json:"resolved_executable"`
 	Arguments          []string `json:"arguments"`
 	WorkingDirectory   string   `json:"working_directory"`
+	SuppressOutput     bool     `json:"suppress_output,omitempty"`
 }
 
 const (
@@ -366,7 +367,7 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 		}
 		return steps, nil
 	case "generate-version":
-		return []OperationStep{tool("gitversion", "calculate project version", call("gitversion", "-output", "json"), "", "", false)}, nil
+		return []OperationStep{tool("gitversion", "calculate project version", gitVersionToolCall(workdir, "-output", "json"), "", "", false)}, nil
 	case "terraform-init":
 		return []OperationStep{
 			native("remove-provider-temp", "remove stale provider template", "remove-file", map[string]string{"path": "provider.temp.tf", "force": "true"}),
@@ -675,7 +676,9 @@ func (r *Runner) toolError(capability, name string, err error) *Error {
 func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution, error) {
 	if r.Opts.ExecuteTool != nil {
 		execution, err := r.Opts.ExecuteTool(ctx, call)
-		r.streamExecution(execution)
+		if !call.SuppressOutput {
+			r.streamExecution(execution)
+		}
 		return execution, err
 	}
 	var stdout, stderr bytes.Buffer
@@ -686,8 +689,8 @@ func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution,
 	cmd := exec.CommandContext(ctx, command, call.Arguments...)
 	cmd.Dir = call.WorkingDirectory
 	cmd.Stdin = r.Opts.Stdin
-	cmd.Stdout = io.MultiWriter(&stdout, r.toolOutput(r.Opts.Stdout))
-	cmd.Stderr = io.MultiWriter(&stderr, r.toolOutput(r.Opts.Stderr))
+	cmd.Stdout = io.MultiWriter(&stdout, r.toolOutput(call, r.Opts.Stdout))
+	cmd.Stderr = io.MultiWriter(&stderr, r.toolOutput(call, r.Opts.Stderr))
 	err := cmd.Run()
 	status := 0
 	if err != nil {
@@ -700,11 +703,25 @@ func (r *Runner) executeTool(ctx context.Context, call ToolCall) (ToolExecution,
 	return ToolExecution{Stdout: stdout.String(), Stderr: stderr.String(), ExitStatus: status}, err
 }
 
-func (r *Runner) toolOutput(writer io.Writer) io.Writer {
-	if r.Opts.JSON {
+func (r *Runner) toolOutput(call ToolCall, writer io.Writer) io.Writer {
+	if r.Opts.JSON || call.SuppressOutput {
 		return io.Discard
 	}
 	return writer
+}
+
+// printToolFailure exposes output deliberately withheld from a suppressed tool
+// invocation. JSON mode keeps stdout machine-readable, including on failure.
+func (r *Runner) printToolFailure(execution ToolExecution) {
+	if r.Opts.JSON {
+		return
+	}
+	if execution.Stderr != "" {
+		_, _ = fmt.Fprint(r.Opts.Stderr, execution.Stderr)
+	}
+	if execution.Stdout != "" {
+		_, _ = fmt.Fprint(r.Opts.Stdout, execution.Stdout)
+	}
 }
 
 func (r *Runner) streamExecution(execution ToolExecution) {
@@ -754,17 +771,21 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		if status == 0 {
 			status = 1
 		}
+		r.printToolFailure(execution)
 		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: status, Cause: fmt.Errorf("gitversion: %w", err)}, detection)
 	}
 	if execution.ExitStatus != 0 {
+		r.printToolFailure(execution)
 		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}, detection)
 	}
 	version := parseGitVersionOutput(execution.Stdout)
 	if version == "" {
-		return Result{}, withDetection(projectError("project_operation_failed", "gitversion returned no version"), detection)
+		r.printToolFailure(execution)
+		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned no version")}, detection)
 	}
 	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`).MatchString(version) {
-		return Result{}, withDetection(projectError("project_operation_failed", "gitversion returned an invalid semantic version"), detection)
+		r.printToolFailure(execution)
+		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned an invalid semantic version")}, detection)
 	}
 	versionPath, err := safeProjectPath(r.Opts.WorkDir, "VERSION")
 	if err != nil {
