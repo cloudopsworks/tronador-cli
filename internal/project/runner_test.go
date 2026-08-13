@@ -172,56 +172,79 @@ func TestDryRunDoesNotResolveOrExecuteTools(t *testing.T) {
 	}
 }
 
-func TestVersionUsesTypedGitVersionAndNeverCreatesTags(t *testing.T) {
-	workdir := fixture(t, ".golang")
-	initializeGitRepository(t, workdir)
-	runGit(t, workdir, "tag", "v2.4.5")
-	if err := os.WriteFile(filepath.Join(workdir, "intermediate-change"), []byte("changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, workdir, "add", "intermediate-change")
-	runGit(t, workdir, "commit", "-m", "intermediate change")
-	gitversion := executable(t, "gitversion")
-	called := []ToolCall{}
-	runner := mustRunner(t, Options{
-		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": gitversion}, NoInstallTools: true,
-		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
-			called = append(called, call)
-			return ToolExecution{Stdout: `{"SemVer":"2.4.6","FullSemVer":"2.4.6+7"}`}, nil
-		},
-	})
-	result, err := runner.Run(context.Background(), "version", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Version != "2.4.6-7" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6-7\n" {
-		t.Fatalf("version result = %+v", result)
-	}
-	if len(called) != 1 || called[0].ToolName != "gitversion" || !contains(called[0].Arguments, "FullSemVer") || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
-		t.Fatalf("typed calls = %+v", called)
+func TestVersionPreservesGitVersionFullSemVerAndUsesRepoConfig(t *testing.T) {
+	for _, configName := range []string{"gitversion.yaml", "gitversion.yml"} {
+		t.Run(configName, func(t *testing.T) {
+			workdir := fixture(t, ".golang")
+			configPath := filepath.Join(workdir, ".cloudopsworks", configName)
+			if err := os.WriteFile(configPath, []byte("mode: Mainline\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			initializeGitRepository(t, workdir)
+			runGit(t, workdir, "tag", "v2.4.5")
+			if err := os.WriteFile(filepath.Join(workdir, "intermediate-change"), []byte("changed\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, workdir, "add", "intermediate-change")
+			runGit(t, workdir, "commit", "-m", "intermediate change")
+			gitversion := executable(t, "gitversion")
+			called := []ToolCall{}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": gitversion}, NoInstallTools: true,
+				ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+					called = append(called, call)
+					return ToolExecution{Stdout: `{"SemVer":"1.8.0-beta.1+69","FullSemVer":"1.8.0-beta.1+69"}`}, nil
+				},
+			})
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Version != "v1.8.0-beta.1+69" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "v1.8.0-beta.1+69\n" {
+				t.Fatalf("version result = %+v", result)
+			}
+			if len(called) != 1 || called[0].ToolName != "gitversion" || !contains(called[0].Arguments, "FullSemVer") || !contains(called[0].Arguments, "-config") || !contains(called[0].Arguments, filepath.Join(".cloudopsworks", configName)) || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
+				t.Fatalf("typed calls = %+v", called)
+			}
+		})
 	}
 }
 
-func TestVersionUsesNormalizedExactHeadTagWithoutRunningGitVersion(t *testing.T) {
-	workdir := fixture(t, ".golang")
-	initializeGitRepository(t, workdir)
-	runGit(t, workdir, "tag", "v2.4.6-beta.7+deploy-123")
+func TestVersionUsesExactHeadTagWithoutRunningGitVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		branch string
+		tag    string
+		want   string
+	}{
+		{name: "release branch prerelease tag", branch: "release/1.8", tag: "v1.8.0-beta.1", want: "v1.8.0-beta.1"},
+		{name: "deploy metadata tag", tag: "v1.8.0+deploy-proc1", want: "v1.8.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, ".golang")
+			initializeGitRepository(t, workdir)
+			if tc.branch != "" {
+				runGit(t, workdir, "checkout", "-b", tc.branch)
+			}
+			runGit(t, workdir, "tag", tc.tag)
 
-	called := false
-	runner := mustRunner(t, Options{
-		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
-		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
-			called = true
-			return ToolExecution{}, errors.New("GitVersion must not run for an exact HEAD tag")
-		},
-	})
+			called := false
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					called = true
+					return ToolExecution{}, errors.New("GitVersion must not run for an exact HEAD tag")
+				},
+			})
 
-	result, err := runner.Run(context.Background(), "version", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if called || result.Version != "2.4.6-beta.7" || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6-beta.7\n" {
-		t.Fatalf("tagged version result = %+v, GitVersion called=%v", result, called)
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if called || result.Version != tc.want || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.want+"\n" {
+				t.Fatalf("tagged version result = %+v, GitVersion called=%v", result, called)
+			}
+		})
 	}
 }
 
@@ -239,7 +262,7 @@ printf 'gitversion warning\n' >&2`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stdout.String(), "Generated version 2.4.6 in VERSION (tag_created=false)\n"; got != want {
+	if got, want := stdout.String(), "Generated version v2.4.6 in VERSION (tag_created=false)\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {

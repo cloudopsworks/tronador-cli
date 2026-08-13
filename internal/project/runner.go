@@ -781,13 +781,13 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 			r.printToolFailure(execution)
 			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}, detection)
 		}
-		version = strings.ReplaceAll(parseGitVersionFullOutput(execution.Stdout), "+", "-")
+		version = versionFromGitVersionOutput(execution.Stdout)
 		if version == "" {
 			r.printToolFailure(execution)
 			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned no version")}, detection)
 		}
 	}
-	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`).MatchString(version) {
+	if !semanticVersionPattern.MatchString(version) {
 		if fromGitVersion {
 			r.printToolFailure(ToolExecution{Stdout: result.Stdout, Stderr: result.Stderr})
 		}
@@ -800,7 +800,7 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 	if err := os.WriteFile(versionPath, []byte(version+"\n"), 0o644); err != nil {
 		return Result{}, withDetection(wrapProjectError("project_operation_failed", "write VERSION", err), detection)
 	}
-	if err := updateProfileMetadata(r.Opts.WorkDir, detection.ProfileID, version); err != nil {
+	if err := updateProfileMetadata(r.Opts.WorkDir, detection.ProfileID, strings.TrimPrefix(version, "v")); err != nil {
 		return Result{}, withDetection(err, detection)
 	}
 	result.Version = version
@@ -896,16 +896,27 @@ func versionFromExactHeadTag(ctx context.Context, workdir string) string {
 	return ""
 }
 
-var versionTagPattern = regexp.MustCompile(`^v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)(?:\+deploy-.*)?$`)
+var (
+	semanticVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	deployMetadataPattern  = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
+)
 
 // normalizeVersionTag applies the same release-tag transformation as the
-// application templates' version targets: remove the v prefix and CI deploy
-// metadata while retaining the release or prerelease version.
+// application templates' version targets: remove CI deploy metadata while
+// retaining the tagged release or prerelease version exactly.
 func normalizeVersionTag(tag string) string {
-	if matches := versionTagPattern.FindStringSubmatch(tag); matches != nil {
-		return matches[1]
+	return deployMetadataPattern.ReplaceAllString(tag, "")
+}
+
+// versionFromGitVersionOutput preserves FullSemVer, including build metadata,
+// and formats it as a release tag for the generated VERSION file. GitVersion
+// reports values without the tag prefix, while exact HEAD tags retain theirs.
+func versionFromGitVersionOutput(output string) string {
+	version := parseGitVersionFullOutput(output)
+	if version == "" || strings.HasPrefix(version, "v") {
+		return version
 	}
-	return tag
+	return "v" + version
 }
 
 func parseGitVersionFullOutput(output string) string {
