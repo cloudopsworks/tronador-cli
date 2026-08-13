@@ -367,7 +367,7 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 		}
 		return steps, nil
 	case "generate-version":
-		return []OperationStep{tool("gitversion", "calculate project version", gitVersionToolCall(workdir, "-output", "json"), "", "", false)}, nil
+		return []OperationStep{tool("gitversion", "calculate project version", gitVersionToolCall(workdir, "-output", "json", "-showvariable", "FullSemVer"), "", "", false)}, nil
 	case "terraform-init":
 		return []OperationStep{
 			native("remove-provider-temp", "remove stale provider template", "remove-file", map[string]string{"path": "provider.temp.tf", "force": "true"}),
@@ -762,30 +762,36 @@ func executeNative(plan OperationPlan) ([]string, error) {
 }
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result) (Result, error) {
-	call := plan.ToolCalls[0]
-	execution, err := r.executeTool(ctx, call)
-	result.Stdout = execution.Stdout
-	result.Stderr = execution.Stderr
-	if err != nil {
-		status := execution.ExitStatus
-		if status == 0 {
-			status = 1
+	version := versionFromExactHeadTag(ctx, r.Opts.WorkDir)
+	fromGitVersion := version == ""
+	if fromGitVersion {
+		call := plan.ToolCalls[0]
+		execution, err := r.executeTool(ctx, call)
+		result.Stdout = execution.Stdout
+		result.Stderr = execution.Stderr
+		if err != nil {
+			status := execution.ExitStatus
+			if status == 0 {
+				status = 1
+			}
+			r.printToolFailure(execution)
+			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: status, Cause: fmt.Errorf("gitversion: %w", err)}, detection)
 		}
-		r.printToolFailure(execution)
-		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: status, Cause: fmt.Errorf("gitversion: %w", err)}, detection)
-	}
-	if execution.ExitStatus != 0 {
-		r.printToolFailure(execution)
-		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}, detection)
-	}
-	version := parseGitVersionOutput(execution.Stdout)
-	if version == "" {
-		r.printToolFailure(execution)
-		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned no version")}, detection)
+		if execution.ExitStatus != 0 {
+			r.printToolFailure(execution)
+			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}, detection)
+		}
+		version = strings.ReplaceAll(parseGitVersionFullOutput(execution.Stdout), "+", "-")
+		if version == "" {
+			r.printToolFailure(execution)
+			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned no version")}, detection)
+		}
 	}
 	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`).MatchString(version) {
-		r.printToolFailure(execution)
-		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned an invalid semantic version")}, detection)
+		if fromGitVersion {
+			r.printToolFailure(ToolExecution{Stdout: result.Stdout, Stderr: result.Stderr})
+		}
+		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: result.Stdout, Stderr: result.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}, detection)
 	}
 	versionPath, err := safeProjectPath(r.Opts.WorkDir, "VERSION")
 	if err != nil {
@@ -869,6 +875,53 @@ func parseGitVersionOutput(output string) string {
 			return value.SemVer
 		}
 		return value.FullSemVer
+	}
+	return strings.TrimSpace(strings.Split(trimmed, "\n")[0])
+}
+
+// versionFromExactHeadTag mirrors the Git bootstrap used by template Makefiles:
+// a tag pointing at HEAD takes precedence over GitVersion's intermediate build
+// calculation. Git metadata is best-effort here, just as the Make bootstrap
+// leaves GIT_TAG empty when the working directory is not a Git repository.
+func versionFromExactHeadTag(ctx context.Context, workdir string) string {
+	command := exec.CommandContext(ctx, "git", "tag", "-l", "--sort=-taggerdate", "--points-at", "HEAD")
+	command.Dir = workdir
+	output, err := command.Output()
+	if err != nil {
+		return ""
+	}
+	for _, tag := range strings.Fields(string(output)) {
+		return normalizeVersionTag(tag)
+	}
+	return ""
+}
+
+var versionTagPattern = regexp.MustCompile(`^v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)(?:\+deploy-.*)?$`)
+
+// normalizeVersionTag applies the same release-tag transformation as the
+// application templates' version targets: remove the v prefix and CI deploy
+// metadata while retaining the release or prerelease version.
+func normalizeVersionTag(tag string) string {
+	if matches := versionTagPattern.FindStringSubmatch(tag); matches != nil {
+		return matches[1]
+	}
+	return tag
+}
+
+func parseGitVersionFullOutput(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return ""
+	}
+	var value struct {
+		FullSemVer string `json:"FullSemVer"`
+		SemVer     string `json:"SemVer"`
+	}
+	if json.Unmarshal([]byte(trimmed), &value) == nil {
+		if value.FullSemVer != "" {
+			return value.FullSemVer
+		}
+		return value.SemVer
 	}
 	return strings.TrimSpace(strings.Split(trimmed, "\n")[0])
 }

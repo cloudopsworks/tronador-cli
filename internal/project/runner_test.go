@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -173,24 +174,54 @@ func TestDryRunDoesNotResolveOrExecuteTools(t *testing.T) {
 
 func TestVersionUsesTypedGitVersionAndNeverCreatesTags(t *testing.T) {
 	workdir := fixture(t, ".golang")
+	initializeGitRepository(t, workdir)
+	runGit(t, workdir, "tag", "v2.4.5")
+	if err := os.WriteFile(filepath.Join(workdir, "intermediate-change"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workdir, "add", "intermediate-change")
+	runGit(t, workdir, "commit", "-m", "intermediate change")
 	gitversion := executable(t, "gitversion")
 	called := []ToolCall{}
 	runner := mustRunner(t, Options{
 		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": gitversion}, NoInstallTools: true,
 		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
 			called = append(called, call)
-			return ToolExecution{Stdout: `{"SemVer":"2.4.6"}`}, nil
+			return ToolExecution{Stdout: `{"SemVer":"2.4.6","FullSemVer":"2.4.6+7"}`}, nil
 		},
 	})
 	result, err := runner.Run(context.Background(), "version", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Version != "2.4.6" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6\n" {
+	if result.Version != "2.4.6-7" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6-7\n" {
 		t.Fatalf("version result = %+v", result)
 	}
-	if len(called) != 1 || called[0].ToolName != "gitversion" || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
+	if len(called) != 1 || called[0].ToolName != "gitversion" || !contains(called[0].Arguments, "FullSemVer") || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
 		t.Fatalf("typed calls = %+v", called)
+	}
+}
+
+func TestVersionUsesNormalizedExactHeadTagWithoutRunningGitVersion(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	initializeGitRepository(t, workdir)
+	runGit(t, workdir, "tag", "v2.4.6-beta.7+deploy-123")
+
+	called := false
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+			called = true
+			return ToolExecution{}, errors.New("GitVersion must not run for an exact HEAD tag")
+		},
+	})
+
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called || result.Version != "2.4.6-beta.7" || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6-beta.7\n" {
+		t.Fatalf("tagged version result = %+v, GitVersion called=%v", result, called)
 	}
 }
 
@@ -986,6 +1017,27 @@ func shellExecutable(t *testing.T, name, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func initializeGitRepository(t *testing.T, workdir string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required to test exact-HEAD tag detection")
+	}
+	runGit(t, workdir, "init")
+	runGit(t, workdir, "config", "user.email", "project-test@example.invalid")
+	runGit(t, workdir, "config", "user.name", "Project test")
+	runGit(t, workdir, "add", ".")
+	runGit(t, workdir, "commit", "-m", "initial project")
+}
+
+func runGit(t *testing.T, workdir string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", arguments...)
+	command.Dir = workdir
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
+	}
 }
 
 func mustRunner(t *testing.T, opts Options) *Runner {
