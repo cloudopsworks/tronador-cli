@@ -40,19 +40,7 @@ func updateMetadataFile(workdir string, update metadataUpdate) error {
 		return err
 	}
 
-	var updated []byte
-	switch strings.ToLower(update.Format) {
-	case "json":
-		updated, err = updateJSON(data, update.Selector, update.Value)
-	case "yaml", "yml":
-		updated, err = updateYAML(data, update.Selector, update.Value)
-	case "xml":
-		updated, err = updateXML(data, update.Selector, update.Attribute, update.Value)
-	case "toml":
-		return fmt.Errorf("TOML metadata updates must use updateTOMLFields")
-	default:
-		return fmt.Errorf("unsupported metadata format %q", update.Format)
-	}
+	updated, err := transformMetadata(data, update)
 	if err != nil {
 		return err
 	}
@@ -60,6 +48,23 @@ func updateMetadataFile(workdir string, update metadataUpdate) error {
 		return nil
 	}
 	return os.WriteFile(path, updated, fileMode(path))
+}
+
+// transformMetadata applies one scoped metadata edit without touching disk.
+// Version previews use this same transformer as the live operation.
+func transformMetadata(data []byte, update metadataUpdate) ([]byte, error) {
+	switch strings.ToLower(update.Format) {
+	case "json":
+		return updateJSON(data, update.Selector, update.Value)
+	case "yaml", "yml":
+		return updateYAML(data, update.Selector, update.Value)
+	case "xml":
+		return updateXML(data, update.Selector, update.Attribute, update.Value)
+	case "toml":
+		return updateTOML(data, update.Selector, []tomlField{{name: update.Attribute, value: update.Value}})
+	default:
+		return nil, fmt.Errorf("unsupported metadata format %q", update.Format)
+	}
 }
 
 func updateJSON(data []byte, selector, value string) ([]byte, error) {

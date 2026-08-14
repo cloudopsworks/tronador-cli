@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -1105,4 +1106,41 @@ func flagNamed(values []FlagDefinition, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestVersionDryRunPreviewsChangesWithoutMutation(t *testing.T) {
+	workdir := fixture(t, ".node")
+	packagePath := filepath.Join(workdir, "package.json")
+	if err := os.WriteFile(packagePath, []byte("{\n  \"version\": \"0.1.0\"\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	runner := mustRunner(t, Options{WorkDir: workdir, DryRun: true, Stdout: &stdout, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+			return ToolExecution{Stdout: `{"FullSemVer":"2.4.6"}`}, nil
+		},
+	})
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "v2.4.6" || result.FileChanges == nil || len(*result.FileChanges) != 2 {
+		t.Fatalf("preview result = %+v", result)
+	}
+	if got := string(mustRead(t, packagePath)); got != "{\n  \"version\": \"0.1.0\"\n}\n" {
+		t.Fatalf("dry-run mutated metadata: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, "VERSION")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dry-run created VERSION: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "--- /dev/null\n+++ b/VERSION\n") || strings.Contains(stdout.String(), "DRY-RUN:") {
+		t.Fatalf("preview stdout = %q", stdout.String())
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"file_changes"`) || strings.Contains(string(encoded), `"generated_artifacts"`) {
+		t.Fatalf("preview JSON = %s", encoded)
+	}
 }

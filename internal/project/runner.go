@@ -126,6 +126,19 @@ type Result struct {
 	Stdout             string               `json:"stdout,omitempty"`
 	Stderr             string               `json:"stderr,omitempty"`
 	ExitStatus         int                  `json:"exit_status"`
+	FileChanges        *[]FileChange        `json:"file_changes,omitempty"`
+}
+
+// FileChange is one byte-changing file that a version dry-run would write.
+type FileChange struct {
+	Path      string `json:"path"`
+	Operation string `json:"operation"`
+	Patch     string `json:"patch"`
+}
+
+type versionChange struct {
+	FileChange
+	after []byte
 }
 
 // CapabilityDescription joins a shared definition to its profile binding for
@@ -222,7 +235,7 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 	flags := []FlagDefinition{
 		{Name: "workdir", Type: "string", Description: "target project directory", Default: "."},
 		{Name: "json", Type: "bool", Description: "emit stable JSON output", Default: "false"},
-		{Name: "dry-run", Type: "bool", Description: "show the operation plan without mutation or tool resolution", Default: "false"},
+		{Name: "dry-run", Type: "bool", Description: dryRunDescription(binding), Default: "false"},
 	}
 	if len(binding.Tools) > 0 {
 		flags = append(flags,
@@ -241,6 +254,13 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 		flags = append(flags, FlagDefinition{Name: "engine", Type: "string", Description: "select Terraform or OpenTofu", Default: "tofu"})
 	}
 	return flags
+}
+
+func dryRunDescription(binding CapabilityBinding) string {
+	if binding.Operation == "generate-version" {
+		return "calculate the version and preview actual file deltas without project mutation; may resolve or execute GitVersion and can provision only to an external tools directory"
+	}
+	return "show the operation plan without mutation or tool resolution"
 }
 
 func hasEngineRequirement(requirements []ToolRequirement) bool {
@@ -474,8 +494,9 @@ func terragruntCleanPaths(workdir string) ([]string, error) {
 	return paths, nil
 }
 
-// Run plans, resolves all declared dependencies, enforces policy, and executes
-// the typed plan. Dry-run stops before tool resolution as required by DESIGN.md.
+// Run plans, resolves declared dependencies, enforces policy, and executes the
+// typed plan. Dry-runs stop before tool resolution except evaluated version
+// previews, which need GitVersion to produce authoritative file deltas.
 func (r *Runner) Run(ctx context.Context, capability string, args []string) (Result, error) {
 	detection, plan, err := r.Plan(capability, args)
 	if err != nil {
@@ -489,7 +510,7 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 		replaceEngineCalls(&plan, r.Opts.Engine)
 	}
 	result := resultFromPlan(plan, detection, r.Opts.DryRun)
-	if r.Opts.DryRun {
+	if r.Opts.DryRun && plan.Capability != "version" {
 		if r.Opts.JSON {
 			result.Plan = &plan
 		} else {
@@ -499,6 +520,11 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	}
 	if hasNetworkStep(plan.Steps) && !r.Opts.AllowNetwork {
 		return Result{}, withDetection(&Error{Code: "project_network_not_allowed", Command: "project", Capability: plan.Capability, Hint: "pass --allow-network to permit the template's declared network operation", ExitStatus: 1, Cause: errors.New("operation contains a direct network step")}, detection)
+	}
+	// Version has an exact-tag fast path. It deliberately runs before any
+	// resolver work, including for evaluated dry-runs.
+	if plan.Capability == "version" {
+		return r.runVersion(ctx, detection, plan, result)
 	}
 	resolved, err := r.resolveTools(ctx, &plan)
 	if err != nil {
@@ -518,9 +544,6 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 			fmt.Fprintf(r.Opts.Stdout, "project %s %s completed\n", detection.ProfileID, plan.Capability)
 		}
 		return result, nil
-	}
-	if plan.Capability == "version" {
-		return r.runVersion(ctx, detection, plan, result)
 	}
 	result, err = r.executeSteps(ctx, detection, plan, result)
 	if err != nil {
@@ -571,12 +594,18 @@ func (r *Runner) resolveTools(ctx context.Context, plan *OperationPlan) ([]Resol
 		return nil, nil
 	}
 	stdout, stderr := r.Opts.Stdout, r.Opts.Stderr
-	if r.Opts.JSON {
+	if r.Opts.JSON || (r.Opts.DryRun && plan.Capability == "version") {
 		stdout, stderr = io.Discard, io.Discard
 	}
 	provisioner, err := toolspkg.NewProvisioner(toolspkg.Options{ToolsDir: r.Opts.ToolsDir, WorkDir: r.Opts.WorkDir, ConfigPath: r.Opts.ToolsConfig, SkipInstall: r.Opts.NoInstallTools || !r.Opts.AllowNetwork, Stdout: stdout, Stderr: stderr})
 	if err != nil {
 		return nil, &Error{Code: "project_tool_catalog_invalid", Command: "project", Capability: plan.Capability, ExitStatus: 1, Cause: err}
+	}
+	workspaceCacheInstallBlocked := r.Opts.DryRun && plan.Capability == "version" && containedPath(r.Opts.WorkDir, provisioner.Opts.ToolsDir)
+	if workspaceCacheInstallBlocked {
+		// An evaluated preview may read a pre-existing cache here but must never
+		// create it (including through an alias or symlink).
+		provisioner.Opts.SkipInstall = true
 	}
 	selectedEngine := ""
 	if hasEngineRequirement(plan.ToolRequirements) {
@@ -608,11 +637,40 @@ func (r *Runner) resolveTools(ctx context.Context, plan *OperationPlan) ([]Resol
 		}
 		resolved, ensureErr := provisioner.EnsureTool(ctx, name, path, version)
 		if ensureErr != nil {
+			if workspaceCacheInstallBlocked {
+				return nil, &Error{Code: "project_tool_unavailable", Command: "project", Capability: plan.Capability, Tool: name, Hint: "pass --tool-path gitversion=/absolute/path or select a --tools-dir outside the project workdir", ExitStatus: 1, Cause: ensureErr}
+			}
 			return nil, r.toolError(plan.Capability, name, ensureErr)
 		}
 		results = append(results, ResolvedToolResult{Name: name, Source: resolved.Source, Path: resolved.Path})
 	}
 	return results, nil
+}
+
+// containedPath resolves existing ancestors before comparing with filepath.Rel,
+// so lexical aliases and symlinked tool caches cannot bypass dry-run safety.
+func containedPath(root, candidate string) bool {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	candidate = filepath.Clean(candidate)
+	missing := []string{}
+	for {
+		real, evalErr := filepath.EvalSymlinks(candidate)
+		if evalErr == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				real = filepath.Join(real, missing[i])
+			}
+			return withinPath(realRoot, real) || real == realRoot
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return false
+		}
+		missing = append(missing, filepath.Base(candidate))
+		candidate = parent
+	}
 }
 
 func replaceEngineRequirement(requirements []ToolRequirement, engine string) []ToolRequirement {
@@ -762,101 +820,171 @@ func executeNative(plan OperationPlan) ([]string, error) {
 }
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result) (Result, error) {
-	version := versionFromExactHeadTag(ctx, r.Opts.WorkDir)
-	fromGitVersion := version == ""
-	if fromGitVersion {
-		call := plan.ToolCalls[0]
-		execution, err := r.executeTool(ctx, call)
-		result.Stdout = execution.Stdout
-		result.Stderr = execution.Stderr
-		if err != nil {
-			status := execution.ExitStatus
-			if status == 0 {
-				status = 1
-			}
-			r.printToolFailure(execution)
-			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: status, Cause: fmt.Errorf("gitversion: %w", err)}, detection)
-		}
-		if execution.ExitStatus != 0 {
-			r.printToolFailure(execution)
-			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}, detection)
-		}
-		version = versionFromGitVersionOutput(execution.Stdout)
-		if version == "" {
-			r.printToolFailure(execution)
-			return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("gitversion returned no version")}, detection)
-		}
-	}
-	if !semanticVersionPattern.MatchString(version) {
-		if fromGitVersion {
-			r.printToolFailure(ToolExecution{Stdout: result.Stdout, Stderr: result.Stderr})
-		}
-		return Result{}, withDetection(&Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: result.Stdout, Stderr: result.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}, detection)
-	}
-	versionPath, err := safeProjectPath(r.Opts.WorkDir, "VERSION")
+	tag := exactHeadTag(ctx, r.Opts.WorkDir)
+	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag)
 	if err != nil {
-		return Result{}, withDetection(wrapProjectError("project_operation_failed", "resolve VERSION", err), detection)
-	}
-	if err := os.WriteFile(versionPath, []byte(version+"\n"), 0o644); err != nil {
-		return Result{}, withDetection(wrapProjectError("project_operation_failed", "write VERSION", err), detection)
-	}
-	if err := updateProfileMetadata(r.Opts.WorkDir, detection.ProfileID, strings.TrimPrefix(version, "v")); err != nil {
+		if fromGitVersion {
+			r.printToolFailure(execution)
+		}
 		return Result{}, withDetection(err, detection)
 	}
-	result.Version = version
+	changes, buildErr := buildVersionChanges(r.Opts.WorkDir, detection.ProfileID, version)
+	if buildErr != nil {
+		return Result{}, withDetection(wrapProjectError("project_operation_failed", "build version file changes", buildErr), detection)
+	}
+	result.Version, result.TagCreated = version, false
+	if r.Opts.DryRun {
+		preview := make([]FileChange, 0, len(changes))
+		for _, change := range changes {
+			preview = append(preview, change.FileChange)
+		}
+		result.FileChanges = &preview
+		// A preview intentionally exposes only its calculated value and actual deltas.
+		result.Tools, result.Calls, result.Steps, result.Plan = nil, nil, nil, nil
+		result.GeneratedArtifacts, result.Stdout, result.Stderr = nil, "", ""
+		if !r.Opts.JSON {
+			if len(preview) == 0 {
+				_, _ = fmt.Fprintf(r.Opts.Stdout, "No file changes for version %s.\n", version)
+			} else {
+				patches := make([]string, len(preview))
+				for i := range preview {
+					patches[i] = preview[i].Patch
+				}
+				_, _ = fmt.Fprint(r.Opts.Stdout, strings.Join(patches, "\n"))
+			}
+		}
+		return result, nil
+	}
+	for _, change := range changes {
+		path, pathErr := safeProjectPath(r.Opts.WorkDir, filepath.FromSlash(change.Path))
+		if pathErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "resolve version output", pathErr), detection)
+		}
+		if writeErr := os.WriteFile(path, change.after, fileMode(path)); writeErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "write version output", writeErr), detection)
+		}
+	}
+	result.Stdout, result.Stderr = execution.Stdout, execution.Stderr
 	result.GeneratedArtifacts = append([]string(nil), plan.GeneratedArtifacts...)
-	result.TagCreated = false
 	if !r.Opts.JSON {
-		fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
+		_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
 	}
 	return result, nil
 }
 
-func updateProfileMetadata(workdir, profile, version string) error {
-	updates := []metadataUpdate{}
+type exactTag struct {
+	Raw, Normalized string
+	Found           bool
+}
+
+func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag exactTag) (string, ToolExecution, bool, *Error) {
+	if tag.Found {
+		if !semanticVersionPattern.MatchString(tag.Normalized) {
+			return "", ToolExecution{}, false, projectError("project_operation_failed", "version source returned an invalid semantic version")
+		}
+		return tag.Normalized, ToolExecution{}, false, nil
+	}
+	// This is the sole dry-run exception: calculate the authoritative version.
+	resolved, err := r.resolveTools(ctx, &plan)
+	if err != nil {
+		var projectErr *Error
+		if errors.As(err, &projectErr) {
+			return "", ToolExecution{}, true, projectErr
+		}
+		return "", ToolExecution{}, true, r.toolError(plan.Capability, "gitversion", err)
+	}
+	path, _ := resolvedPathByName(resolved, "gitversion")
+	call := plan.ToolCalls[0]
+	call.ResolvedExecutable = path
+	execution, runErr := r.executeTool(ctx, call)
+	if runErr != nil {
+		status := execution.ExitStatus
+		if status == 0 {
+			status = 1
+		}
+		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: status, Cause: fmt.Errorf("gitversion: %w", runErr)}
+	}
+	if execution.ExitStatus != 0 {
+		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}
+	}
+	version := versionFromGitVersionOutput(execution.Stdout)
+	if version == "" || !semanticVersionPattern.MatchString(version) {
+		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}
+	}
+	return version, execution, true, nil
+}
+
+func buildVersionChanges(workdir, profile, version string) ([]versionChange, error) {
+	updates := profileMetadataUpdates(workdir, profile, strings.TrimPrefix(version, "v"))
+	// VERSION is mandatory, while profile metadata is optional.
+	updates = append([]metadataUpdate{{Path: "VERSION"}}, updates...)
+	byPath := map[string][]metadataUpdate{}
+	for _, u := range updates {
+		byPath[u.Path] = append(byPath[u.Path], u)
+	}
+	paths := make([]string, 0, len(byPath))
+	for path := range byPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	changes := make([]versionChange, 0, len(paths))
+	for _, relative := range paths {
+		path, err := safeProjectPath(workdir, relative)
+		if err != nil {
+			return nil, err
+		}
+		before, err := os.ReadFile(path)
+		missing := errors.Is(err, os.ErrNotExist)
+		if err != nil && !missing {
+			return nil, err
+		}
+		if missing && relative != "VERSION" {
+			continue
+		}
+		after := append([]byte(nil), before...)
+		if relative == "VERSION" {
+			after = []byte(version + "\n")
+		} else {
+			for _, update := range byPath[relative] {
+				after, err = transformMetadata(after, update)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if bytes.Equal(before, after) {
+			continue
+		}
+		slash := filepath.ToSlash(relative)
+		op := "modify"
+		if missing {
+			op = "add"
+		}
+		changes = append(changes, versionChange{FileChange: FileChange{Path: slash, Operation: op, Patch: unifiedPatch(slash, before, after, missing)}, after: after})
+	}
+	return changes, nil
+}
+
+func profileMetadataUpdates(workdir, profile, version string) []metadataUpdate {
 	switch profile {
 	case "docker", "node":
-		updates = append(updates, metadataUpdate{Format: "json", Path: "package.json", Selector: "version", Value: version, IgnoreMissing: true})
+		return []metadataUpdate{{Format: "json", Path: "package.json", Selector: "version", Value: version, IgnoreMissing: true}}
 	case "flutter":
-		updates = append(updates, metadataUpdate{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true})
+		return []metadataUpdate{{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true}}
 	case "java":
-		// Maven has many version elements (parent, dependencies, plugins). The
-		// project version is the direct /project/version element only.
-		updates = append(updates, metadataUpdate{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true})
+		return []metadataUpdate{{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true}}
 	case "python":
-		err := updateTOMLFields(workdir, "pyproject.toml", "[project]", []tomlField{{name: "version", value: version}})
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
+		return []metadataUpdate{{Format: "toml", Path: "pyproject.toml", Selector: "[project]", Attribute: "version", Value: version, IgnoreMissing: true}}
 	case "rust":
-		err := updateTOMLFields(workdir, "Cargo.toml", "[package]", []tomlField{{name: "version", value: version}})
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
+		return []metadataUpdate{{Format: "toml", Path: "Cargo.toml", Selector: "[package]", Attribute: "version", Value: version, IgnoreMissing: true}}
 	case "dotnet":
-		matches, err := filepath.Glob(filepath.Join(workdir, "*.csproj"))
-		if err != nil {
-			return wrapProjectError("project_operation_failed", "find .csproj metadata", err)
+		matches, _ := filepath.Glob(filepath.Join(workdir, "*.csproj"))
+		result := make([]metadataUpdate, 0, len(matches)*2)
+		for _, p := range matches {
+			rel, _ := filepath.Rel(workdir, p)
+			result = append(result, metadataUpdate{Format: "xml", Path: rel, Selector: "Project/PropertyGroup/Version", Value: version, IgnoreMissing: true}, metadataUpdate{Format: "xml", Path: rel, Selector: "Project/Version", Value: version, IgnoreMissing: true})
 		}
-		for _, path := range matches {
-			relative, err := filepath.Rel(workdir, path)
-			if err != nil {
-				return wrapProjectError("project_operation_failed", "resolve metadata path", err)
-			}
-			updates = append(updates, metadataUpdate{Format: "xml", Path: relative, Selector: "Project/PropertyGroup/Version", Value: version, IgnoreMissing: true})
-			// Minimal project fixtures and older templates may place Version
-			// directly under Project; support that shape without broad matching.
-			updates = append(updates, metadataUpdate{Format: "xml", Path: relative, Selector: "Project/Version", Value: version, IgnoreMissing: true})
-		}
-	default:
-		return nil
-	}
-	for _, update := range updates {
-		if err := updateMetadataFile(workdir, update); err != nil {
-			return wrapProjectError("project_operation_failed", "update metadata "+update.Path, err)
-		}
+		return result
 	}
 	return nil
 }
@@ -883,17 +1011,23 @@ func parseGitVersionOutput(output string) string {
 // a tag pointing at HEAD takes precedence over GitVersion's intermediate build
 // calculation. Git metadata is best-effort here, just as the Make bootstrap
 // leaves GIT_TAG empty when the working directory is not a Git repository.
-func versionFromExactHeadTag(ctx context.Context, workdir string) string {
+func exactHeadTag(ctx context.Context, workdir string) exactTag {
 	command := exec.CommandContext(ctx, "git", "tag", "-l", "--sort=-taggerdate", "--points-at", "HEAD")
 	command.Dir = workdir
 	output, err := command.Output()
 	if err != nil {
-		return ""
+		return exactTag{}
 	}
 	for _, tag := range strings.Fields(string(output)) {
-		return normalizeVersionTag(tag)
+		return exactTag{Raw: tag, Normalized: normalizeVersionTag(tag), Found: true}
 	}
-	return ""
+	return exactTag{}
+}
+
+// versionFromExactHeadTag is retained for callers/tests that need the legacy
+// best-effort value; version execution uses exactHeadTag to preserve presence.
+func versionFromExactHeadTag(ctx context.Context, workdir string) string {
+	return exactHeadTag(ctx, workdir).Normalized
 }
 
 var (
@@ -935,4 +1069,144 @@ func parseGitVersionFullOutput(output string) string {
 		return value.SemVer
 	}
 	return strings.TrimSpace(strings.Split(trimmed, "\n")[0])
+}
+
+type patchLine struct {
+	text string
+	end  string
+}
+
+func splitPatchLines(data []byte) []patchLine {
+	if len(data) == 0 {
+		return nil
+	}
+	out := []patchLine{}
+	for len(data) > 0 {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			out = append(out, patchLine{string(data), ""})
+			break
+		}
+		end := "\n"
+		text := data[:i]
+		if i > 0 && data[i-1] == '\r' {
+			text = data[:i-1]
+			end = "\r\n"
+		}
+		out = append(out, patchLine{string(text), end})
+		data = data[i+1:]
+	}
+	return out
+}
+func unifiedPatch(path string, before, after []byte, added bool) string {
+	a, b := splitPatchLines(before), splitPatchLines(after)
+	var out strings.Builder
+	if added {
+		out.WriteString("--- /dev/null\n")
+	} else {
+		out.WriteString("--- a/" + path + "\n")
+	}
+	out.WriteString("+++ b/" + path + "\n")
+	// LCS, with deletion preferred on an equal choice, makes repeated lines stable.
+	dp := make([][]int, len(a)+1)
+	for i := range dp {
+		dp[i] = make([]int, len(b)+1)
+	}
+	for i := len(a) - 1; i >= 0; i-- {
+		for j := len(b) - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				dp[i][j] = 1 + dp[i+1][j+1]
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i][j] = dp[i+1][j]
+			} else {
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	type op struct {
+		kind     byte
+		line     patchLine
+		old, neu int
+	}
+	ops := []op{}
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		if i < len(a) && j < len(b) && a[i] == b[j] {
+			ops = append(ops, op{' ', a[i], i, j})
+			i++
+			j++
+			continue
+		}
+		if i < len(a) && (j == len(b) || dp[i+1][j] >= dp[i][j+1]) {
+			ops = append(ops, op{'-', a[i], i, j})
+			i++
+			continue
+		}
+		ops = append(ops, op{'+', b[j], i, j})
+		j++
+	}
+	groups := [][2]int{}
+	start := -1
+	unchanged := 0
+	for k, o := range ops {
+		if o.kind != ' ' {
+			if start < 0 {
+				start = k
+			}
+			unchanged = 0
+		} else if start >= 0 {
+			unchanged++
+			if unchanged > 6 {
+				groups = append(groups, [2]int{start, k - unchanged})
+				start = -1
+				unchanged = 0
+			}
+		}
+	}
+	if start >= 0 {
+		groups = append(groups, [2]int{start, len(ops) - 1})
+	}
+	if len(groups) == 0 {
+		return out.String()
+	}
+	for _, g := range groups {
+		lo := g[0] - 3
+		if lo < 0 {
+			lo = 0
+		}
+		hi := g[1] + 4
+		if hi > len(ops) {
+			hi = len(ops)
+		}
+		oldCount, newCount := 0, 0
+		oldStart, newStart := 0, 0
+		for k := lo; k < hi; k++ {
+			if ops[k].kind != '+' {
+				oldCount++
+			}
+			if ops[k].kind != '-' {
+				newCount++
+			}
+		}
+		oldStart = ops[lo].old + 1
+		newStart = ops[lo].neu + 1
+		if oldCount == 0 {
+			oldStart = ops[lo].old
+		}
+		if newCount == 0 {
+			newStart = ops[lo].neu
+		}
+		fmt.Fprintf(&out, "@@ -%d,%d +%d,%d @@\n", oldStart, oldCount, newStart, newCount)
+		for _, o := range ops[lo:hi] {
+			out.WriteByte(o.kind)
+			out.WriteString(o.line.text)
+			if o.line.end != "" {
+				out.WriteString(o.line.end)
+			} else {
+				out.WriteByte('\n')
+				out.WriteString("\\ No newline at end of file\n")
+			}
+		}
+	}
+	return out.String()
 }

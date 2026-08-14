@@ -123,7 +123,7 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), " [%s]", strings.Join(args, ", "))
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), " — %s; executor=%s; mutation=%s; tools=%s; flags=%s\n", description.Semantics, description.Executor, description.MutationClass, capabilityToolNames(description.Tools), capabilityFlagNames(description.Flags))
+			fmt.Fprintf(cmd.OutOrStdout(), " — %s; executor=%s; mutation=%s; tools=%s; flags=%s%s\n", description.Semantics, description.Executor, description.MutationClass, capabilityToolNames(description.Tools), capabilityFlagNames(description.Flags), dryRunBehavior(description.Flags))
 		}
 		return nil
 	default:
@@ -139,6 +139,15 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
+}
+
+func dryRunBehavior(flags []projectpkg.FlagDefinition) string {
+	for _, flag := range flags {
+		if flag.Name == "dry-run" {
+			return "; dry-run=" + flag.Description
+		}
+	}
+	return ""
 }
 
 func capabilityToolNames(requirements []projectpkg.ToolRequirement) string {
