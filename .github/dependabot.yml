@@ -8,3 +8,10 @@ updates:
       prefix: "fix"
       prefix-development: "chore"
       include: "scope"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

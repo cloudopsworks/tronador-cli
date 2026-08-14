@@ -476,8 +476,10 @@ ToolCall {
 `tool_calls` are executed with `os/exec`-style argument arrays. Shell parsing,
 Make expansion, target concatenation, and `sh -c` are out of scope. `--dry-run`
 prints the operation, required tools, resolution sources, and intended calls;
-it does not install tools, invoke tools, or mutate files. This is mandatory for
-every mutating capability exposed by the registry.
+it does not install tools, invoke tools, or mutate files for non-version capabilities.
+`project version --dry-run` is the single exception: it calculates GitVersion when no
+exact HEAD tag is present, constructs file deltas in memory, and never mutates the
+project workdir; it may provision only to a tools directory outside that workdir.
 
 ### Tool dependency resolution and installation
 
@@ -521,7 +523,7 @@ Installation rules are explicit:
 Tool installation is the only declared network activity for an otherwise local
 operation. The resolver requires `--allow-network` before downloading; local
 PATH/cache resolution remains network-free. `detect`, `capabilities`, and
-`--dry-run` never download or invoke tools.
+`--dry-run` never downloads or invokes tools for non-version capabilities; evaluated `project version --dry-run` may calculate GitVersion and may provision only outside its workdir.
 
 The executor must:
 
@@ -590,7 +592,7 @@ The descriptor records `dry_run`, `network_policy`, `confirmation_policy`,
 capability.
 
 - `detect` and `capabilities` are read-only and network-free.
-- Mutating operations support plan-only `--dry-run` without installing or
+- Non-version mutating operations support plan-only `--dry-run` without installing or
   evaluating tools.
 - Workspace operations are local by default. Tool downloads require explicit
   `--allow-network`; otherwise a missing tool fails before the operation starts.
@@ -721,7 +723,7 @@ Makefile targets, and all tag-management behavior are not public capabilities.
 Assert that:
 
 - detection and capability listing never invoke Make, tools, or network;
-- every mutating capability's dry-run prints an operation plan and invokes no
+- every non-version mutating capability's dry-run prints an operation plan and invokes no
   child process or tool installation;
 - a missing or malformed tool catalog fails before operation start;
 - PATH/cache resolution works without network, while missing tools require

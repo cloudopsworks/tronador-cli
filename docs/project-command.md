@@ -47,9 +47,16 @@ format operations use OpenTofu by default and accept
 candidate is available and fails when both are available.
 Initialization does not resolve an IaC engine.
 
-Every mutating capability supports the global `--dry-run` plan. Destructive
-Terragrunt cleanup requires `--yes`. Tool calls use typed argument arrays and
-never invoke Make, shell bootstrap scripts, or tag-management workflows.
+Every mutating capability except `project version` supports the global `--dry-run`
+operation plan without tool resolution. `project version --dry-run` is the explicit
+evaluated-preview exception: it selects an exact HEAD tag first, otherwise calculates
+GitVersion, but never changes project files. It prints deterministic unified file
+patches (or `No file changes for version <version>.`) and JSON exposes only actual
+`file_changes`; unchanged and optional missing metadata files are omitted. GitVersion
+provisioning is allowed only to a tools directory outside the workdir, and successful
+preview suppresses provisioner/tool progress. Destructive Terragrunt cleanup requires
+`--yes`. Tool calls use typed argument arrays and never invoke Make, shell bootstrap
+scripts, or tag-management workflows.
 
 ## Initialization mappings
 
@@ -69,8 +76,9 @@ engine subcommand from the word `init`.
   `terragrunt hcl format --exclude-dir .cloudopsworks`. They do not run
   `terragrunt init`.
 
-Dry-run output exposes each native and tool step, including its ordered
-arguments, so callers can inspect the polymorphic pipeline before mutation.
+Non-version dry-run output exposes each native and tool step, including its ordered
+arguments, so callers can inspect the polymorphic pipeline before mutation. Version
+dry-run instead emits only its actual file delta.
 
 ### Native metadata updates
 

@@ -109,7 +109,7 @@ func DefaultRegistry() Registry {
 		},
 		"version": {
 			ID: "version", Semantics: "generate a project version without tag management",
-			ResultFields: []string{"version", "generated_artifacts", "tag_created"},
+			ResultFields: []string{"version", "generated_artifacts", "tag_created", "file_changes"},
 		},
 		"lint": {
 			ID: "lint", Aliases: []string{"validate"}, Semantics: "validate the detected infrastructure project",
