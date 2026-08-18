@@ -55,7 +55,7 @@ branches:
     label: ''
     increment: Patch
     prevent-increment:
-      of-merged-branch: true
+      of-merged-branch: false
     track-merge-target: false
     track-merge-message: true
     regex: "^master$|^main$"
@@ -73,7 +73,7 @@ branches:
       of-merged-branch: true
       when-current-commit-tagged: false
     track-merge-target: false
-    regex: "^releases?[\\/-](?<BranchName>.+)"
+    regex: "^releases?[\\/-](?<BranchName>[vV]?\\d+\\.\\d+\\.\\d+.*)"
     source-branches:
       - main
       - support
@@ -123,7 +123,7 @@ branches:
     increment: Inherit
     prevent-increment:
       when-current-commit-tagged: false
-    regex: "^(hotfix|fix)(es)?[\\/-](?<BranchName>.+)"
+    regex: "^(hotfix|fix)(es)?[\\/-](?<BranchName>[vV]?\\d+\\.\\d+\\.\\d+.*)"
     source-branches:
       - main
       - support
@@ -137,7 +137,7 @@ branches:
     prevent-increment:
       of-merged-branch: true
     track-merge-target: false
-    regex: "^support[\\/-](?<BranchName>.+)"
+    regex: "^support[\\/-](?<BranchName>[vV]?\\d+\\.\\d+(\\.\\d+)?.*)"
     source-branches:
       - main
     is-source-branch-for: []
