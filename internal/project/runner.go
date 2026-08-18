@@ -873,18 +873,14 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 }
 
 type exactTag struct {
-	Raw, Normalized string
-	Found           bool
+	Normalized string
+	Found      bool
 }
 
 func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag exactTag) (string, ToolExecution, bool, *Error) {
-	if tag.Found {
-		if !semanticVersionPattern.MatchString(tag.Normalized) {
-			return "", ToolExecution{}, false, projectError("project_operation_failed", "version source returned an invalid semantic version")
-		}
-		return tag.Normalized, ToolExecution{}, false, nil
-	}
 	// This is the sole dry-run exception: calculate the authoritative version.
+	// GitVersion always runs so a repo-local configuration is honored, even when
+	// a tag at HEAD controls the rendered VERSION value.
 	resolved, err := r.resolveTools(ctx, &plan)
 	if err != nil {
 		var projectErr *Error
@@ -908,6 +904,9 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}
 	}
 	version := versionFromGitVersionOutput(execution.Stdout)
+	if tag.Found {
+		version = tag.Normalized
+	}
 	if version == "" || !semanticVersionPattern.MatchString(version) {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}
 	}
@@ -1019,7 +1018,7 @@ func exactHeadTag(ctx context.Context, workdir string) exactTag {
 		return exactTag{}
 	}
 	for _, tag := range strings.Fields(string(output)) {
-		return exactTag{Raw: tag, Normalized: normalizeVersionTag(tag), Found: true}
+		return exactTag{Normalized: normalizeVersionTag(tag), Found: true}
 	}
 	return exactTag{}
 }
@@ -1035,22 +1034,19 @@ var (
 	deployMetadataPattern  = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
 )
 
-// normalizeVersionTag applies the same release-tag transformation as the
-// application templates' version targets: remove CI deploy metadata while
-// retaining the tagged release or prerelease version exactly.
+// normalizeVersionTag applies the template Makefile's tag transformation:
+// remove the tag prefix and CI deploy metadata while retaining prereleases.
 func normalizeVersionTag(tag string) string {
-	return deployMetadataPattern.ReplaceAllString(tag, "")
+	tag = deployMetadataPattern.ReplaceAllString(tag, "")
+	return strings.TrimPrefix(strings.TrimPrefix(tag, "v"), "V")
 }
 
-// versionFromGitVersionOutput preserves FullSemVer, including build metadata,
-// and formats it as a release tag for the generated VERSION file. GitVersion
-// reports values without the tag prefix, while exact HEAD tags retain theirs.
+// versionFromGitVersionOutput renders GitVersion's FullSemVer the same way as
+// the template Makefile: build metadata is changed from a SemVer '+' separator
+// to a '-' separator for VERSION and package-manager compatibility.
 func versionFromGitVersionOutput(output string) string {
-	version := parseGitVersionFullOutput(output)
-	if version == "" || strings.HasPrefix(version, "v") {
-		return version
-	}
-	return "v" + version
+	version := strings.TrimPrefix(strings.TrimPrefix(parseGitVersionFullOutput(output), "v"), "V")
+	return strings.ReplaceAll(version, "+", "-")
 }
 
 func parseGitVersionFullOutput(output string) string {
