@@ -49,8 +49,10 @@ Initialization does not resolve an IaC engine.
 
 Every mutating capability except `project version` supports the global `--dry-run`
 operation plan without tool resolution. `project version --dry-run` is the explicit
-evaluated-preview exception: it selects an exact HEAD tag first, otherwise calculates
-GitVersion, but never changes project files. It prints deterministic unified file
+evaluated-preview exception: it always calculates GitVersion (using a repo-local
+configuration when present) but never changes project files. A tag at `HEAD` controls
+the rendered `VERSION` value; otherwise its `FullSemVer` is written with `+` translated
+to `-`. It prints deterministic unified file
 patches (or `No file changes for version <version>.`) and JSON exposes only actual
 `file_changes`; unchanged and optional missing metadata files are omitted. GitVersion
 provisioning is allowed only to a tools directory outside the workdir, and successful
