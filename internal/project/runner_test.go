@@ -201,7 +201,7 @@ func TestVersionPreservesGitVersionFullSemVerAndUsesRepoConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Version != "v1.8.0-beta.1+69" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "v1.8.0-beta.1+69\n" {
+			if result.Version != "1.8.0-beta.1-69" || result.TagCreated || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "1.8.0-beta.1-69\n" {
 				t.Fatalf("version result = %+v", result)
 			}
 			if len(called) != 1 || called[0].ToolName != "gitversion" || !contains(called[0].Arguments, "FullSemVer") || !contains(called[0].Arguments, "-config") || !contains(called[0].Arguments, filepath.Join(".cloudopsworks", configName)) || contains(called[0].Arguments, "tag") || contains(called[0].Arguments, "push") {
@@ -211,30 +211,32 @@ func TestVersionPreservesGitVersionFullSemVerAndUsesRepoConfig(t *testing.T) {
 	}
 }
 
-func TestVersionUsesExactHeadTagWithoutRunningGitVersion(t *testing.T) {
+func TestVersionUsesExactHeadTagAndGitVersionConfig(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		branch string
-		tag    string
-		want   string
+		name string
+		tag  string
+		want string
 	}{
-		{name: "release branch prerelease tag", branch: "release/1.8", tag: "v1.8.0-beta.1", want: "v1.8.0-beta.1"},
-		{name: "deploy metadata tag", tag: "v1.8.0+deploy-proc1", want: "v1.8.0"},
+		{name: "deploy prerelease tag", tag: "v0.2.8-beta.1+deploy-pepe", want: "0.2.8-beta.1"},
+		{name: "deploy release tag", tag: "v0.2.8+deploy-pepe", want: "0.2.8"},
+		{name: "beta tag", tag: "v0.2.8-beta.4", want: "0.2.8-beta.4"},
+		{name: "alpha tag", tag: "v0.2.8-alpha.1", want: "0.2.8-alpha.1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			workdir := fixture(t, ".golang")
-			initializeGitRepository(t, workdir)
-			if tc.branch != "" {
-				runGit(t, workdir, "checkout", "-b", tc.branch)
+			configPath := filepath.Join(workdir, ".cloudopsworks", "gitversion.yaml")
+			if err := os.WriteFile(configPath, []byte("mode: Mainline\n"), 0o644); err != nil {
+				t.Fatal(err)
 			}
+			initializeGitRepository(t, workdir)
 			runGit(t, workdir, "tag", tc.tag)
 
-			called := false
+			calls := []ToolCall{}
 			runner := mustRunner(t, Options{
 				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
-				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
-					called = true
-					return ToolExecution{}, errors.New("GitVersion must not run for an exact HEAD tag")
+				ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+					calls = append(calls, call)
+					return ToolExecution{Stdout: `{"FullSemVer":"0.2.8-beta.1+0"}`}, nil
 				},
 			})
 
@@ -242,8 +244,11 @@ func TestVersionUsesExactHeadTagWithoutRunningGitVersion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if called || result.Version != tc.want || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.want+"\n" {
-				t.Fatalf("tagged version result = %+v, GitVersion called=%v", result, called)
+			if result.Version != tc.want || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.want+"\n" {
+				t.Fatalf("tagged version result = %+v", result)
+			}
+			if len(calls) != 1 || calls[0].ToolName != "gitversion" || !contains(calls[0].Arguments, "FullSemVer") || !contains(calls[0].Arguments, "-config") || !contains(calls[0].Arguments, filepath.Join(".cloudopsworks", "gitversion.yaml")) {
+				t.Fatalf("GitVersion call = %+v", calls)
 			}
 		})
 	}
@@ -263,7 +268,7 @@ printf 'gitversion warning\n' >&2`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := stdout.String(), "Generated version v2.4.6 in VERSION (tag_created=false)\n"; got != want {
+	if got, want := stdout.String(), "Generated version 2.4.6 in VERSION (tag_created=false)\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if stderr.Len() != 0 {
@@ -1124,7 +1129,7 @@ func TestVersionDryRunPreviewsChangesWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Version != "v2.4.6" || result.FileChanges == nil || len(*result.FileChanges) != 2 {
+	if result.Version != "2.4.6" || result.FileChanges == nil || len(*result.FileChanges) != 2 {
 		t.Fatalf("preview result = %+v", result)
 	}
 	if got := string(mustRead(t, packagePath)); got != "{\n  \"version\": \"0.1.0\"\n}\n" {
