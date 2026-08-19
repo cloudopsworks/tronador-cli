@@ -100,32 +100,32 @@ homebrew_casks:
     binaries:
       - tronador
     skip_upload: '{{ not (isEnvSet "HOMEBREW_TAP_TOKEN") }}'
-chocolateys:
-  - name: tronador-cli
-    ids:
-      - tronador-cli
-    package_source_url: "https://github.com/cloudopsworks/chocolatey-packages"
-    owners: "Cloud Ops Works LLC"
-    title: "Tronador CLI"
-    authors: "Cristian Beraha"
-    project_url: "https://cloudopsworks.co/products/#tronador-cli"
-    icon_url: "https://cloudopsworks.co/images/logo.png"
-    copyright: "Copyright 2026 Cloud Ops Works LLC"
-    license_url: "https://github.com/cloudopsworks/tronador-cli/blob/master/LICENSE"
-    require_license_acceptance: false
-    project_source_url: "https://github.com/cloudopsworks/tronador-cli"
-    docs_url: "https://github.com/cloudopsworks/tronador-cli/blob/master/README.md"
-    bug_tracker_url: "https://github.com/cloudopsworks/tronador-cli/issues"
-    summary: "CLI tool for CloudOps Works Tronador workflows and AWS automation"
-    tags: "tronador cli cloudopsworks"
-    description: |
-      {{ .ProjectName }} is a CLI tool for CloudOps Works Tronador workflows and AWS automation.
-      It provides a set of commands to interact with Tronador and perform various tasks related to AWS
-      infrastructure management, deployment, and automation. With {{ .ProjectName }}, users can easily
-      manage their AWS resources, automate repetitive tasks, and streamline their workflow.
-    release_notes: "https://github.com/cloudopsworks/tronador-cli/releases/tag/v{{ .Version }}"
-    api_key:  '{{ .Env.CHOCOLATEY_API_KEY }}'
-    skip_publish: true
+#chocolateys:
+#  - name: tronador-cli
+#    ids:
+#      - tronador-cli
+#    package_source_url: "https://github.com/cloudopsworks/chocolatey-packages"
+#    owners: "Cloud Ops Works LLC"
+#    title: "Tronador CLI"
+#    authors: "Cristian Beraha"
+#    project_url: "https://cloudopsworks.co/products/#tronador-cli"
+#    icon_url: "https://cloudopsworks.co/images/logo.png"
+#    copyright: "Copyright 2026 Cloud Ops Works LLC"
+#    license_url: "https://github.com/cloudopsworks/tronador-cli/blob/master/LICENSE"
+#    require_license_acceptance: false
+#    project_source_url: "https://github.com/cloudopsworks/tronador-cli"
+#    docs_url: "https://github.com/cloudopsworks/tronador-cli/blob/master/README.md"
+#    bug_tracker_url: "https://github.com/cloudopsworks/tronador-cli/issues"
+#    summary: "CLI tool for CloudOps Works Tronador workflows and AWS automation"
+#    tags: "tronador cli cloudopsworks"
+#    description: |
+#      {{ .ProjectName }} is a CLI tool for CloudOps Works Tronador workflows and AWS automation.
+#      It provides a set of commands to interact with Tronador and perform various tasks related to AWS
+#      infrastructure management, deployment, and automation. With {{ .ProjectName }}, users can easily
+#      manage their AWS resources, automate repetitive tasks, and streamline their workflow.
+#    release_notes: "https://github.com/cloudopsworks/tronador-cli/releases/tag/v{{ .Version }}"
+#    api_key:  '{{ .Env.CHOCOLATEY_API_KEY }}'
+#    skip_publish: true
 publishers:
   - name: chocolatey-package
     ids:
