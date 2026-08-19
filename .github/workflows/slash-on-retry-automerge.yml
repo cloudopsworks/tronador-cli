@@ -23,6 +23,7 @@ permissions:
 
 jobs:
   retry-automerge:
+    name: Retry Automerge
     runs-on: ubuntu-latest
     steps:
       - uses: cloudopsworks/automerge-action@v0.17.0

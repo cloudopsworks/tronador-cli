@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   automerge:
+    name: Automerge Pull Request
     runs-on: ubuntu-latest
     steps:
       - uses: cloudopsworks/automerge-action@v0.17.0

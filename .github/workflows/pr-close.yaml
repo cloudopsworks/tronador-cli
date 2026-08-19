@@ -65,6 +65,7 @@ jobs:
           bot_email: ${{ vars.BOT_EMAIL }}
 
   preview-destroy:
+    name: Destroy Preview Environment
     needs:
       - preload
     if: needs.preload.outputs.has_preview == 'true'
@@ -146,6 +147,7 @@ jobs:
           rancher_project_id: ${{ vars.PREVIEW_RANCHER_PROJECT_ID }}
 
   branch_deletion:
+    name: Delete Branch
     if: ${{ ! cancelled() }}
     needs:
       - preload

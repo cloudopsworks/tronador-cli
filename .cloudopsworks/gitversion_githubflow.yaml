@@ -24,7 +24,12 @@ patch-version-bump-message: "\\+semver:\\s?(fix|patch|hotfix)"
 no-bump-message: "\\+semver:\\s?(none|skip)"
 tag-pre-release-weight: 60000
 commit-date-format: yyyy-MM-dd
-merge-message-formats: {}
+merge-message-formats:
+  conventional-commits-merge: "^(?<type>build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\((?<scope>.*)\\))?(!)?: Merge pull request #(?<PullRequestNumber>\\d+) from (?<SourceBranch>.*)"
+  direct-commits-merge: "^Merge pull request #(?<PullRequestNumber>\\d+) from (?<SourceBranch>.*)"
+  feat-finish: "^chore: Feature Finish from (?<SourceBranch>.*).*"
+  hotfix-finish: "^chore: Hotfix Release from (?<SourceBranch>.*).*"
+  release-finish: "^chore: Release v\\d+\\.\\d+\\.\\d+.* from (?<SourceBranch>.*).*"
 update-build-number: true
 semantic-version-format: Strict
 strategies:
