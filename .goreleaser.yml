@@ -117,10 +117,7 @@ chocolateys:
     docs_url: "https://github.com/cloudopsworks/tronador-cli/blob/master/README.md"
     bug_tracker_url: "https://github.com/cloudopsworks/tronador-cli/issues"
     summary: "CLI tool for CloudOps Works Tronador workflows and AWS automation"
-    tags:
-      - tronador
-      - cli
-      - cloudopsworks
+    tags: "tronador cli cloudopsworks"
     description: |
       {{ .ProjectName }} is a CLI tool for CloudOps Works Tronador workflows and AWS automation.
       It provides a set of commands to interact with Tronador and perform various tasks related to AWS
