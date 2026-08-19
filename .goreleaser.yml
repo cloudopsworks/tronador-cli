@@ -134,7 +134,7 @@ publishers:
       ./packaging/chocolatey/package.sh --artifact "{{ abs .ArtifactPath }}" --version "{{ .Version }}" --tag "{{ .Tag }}" --out dist/chocolatey
     env:
       - CHOCOLATEY_API_KEY={{ .Env.CHOCOLATEY_API_KEY }}
-      - TRONADOR_CHOCOLATEY_PUBLISH=true
+      - TRONADOR_CHOCOLATEY_PUBLISH=false
 release:
   use_existing_draft: true
   extra_files:
