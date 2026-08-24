@@ -234,6 +234,7 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v1.6.31\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "gitversion_trunkbased.yaml"), "mode: ContinuousDeployment\n")
 
 	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
@@ -260,6 +261,10 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates: []\n" {
 		t.Fatalf("dependabot config = %q, want template configuration", got)
+	}
+	trunkBasedConfig := filepath.Join(dir, ".cloudopsworks", "gitversion_trunkbased.yaml")
+	if got := mustRead(t, trunkBasedConfig); got != "mode: ContinuousDeployment\n" {
+		t.Fatalf("trunk-based GitVersion config = %q, want template configuration", got)
 	}
 }
 
