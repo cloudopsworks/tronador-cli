@@ -469,11 +469,13 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 				return err
 			}
 		}
-		for _, file := range []string{"labeler.yml", "auto-label.yml", "gitversion.yaml", "gitversion_gitflow.yaml", "gitversion_githubflow.yaml"} {
+		for _, file := range []string{"labeler.yml", "auto-label.yml", "gitversion.yaml", "gitversion_gitflow.yaml", "gitversion_githubflow.yaml", "gitversion_trunkbased.yaml"} {
 			if err := r.copyFileIfExists(r.path(r.Config.TemplateDirectory, ".cloudopsworks", file), r.path(".cloudopsworks", file)); err != nil {
 				return err
 			}
 		}
+		// These configuration files may be tailored by the implementation
+		// repository, so initialize them from the template only when missing.
 		for _, file := range []string{"inputs-jira.yaml", "inputs.yaml"} {
 			dest := r.path(".cloudopsworks", file)
 			if !exists(dest) {
