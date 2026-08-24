@@ -837,7 +837,7 @@ func executeNative(plan OperationPlan) ([]string, error) {
 }
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result, tag exactTag) (Result, error) {
-	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag)
+	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag, detection.ProfileID)
 	if err != nil {
 		if fromGitVersion {
 			r.printToolFailure(execution)
@@ -922,7 +922,7 @@ func snapshotVersion(version string) string {
 	return version + "-SNAPSHOT"
 }
 
-func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag exactTag) (string, ToolExecution, bool, *Error) {
+func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag exactTag, profile string) (string, ToolExecution, bool, *Error) {
 	// This is the sole dry-run exception: calculate the authoritative version.
 	// GitVersion always runs so a repo-local configuration is honored, even when
 	// a tag at HEAD controls the rendered VERSION value.
@@ -953,6 +953,9 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 		version = tag.Normalized
 	} else if r.Opts.Snapshot {
 		version = snapshotVersion(version)
+	}
+	if profile == "java" {
+		version = normalizeJavaVersion(version)
 	}
 	if version == "" || !semanticVersionPattern.MatchString(version) {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}
@@ -1078,9 +1081,27 @@ func versionFromExactHeadTag(ctx context.Context, workdir string) string {
 
 var (
 	majorMinorPatchPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	majorMinorPatchPrefix  = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+`)
 	semanticVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 	deployMetadataPattern  = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
+	javaQualifierReplacer  = strings.NewReplacer(".", "-", "_", "-", "+", "-")
 )
+
+// normalizeJavaVersion renders a Maven-compatible qualifier. The numeric
+// Major.Minor.Patch prefix remains unchanged; every qualifier and build
+// separator is a hyphen so dots and underscores cannot reach pom.xml.
+func normalizeJavaVersion(version string) string {
+	core := majorMinorPatchPrefix.FindString(version)
+	if core == "" || len(core) == len(version) {
+		return version
+	}
+	separator := version[len(core):]
+	if !strings.HasPrefix(separator, "-") && !strings.HasPrefix(separator, "+") {
+		return version
+	}
+	qualifier := separator[1:]
+	return core + "-" + javaQualifierReplacer.Replace(qualifier)
+}
 
 // normalizeVersionTag applies the template Makefile's tag transformation:
 // remove the tag prefix and CI deploy metadata while retaining prereleases.

@@ -254,6 +254,56 @@ func TestVersionUsesExactHeadTagAndGitVersionConfig(t *testing.T) {
 	}
 }
 
+func TestJavaVersionNormalizesQualifierSeparators(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tag    string
+		output string
+		want   string
+	}{
+		{
+			name:   "GitVersion output",
+			output: `{"FullSemVer":"2.4.6-feature.branch_name.7+build_meta.9"}`,
+			want:   "2.4.6-feature-branch-name-7-build-meta-9",
+		},
+		{
+			name:   "exact tag",
+			tag:    "v2.4.6-feature.branch_name.7+build_meta.9",
+			output: `{"FullSemVer":"9.9.9"}`,
+			want:   "2.4.6-feature-branch-name-7-build-meta-9",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, ".java")
+			pomPath := filepath.Join(workdir, "pom.xml")
+			if err := os.WriteFile(pomPath, []byte("<project>\n  <version>0.1.0</version>\n</project>\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			initializeGitRepository(t, workdir)
+			if tc.tag != "" {
+				runGit(t, workdir, "tag", tc.tag)
+			}
+
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: tc.output}, nil
+				},
+			})
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Version != tc.want || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.want+"\n" {
+				t.Fatalf("version result = %+v", result)
+			}
+			if got, want := string(mustRead(t, pomPath)), "<project>\n  <version>"+tc.want+"</version>\n</project>\n"; got != want {
+				t.Fatalf("pom.xml = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestSnapshotVersionIsLimitedToUntaggedJavaProjects(t *testing.T) {
 	t.Run("untagged Java project", func(t *testing.T) {
 		workdir := fixture(t, ".java")
