@@ -52,7 +52,9 @@ operation plan without tool resolution. `project version --dry-run` is the expli
 evaluated-preview exception: it always calculates GitVersion (using a repo-local
 configuration when present) but never changes project files. A tag at `HEAD` controls
 the rendered `VERSION` value; otherwise its `FullSemVer` is written with `+` translated
-to `-`. For an untagged Java repository only, `tronador project version --snapshot`
+to `-`. For Java projects, qualifier and build segments after `x.y.z` use hyphens:
+for example, `x.y.z-feature.branch_name.1+build_2` becomes
+`x.y.z-feature-branch-name-1-build-2`. For an untagged Java repository only, `tronador project version --snapshot`
 uses GitVersion's `MajorMinorPatch` and writes `x.y.z-SNAPSHOT` to `VERSION` and the
 root Maven project version; the flag is rejected for tagged `HEAD`s, non-Java projects,
 and non-version capabilities. It prints deterministic unified file
