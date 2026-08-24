@@ -370,6 +370,10 @@ application profiles in the matrix. It is a generation/update operation:
 - write the declared generated file and implementation metadata; and
 - return the generated version and changed-artifact summary in the result.
 
+For the Java profile only, an untagged `HEAD` may use `--snapshot` to generate
+`x.y.z-SNAPSHOT` from GitVersion's `MajorMinorPatch`; the flag is unavailable for
+other capabilities, profiles, and tagged `HEAD`s.
+
 The implementation must not invoke `git tag`, `git push`, branch checkout for
 tag management, Make, or any release workflow. A tagged working tree may
 affect GitVersion's calculated input, but that behavior is reported as an

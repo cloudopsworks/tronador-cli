@@ -254,6 +254,107 @@ func TestVersionUsesExactHeadTagAndGitVersionConfig(t *testing.T) {
 	}
 }
 
+func TestSnapshotVersionIsLimitedToUntaggedJavaProjects(t *testing.T) {
+	t.Run("untagged Java project", func(t *testing.T) {
+		workdir := fixture(t, ".java")
+		pomPath := filepath.Join(workdir, "pom.xml")
+		before := "<project>\n  <version>0.1.0</version>\n</project>\n"
+		if err := os.WriteFile(pomPath, []byte(before), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		initializeGitRepository(t, workdir)
+
+		calls := []ToolCall{}
+		runner := mustRunner(t, Options{
+			WorkDir: workdir, Snapshot: true, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+			ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+				calls = append(calls, call)
+				return ToolExecution{Stdout: "2.4.6\n"}, nil
+			},
+		})
+
+		result, err := runner.Run(context.Background(), "version", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Version != "2.4.6-SNAPSHOT" || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.6-SNAPSHOT\n" {
+			t.Fatalf("snapshot result = %+v", result)
+		}
+		if got, want := string(mustRead(t, pomPath)), "<project>\n  <version>2.4.6-SNAPSHOT</version>\n</project>\n"; got != want {
+			t.Fatalf("pom.xml = %q, want %q", got, want)
+		}
+		if len(calls) != 1 || !contains(calls[0].Arguments, "MajorMinorPatch") || contains(calls[0].Arguments, "FullSemVer") {
+			t.Fatalf("snapshot GitVersion call = %+v", calls)
+		}
+	})
+
+	for _, tc := range []struct {
+		name       string
+		marker     string
+		capability string
+		tagged     bool
+	}{
+		{name: "non-Java version", marker: ".golang", capability: "version"},
+		{name: "Java non-version capability", marker: ".java", capability: "init"},
+		{name: "tagged Java version", marker: ".java", capability: "version", tagged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, tc.marker)
+			if tc.tagged {
+				initializeGitRepository(t, workdir)
+				runGit(t, workdir, "tag", "v2.4.6")
+			}
+			called := false
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Snapshot: true, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					called = true
+					return ToolExecution{Stdout: "2.4.6\n"}, nil
+				},
+			})
+
+			if _, err := runner.Run(context.Background(), tc.capability, nil); err == nil || codeOf(err) != "project_snapshot_unsupported" {
+				t.Fatalf("snapshot error = %v", err)
+			}
+			if called {
+				t.Fatal("snapshot validation unexpectedly invoked GitVersion")
+			}
+		})
+	}
+}
+
+func TestSnapshotCapabilityIsAdvertisedOnlyForJavaVersion(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		want    bool
+	}{
+		{profile: "java", want: true},
+		{profile: "go", want: false},
+	} {
+		t.Run(tc.profile, func(t *testing.T) {
+			workdir := fixture(t, markerForProfile(t, tc.profile))
+			runner := mustRunner(t, Options{WorkDir: workdir})
+			detection, err := runner.Detect()
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptions, err := runner.Describe(detection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, description := range descriptions {
+				if description.ID == "version" {
+					if got := flagNamed(description.Flags, "snapshot"); got != tc.want {
+						t.Fatalf("snapshot advertised = %v, want %v; flags = %+v", got, tc.want, description.Flags)
+					}
+					return
+				}
+			}
+			t.Fatal("version capability missing")
+		})
+	}
+}
+
 func TestVersionSuppressesGitVersionOutputButPreservesCapture(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell process fixture is POSIX-specific")
@@ -354,7 +455,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 				{Operation: "generate-version"},
 				{Operation: "application-init"},
 			} {
-				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir)
+				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -373,7 +474,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 					}
 				}
 			}
-			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir)
+			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir, false)
 			if err != nil {
 				t.Fatal(err)
 			}
