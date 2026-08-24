@@ -82,6 +82,7 @@ type CapabilityBinding struct {
 	NetworkPolicy      string               `json:"network_policy"`
 	ConfirmationPolicy string               `json:"confirmation_policy"`
 	DryRun             string               `json:"dry_run"`
+	SnapshotVersion    bool                 `json:"snapshot_version,omitempty"`
 }
 
 // Profile is a complete detected implementation descriptor.
@@ -205,7 +206,7 @@ func applicationVersionBinding(profile string) CapabilityBinding {
 		Capability: "version", Executor: ExecutorToolPipe, Operation: "generate-version",
 		Tools:         []ToolRequirement{{Name: "gitversion", Executable: "gitversion", InstallPolicy: "provision", RequiredFor: []string{"version"}}},
 		MutationClass: MutationGenerated, GeneratedArtifacts: artifacts, NetworkPolicy: NetworkForbidden,
-		ConfirmationPolicy: "none", DryRun: "required",
+		ConfirmationPolicy: "none", DryRun: "required", SnapshotVersion: profile == "java",
 	}
 }
 

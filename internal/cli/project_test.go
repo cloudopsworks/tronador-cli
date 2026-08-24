@@ -14,11 +14,22 @@ func TestProjectCommandExposesNamespaceFreeGrammar(t *testing.T) {
 	if cmd == nil || cmd.Name() != "project" {
 		t.Fatalf("project command not found: %#v", cmd)
 	}
-	if cmd.Flag("workdir") == nil || cmd.Flag("json") == nil || cmd.Flag("allow-network") == nil {
+	if cmd.Flag("workdir") == nil || cmd.Flag("json") == nil || cmd.Flag("allow-network") == nil || cmd.Flag("snapshot") == nil {
 		t.Fatalf("project command is missing shared flags")
 	}
 	if cmd.SilenceUsage != true || cmd.SilenceErrors != true {
 		t.Fatalf("project command must keep structured errors clean")
+	}
+}
+
+func TestProjectSnapshotIsLimitedToVersion(t *testing.T) {
+	if err := validateSnapshotCapability("version", true); err != nil {
+		t.Fatalf("version snapshot validation = %v", err)
+	}
+	for _, capability := range []string{"detect", "capabilities", "init"} {
+		if err := validateSnapshotCapability(capability, true); err == nil {
+			t.Fatalf("%s unexpectedly accepted --snapshot", capability)
+		}
 	}
 }
 

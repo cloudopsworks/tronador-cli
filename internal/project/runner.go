@@ -31,6 +31,7 @@ type Options struct {
 	Yes            bool
 	DryRun         bool
 	JSON           bool
+	Snapshot       bool
 	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
@@ -247,6 +248,9 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 			FlagDefinition{Name: "tool-path", Type: "stringArray", Description: "use an explicit executable as name=path"},
 		)
 	}
+	if binding.SnapshotVersion {
+		flags = append(flags, FlagDefinition{Name: "snapshot", Type: "bool", Description: "generate the untagged Java project version as x.y.z-SNAPSHOT", Default: "false"})
+	}
 	if binding.Executor == ExecutorNative && binding.ConfirmationPolicy == "yes_for_noninteractive" {
 		flags = append(flags, FlagDefinition{Name: "yes", Type: "bool", Description: "confirm destructive operations", Default: "false"})
 	}
@@ -301,6 +305,9 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 		argumentErr.RequestedArguments = append([]string(nil), args...)
 		return detection, OperationPlan{}, withDetection(argumentErr, detection)
 	}
+	if r.Opts.Snapshot && !binding.SnapshotVersion {
+		return detection, OperationPlan{}, withDetection(snapshotUnsupportedError(binding.Capability), detection)
+	}
 	plan := OperationPlan{
 		Implementation: detection.ProfileID, Marker: detection.Marker, Capability: binding.Capability,
 		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
@@ -311,7 +318,7 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	var steps []OperationStep
 	if binding.Executor != ExecutorNative {
 		var stepErr error
-		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir)
+		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot)
 		if stepErr != nil {
 			return detection, OperationPlan{}, withDetection(stepErr, detection)
 		}
@@ -369,7 +376,7 @@ func countRequired(schema []ArgumentDefinition) int {
 	return count
 }
 
-func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string) ([]OperationStep, error) {
+func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot bool) ([]OperationStep, error) {
 	call := func(tool string, args ...string) ToolCall {
 		return ToolCall{ToolName: tool, Arguments: append([]string(nil), args...), WorkingDirectory: workdir}
 	}
@@ -387,7 +394,13 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 		}
 		return steps, nil
 	case "generate-version":
-		return []OperationStep{tool("gitversion", "calculate project version", gitVersionToolCall(workdir, "-output", "json", "-showvariable", "FullSemVer"), "", "", false)}, nil
+		variable := "FullSemVer"
+		description := "calculate project version"
+		if snapshot {
+			variable = "MajorMinorPatch"
+			description = "calculate project snapshot version"
+		}
+		return []OperationStep{tool("gitversion", description, gitVersionToolCall(workdir, "-output", "json", "-showvariable", variable), "", "", false)}, nil
 	case "terraform-init":
 		return []OperationStep{
 			native("remove-provider-temp", "remove stale provider template", "remove-file", map[string]string{"path": "provider.temp.tf", "force": "true"}),
@@ -524,7 +537,11 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	// Version has an exact-tag fast path. It deliberately runs before any
 	// resolver work, including for evaluated dry-runs.
 	if plan.Capability == "version" {
-		return r.runVersion(ctx, detection, plan, result)
+		tag := exactHeadTag(ctx, r.Opts.WorkDir)
+		if r.Opts.Snapshot && tag.Found {
+			return Result{}, withDetection(snapshotTaggedHeadError(), detection)
+		}
+		return r.runVersion(ctx, detection, plan, result, tag)
 	}
 	resolved, err := r.resolveTools(ctx, &plan)
 	if err != nil {
@@ -819,8 +836,7 @@ func executeNative(plan OperationPlan) ([]string, error) {
 	return removed, nil
 }
 
-func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result) (Result, error) {
-	tag := exactHeadTag(ctx, r.Opts.WorkDir)
+func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result, tag exactTag) (Result, error) {
 	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag)
 	if err != nil {
 		if fromGitVersion {
@@ -877,6 +893,35 @@ type exactTag struct {
 	Found      bool
 }
 
+func snapshotUnsupportedError(capability string) *Error {
+	return &Error{
+		Code:       "project_snapshot_unsupported",
+		Command:    "project",
+		Capability: capability,
+		Hint:       "use --snapshot only with `tronador project version` in a Java repository",
+		ExitStatus: 1,
+		Cause:      errors.New("--snapshot is supported only for Java project version"),
+	}
+}
+
+func snapshotTaggedHeadError() *Error {
+	return &Error{
+		Code:       "project_snapshot_unsupported",
+		Command:    "project",
+		Capability: "version",
+		Hint:       "remove --snapshot when HEAD is tagged",
+		ExitStatus: 1,
+		Cause:      errors.New("--snapshot cannot be used when HEAD is tagged"),
+	}
+}
+
+func snapshotVersion(version string) string {
+	if !majorMinorPatchPattern.MatchString(version) {
+		return ""
+	}
+	return version + "-SNAPSHOT"
+}
+
 func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag exactTag) (string, ToolExecution, bool, *Error) {
 	// This is the sole dry-run exception: calculate the authoritative version.
 	// GitVersion always runs so a repo-local configuration is honored, even when
@@ -906,6 +951,8 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 	version := versionFromGitVersionOutput(execution.Stdout)
 	if tag.Found {
 		version = tag.Normalized
+	} else if r.Opts.Snapshot {
+		version = snapshotVersion(version)
 	}
 	if version == "" || !semanticVersionPattern.MatchString(version) {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}
@@ -1030,6 +1077,7 @@ func versionFromExactHeadTag(ctx context.Context, workdir string) string {
 }
 
 var (
+	majorMinorPatchPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	semanticVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 	deployMetadataPattern  = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
 )

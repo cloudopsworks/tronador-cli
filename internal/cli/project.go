@@ -22,6 +22,7 @@ var (
 	projectEngine         string
 	projectYes            bool
 	projectJSON           bool
+	projectSnapshot       bool
 )
 
 var projectCmd = &cobra.Command{
@@ -54,6 +55,7 @@ func init() {
 	projectCmd.Flags().StringVar(&projectEngine, "engine", "tofu", "IaC engine: tofu (default), terraform, or auto")
 	projectCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm destructive operations")
 	projectCmd.Flags().BoolVar(&projectJSON, "json", false, "Emit stable JSON output")
+	projectCmd.Flags().BoolVar(&projectSnapshot, "snapshot", false, "Generate a Java snapshot version from an untagged HEAD")
 	rootCmd.AddCommand(projectCmd)
 }
 
@@ -66,11 +68,14 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return emitProjectError(cmd, err)
 	}
+	if err := validateSnapshotCapability(args[0], projectSnapshot); err != nil {
+		return emitProjectError(cmd, err)
+	}
 	runner, err := projectpkg.NewRunner(projectpkg.Options{
 		WorkDir: projectWorkDir, ToolsDir: projectToolsDir, ToolsConfig: projectToolsConfig,
 		NoInstallTools: projectNoInstallTools, AllowNetwork: projectAllowNetwork,
 		ToolVersions: versions, ToolPaths: paths, Engine: projectEngine, Yes: projectYes,
-		JSON:   projectJSON,
+		JSON: projectJSON, Snapshot: projectSnapshot,
 		DryRun: commandDryRun(cmd), Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 	})
 	if err != nil {
@@ -178,6 +183,13 @@ func capabilityFlagNames(flags []projectpkg.FlagDefinition) string {
 		names = append(names, "--"+flag.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+func validateSnapshotCapability(capability string, snapshot bool) error {
+	if snapshot && !strings.EqualFold(strings.TrimSpace(capability), "version") {
+		return projectErrorForCLI("project_snapshot_unsupported", "--snapshot is supported only for `tronador project version`")
+	}
+	return nil
 }
 
 func parseAssignments(values []string, flagName string) (map[string]string, error) {

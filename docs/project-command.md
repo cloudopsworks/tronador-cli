@@ -52,7 +52,10 @@ operation plan without tool resolution. `project version --dry-run` is the expli
 evaluated-preview exception: it always calculates GitVersion (using a repo-local
 configuration when present) but never changes project files. A tag at `HEAD` controls
 the rendered `VERSION` value; otherwise its `FullSemVer` is written with `+` translated
-to `-`. It prints deterministic unified file
+to `-`. For an untagged Java repository only, `tronador project version --snapshot`
+uses GitVersion's `MajorMinorPatch` and writes `x.y.z-SNAPSHOT` to `VERSION` and the
+root Maven project version; the flag is rejected for tagged `HEAD`s, non-Java projects,
+and non-version capabilities. It prints deterministic unified file
 patches (or `No file changes for version <version>.`) and JSON exposes only actual
 `file_changes`; unchanged and optional missing metadata files are omitted. GitVersion
 provisioning is allowed only to a tools directory outside the workdir, and successful
