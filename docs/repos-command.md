@@ -61,7 +61,9 @@ implementation repository while still skipping reserved `98_*` and `99_*`
 template-only issue forms. `.github/dependabot.yml` follows the same
 non-destructive rule: it is copied when present in the template and absent from
 the implementation repository, and is left unchanged when already present. The
-repository's `auto-assign.yml` configuration is also copied only when the
+same rule applies to `.github/secret_scanning.yml` and
+`.github/codeql/codeql-config.yml` for every repository type. The repository's
+`auto-assign.yml` configuration is also copied only when the
 destination is missing, so local reviewer and assignee settings are preserved.
 The template `.gitignore` is merged through a stable managed block delimited by
 `# BEGIN TRONADOR TEMPLATE MANAGED BLOCK` and
