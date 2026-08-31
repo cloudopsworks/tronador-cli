@@ -433,6 +433,9 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 	if err := r.copyDependabotIfExists(context.Background()); err != nil {
 		return err
 	}
+	if err := r.copyGitHubSecurityConfigsIfExists(context.Background()); err != nil {
+		return err
+	}
 	if err := r.mergeGitignoreIfExists(context.Background()); err != nil {
 		return err
 	}
@@ -529,6 +532,9 @@ func (r *Runner) applyUnversionedTemplate() error {
 		return err
 	}
 	if err := r.copyDependabotIfExists(context.Background()); err != nil {
+		return err
+	}
+	if err := r.copyGitHubSecurityConfigsIfExists(context.Background()); err != nil {
 		return err
 	}
 	if err := r.gitAdd(context.Background(), ".github/workflows"); err != nil {
@@ -791,6 +797,31 @@ func (r *Runner) copyDependabotIfExists(ctx context.Context) error {
 		return fmt.Errorf("copy %s: %w", rel, err)
 	}
 	return r.gitAdd(ctx, rel)
+}
+
+func (r *Runner) copyGitHubSecurityConfigsIfExists(ctx context.Context) error {
+	for _, rel := range []string{
+		".github/secret_scanning.yml",
+		".github/codeql/codeql-config.yml",
+	} {
+		src := r.path(r.Config.TemplateDirectory, rel)
+		if !exists(src) {
+			continue
+		}
+		dst := r.path(rel)
+		if pathExists(dst) {
+			fmt.Fprintf(r.Opts.Stdout, "Not modifying %s\n", rel)
+			continue
+		}
+		fmt.Fprintf(r.Opts.Stdout, "Copying missing %s\n", rel)
+		if err := r.copyFileAtomically(src, dst); err != nil {
+			return fmt.Errorf("copy %s: %w", rel, err)
+		}
+		if err := r.gitAdd(ctx, rel); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runner) copyAutoAssignIfExists(ctx context.Context) error {

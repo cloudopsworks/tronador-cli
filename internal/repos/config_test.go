@@ -231,6 +231,8 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".terraform-module"), "")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates: []\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "secret_scanning.yml"), "secret-scanning: enabled\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "codeql", "codeql-config.yml"), "name: default\n")
 	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "new\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v1.6.31\n")
@@ -261,6 +263,12 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates: []\n" {
 		t.Fatalf("dependabot config = %q, want template configuration", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "secret_scanning.yml")); got != "secret-scanning: enabled\n" {
+		t.Fatalf("secret scanning config = %q, want template configuration", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "codeql", "codeql-config.yml")); got != "name: default\n" {
+		t.Fatalf("CodeQL config = %q, want template configuration", got)
 	}
 	trunkBasedConfig := filepath.Join(dir, ".cloudopsworks", "gitversion_trunkbased.yaml")
 	if got := mustRead(t, trunkBasedConfig); got != "mode: ContinuousDeployment\n" {
@@ -381,6 +389,61 @@ func TestCopyDependabotIfExistsPreservesExistingConfiguration(t *testing.T) {
 	}
 	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "local\n\x00" {
 		t.Fatalf("existing dependabot config changed: %q", got)
+	}
+}
+
+func TestCopyGitHubSecurityConfigsIfExistsCopiesMissingConfigurations(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "secret_scanning.yml"), "secret-scanning: template\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "codeql", "codeql-config.yml"), "name: template\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyGitHubSecurityConfigsIfExists(context.Background()); err != nil {
+		t.Fatalf("copyGitHubSecurityConfigsIfExists() error = %v", err)
+	}
+
+	wants := map[string]string{
+		".github/secret_scanning.yml":      "secret-scanning: template\n",
+		".github/codeql/codeql-config.yml": "name: template\n",
+	}
+	tracked := runGit(t, dir, "diff", "--cached", "--name-only")
+	for path, want := range wants {
+		if got := mustRead(t, filepath.Join(dir, filepath.FromSlash(path))); got != want {
+			t.Fatalf("copied %s = %q, want %q", path, got, want)
+		}
+		if !strings.Contains(tracked, path+"\n") {
+			t.Fatalf("copied %s was not staged: %s", path, tracked)
+		}
+	}
+}
+
+func TestCopyGitHubSecurityConfigsIfExistsPreservesExistingConfigurations(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "secret_scanning.yml"), "template secret scanning\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "codeql", "codeql-config.yml"), "template codeql\n")
+	mustWrite(t, filepath.Join(dir, ".github", "secret_scanning.yml"), "local secret scanning\n")
+	mustWrite(t, filepath.Join(dir, ".github", "codeql", "codeql-config.yml"), "local codeql\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.copyGitHubSecurityConfigsIfExists(context.Background()); err != nil {
+		t.Fatalf("copyGitHubSecurityConfigsIfExists() error = %v", err)
+	}
+
+	if got := mustRead(t, filepath.Join(dir, ".github", "secret_scanning.yml")); got != "local secret scanning\n" {
+		t.Fatalf("existing secret scanning config changed: %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "codeql", "codeql-config.yml")); got != "local codeql\n" {
+		t.Fatalf("existing CodeQL config changed: %q", got)
 	}
 }
 
@@ -683,7 +746,7 @@ func TestGitAddCloudopsworksExcludesPreservedAutoAssign(t *testing.T) {
 	}
 }
 
-func TestUnversionedTemplateUpgradeRouteCopiesDependabotConfiguration(t *testing.T) {
+func TestUnversionedTemplateUpgradeRouteCopiesMissingGitHubConfigurations(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -691,6 +754,8 @@ func TestUnversionedTemplateUpgradeRouteCopiesDependabotConfiguration(t *testing
 	runGit(t, dir, "init")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: build\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates: []\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "secret_scanning.yml"), "secret-scanning: enabled\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "codeql", "codeql-config.yml"), "name: default\n")
 	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "all:\n\t@true\n")
 
 	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
@@ -702,6 +767,12 @@ func TestUnversionedTemplateUpgradeRouteCopiesDependabotConfiguration(t *testing
 	}
 	if got := mustRead(t, filepath.Join(dir, ".github", "dependabot.yml")); got != "updates: []\n" {
 		t.Fatalf("dependabot config = %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "secret_scanning.yml")); got != "secret-scanning: enabled\n" {
+		t.Fatalf("secret scanning config = %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "codeql", "codeql-config.yml")); got != "name: default\n" {
+		t.Fatalf("CodeQL config = %q", got)
 	}
 }
 
