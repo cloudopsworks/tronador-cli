@@ -116,7 +116,8 @@ usage: |-
 
   `tronador readme` and `tronador docs` port the Tronador `readme/*` and `docs/*` Makefile targets into the release binary.
 
-  - `readme build` — generate `README.md` from `README.yaml` with gomplate, resolving or downloading gomplate on demand.
+  - `readme build` — prepare each file listed in `README.yaml.include`, then generate `README.md` with gomplate. Built-in handlers generate `docs/terraform.md` with `terraform-docs` and `docs/targets.md` with Make.
+  - `readme build terraform` — generate only `docs/terraform.md`; `tf` and `tofu` are concise aliases.
   - `readme init` — create `README.yaml` from the selected runtime template when missing.
   - `readme lint` — fail when `README.md` is not up to date.
   - `readme assets sync` — explicitly download canonical README templates from GitHub into the local cache or project override directory.
@@ -124,9 +125,11 @@ usage: |-
   - `docs terraform` — generate `docs/terraform.md` from `terraform-docs`.
   - `docs copyright-add` — run the configured copyright-header command.
 
-  README tool provisioning is per-tool and on-demand: `readme build`, `readme lint`, and `readme deps` resolve gomplate from `--gomplate`, `PATH`, then `~/.cloudopsworks/tronador/gomplate`, and only download the requested gomplate release when it is missing. The provisioner downloads direct upstream GitHub release assets and does not use `tronador-packages`.
+  README include preparation is registry-driven and extensible. Unknown include entries are passed unchanged to Make. A failed unknown target does not fail the README build: Tronador writes a warning to stderr and creates a comment-only Markdown placeholder explaining that the target is not supported yet. `--make` selects the Make executable.
 
-  Tool metadata is JSON-driven instead of hardcoded in Go. The binary ships an embedded `tools.json` with default definitions for `gomplate`, `gh`, `boilerplate`, `gitversion`, `yq`, `go`, `git`, `terraform`, `tofu`, and `terragrunt`. Runtime overrides can be supplied from `~/.cloudopsworks/tronador/tools.json`, project `.cloudopsworks/tronador/tools.json`, project `.tronador/tools.json`, `TRONADOR_TOOLS_CONFIG`, or `--tools-config`; overrides merge field-by-field by tool name.
+  README tool provisioning is per-tool and on-demand: `readme build`, `readme lint`, and `readme deps` resolve gomplate and, when `docs/terraform.md` is requested, `terraform-docs` from explicit flags, `PATH`, then `~/.cloudopsworks/tronador/`. Only a requested missing tool is downloaded. The provisioner downloads direct upstream GitHub release assets and does not use `tronador-packages`.
+
+  Tool metadata is JSON-driven instead of hardcoded in Go. The binary ships an embedded `tools.json` with default definitions for `gomplate`, `terraform-docs`, `gh`, `boilerplate`, `gitversion`, `yq`, `go`, `git`, `terraform`, `tofu`, and `terragrunt`. Runtime overrides can be supplied from `~/.cloudopsworks/tronador/tools.json`, project `.cloudopsworks/tronador/tools.json`, project `.tronador/tools.json`, `TRONADOR_TOOLS_CONFIG`, or `--tools-config`; overrides merge field-by-field by tool name.
 
   README generator assets resolve in this order: flags, environment variables, project-local `.tronador/readme`, user config, GitHub sync cache, shared install paths, then embedded fallback assets. Template refresh remains explicit through `readme assets sync` when you want to refresh templates from GitHub.
 
@@ -293,11 +296,14 @@ examples: |-
   # Sync editable README generator templates from GitHub into the project
   tronador readme assets sync --project --workdir ../my-service
 
-  # Build and validate README.md
+  # Build and validate README.md; README.yaml.include controls generated dependencies
   tronador readme build --workdir ../my-service
   tronador readme lint --workdir ../my-service
 
-  # Generate Make target and Terraform docs
+  # Generate only Terraform/OpenTofu module docs (tf and tofu are aliases)
+  tronador readme build terraform --workdir ../my-terraform-module
+
+  # Generate Make target docs, or use the standalone Terraform docs command
   tronador docs targets --workdir ../my-service --all
   tronador docs terraform --workdir ../my-terraform-module
 

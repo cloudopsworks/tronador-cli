@@ -63,6 +63,7 @@ Quick examples:
 tronador readme init --workdir .
 tronador readme assets sync --project --workdir .
 tronador readme build --workdir .
+tronador readme build terraform --workdir ./terraform-module
 tronador readme lint --workdir .
 tronador docs targets --workdir . --all
 tronador docs terraform --workdir ./terraform-module

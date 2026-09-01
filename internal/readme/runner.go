@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	docspkg "tronador-cli/internal/docs"
 	toolspkg "tronador-cli/internal/tools"
 )
 
@@ -31,27 +32,35 @@ const (
 
 // Options controls README generation and validation.
 type Options struct {
-	WorkDir             string
-	ReadmeFile          string
-	ReadmeYAML          string
-	TemplateFile        string
-	TemplateYAML        string
-	IncludesURI         string
-	GomplatePath        string
-	GomplateVersion     string
-	ToolsDir            string
-	ToolsConfigPath     string
-	SkipGomplateInstall bool
-	AssetRepo           string
-	AssetRef            string
-	DryRun              bool
-	Stdout              io.Writer
-	Stderr              io.Writer
+	WorkDir                  string
+	ReadmeFile               string
+	ReadmeYAML               string
+	TemplateFile             string
+	TemplateYAML             string
+	IncludesURI              string
+	GomplatePath             string
+	GomplateVersion          string
+	TerraformDocsPath        string
+	TerraformDocsVersion     string
+	TerraformDocsOutput      string
+	TerraformDocsFormat      string
+	MakePath                 string
+	ToolsDir                 string
+	ToolsConfigPath          string
+	SkipGomplateInstall      bool
+	SkipTerraformDocsInstall bool
+	IncludeGate              *IncludeGate
+	AssetRepo                string
+	AssetRef                 string
+	DryRun                   bool
+	Stdout                   io.Writer
+	Stderr                   io.Writer
 }
 
 // Runner executes README commands.
 type Runner struct {
-	Opts Options
+	Opts        Options
+	IncludeGate *IncludeGate
 }
 
 // AssetLocation describes where a README generator asset was resolved from.
@@ -90,6 +99,15 @@ func NewRunner(opts Options) (*Runner, error) {
 	if opts.GomplatePath == "" {
 		opts.GomplatePath = os.Getenv("GOMPLATE")
 	}
+	if opts.TerraformDocsPath == "" {
+		opts.TerraformDocsPath = os.Getenv("TERRAFORM_DOCS")
+	}
+	if opts.TerraformDocsOutput == "" {
+		opts.TerraformDocsOutput = envDefault("TERRAFORM_DOCS_OUTPUT", filepath.Join("docs", "terraform.md"))
+	}
+	if opts.TerraformDocsFormat == "" {
+		opts.TerraformDocsFormat = envDefault("TERRAFORM_DOCS_FORMAT", "md")
+	}
 	if value := os.Getenv("TRONADOR_README_INSTALL_GOMPLATE"); value != "" {
 		install, err := toolspkg.ParseBoolEnv("TRONADOR_README_INSTALL_GOMPLATE", value)
 		if err != nil {
@@ -104,6 +122,13 @@ func NewRunner(opts Options) (*Runner, error) {
 		}
 		opts.SkipGomplateInstall = skip
 	}
+	if value := os.Getenv("TRONADOR_README_SKIP_TERRAFORM_DOCS_INSTALL"); value != "" {
+		skip, err := toolspkg.ParseBoolEnv("TRONADOR_README_SKIP_TERRAFORM_DOCS_INSTALL", value)
+		if err != nil {
+			return nil, err
+		}
+		opts.SkipTerraformDocsInstall = skip
+	}
 	if opts.AssetRepo == "" {
 		opts.AssetRepo = DefaultAssetRepo
 	}
@@ -116,12 +141,24 @@ func NewRunner(opts Options) (*Runner, error) {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}
-	return &Runner{Opts: opts}, nil
+	gate := opts.IncludeGate
+	if gate == nil {
+		gate = DefaultIncludeGate()
+	}
+	return &Runner{Opts: opts, IncludeGate: gate}, nil
 }
 
-// Build generates README.md from README.yaml using gomplate.
+// Build prepares configured README include entries, then generates README.md
+// from README.yaml using gomplate.
 func (r *Runner) Build(ctx context.Context) error {
 	if err := r.requireReadmeYAML(); err != nil {
+		return err
+	}
+	includes, err := r.ReadmeIncludes(ctx)
+	if err != nil {
+		return err
+	}
+	if err := r.IncludeGate.Process(ctx, r, includes); err != nil {
 		return err
 	}
 	gomplate, err := r.ensureGomplate(ctx)
@@ -158,6 +195,76 @@ func (r *Runner) Build(ctx context.Context) error {
 		return fmt.Errorf("run gomplate: %w", err)
 	}
 	fmt.Fprintf(r.Opts.Stdout, "Generated %s from %s using data from %s\n", r.Opts.ReadmeFile, template.DisplayPath(), r.Opts.ReadmeYAML)
+	return nil
+}
+
+// DetectTerraformModule reports whether the work directory is a Terraform or
+// OpenTofu module. The canonical project marker is preferred, while root
+// Terraform files keep detection useful for repositories not initialized by
+// Tronador and for modules that do not use main.tf.
+func (r *Runner) DetectTerraformModule() (bool, error) {
+	marker := filepath.Join(r.Opts.WorkDir, ".cloudopsworks", ".terraform-module")
+	if regular, err := regularFile(marker); err != nil {
+		return false, err
+	} else if regular {
+		return true, nil
+	}
+	for _, pattern := range []string{"*.tf", "*.tf.json"} {
+		matches, err := filepath.Glob(filepath.Join(r.Opts.WorkDir, pattern))
+		if err != nil {
+			return false, fmt.Errorf("detect Terraform module: %w", err)
+		}
+		for _, match := range matches {
+			regular, err := regularFile(match)
+			if err != nil {
+				return false, err
+			}
+			if regular {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// BuildTerraform generates only the Terraform module documentation included by
+// the README template.
+func (r *Runner) BuildTerraform(ctx context.Context) error {
+	isTerraformModule, err := r.DetectTerraformModule()
+	if err != nil {
+		return err
+	}
+	if !isTerraformModule {
+		return fmt.Errorf("%s is not a Terraform module: expected .cloudopsworks/.terraform-module or a root .tf/.tf.json file", r.Opts.WorkDir)
+	}
+	return r.buildTerraformTo(ctx, r.Opts.TerraformDocsOutput, false)
+}
+
+func (r *Runner) buildTerraformTo(ctx context.Context, output string, skipInit bool) error {
+	terraformDocs, err := r.ensureTerraformDocs(ctx)
+	if err != nil {
+		return err
+	}
+	runner, err := docspkg.NewRunner(docspkg.Options{
+		WorkDir: r.Opts.WorkDir,
+		DryRun:  r.Opts.DryRun,
+		Stdout:  r.Opts.Stdout,
+		Stderr:  r.Opts.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	if err := runner.Terraform(ctx, docspkg.TerraformOptions{
+		Output:            output,
+		TerraformDocsPath: terraformDocs,
+		Format:            r.Opts.TerraformDocsFormat,
+		SkipInit:          skipInit,
+	}); err != nil {
+		return err
+	}
+	if !r.Opts.DryRun {
+		fmt.Fprintf(r.Opts.Stdout, "Generated %s from Terraform module files\n", output)
+	}
 	return nil
 }
 
@@ -207,7 +314,7 @@ func (r *Runner) Lint(ctx context.Context) error {
 	lintOpts := r.Opts
 	lintOpts.ReadmeFile = tmpName
 	lintOpts.Stdout = io.Discard
-	lintRunner := &Runner{Opts: lintOpts}
+	lintRunner := &Runner{Opts: lintOpts, IncludeGate: r.IncludeGate}
 	if err := lintRunner.Build(ctx); err != nil {
 		return err
 	}
@@ -228,13 +335,32 @@ func (r *Runner) Lint(ctx context.Context) error {
 	return fmt.Errorf("%s is out of date; run tronador readme build", r.Opts.ReadmeFile)
 }
 
-// Deps ensures gomplate can be resolved or provisioned.
+// Deps ensures all tools required by the detected README workflow can be
+// resolved or provisioned.
 func (r *Runner) Deps(ctx context.Context) error {
 	gomplate, err := r.ensureGomplate(ctx)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(r.Opts.Stdout, "gomplate: %s\n", gomplate)
+	if !strings.HasPrefix(r.Opts.ReadmeYAML, "http://") && !strings.HasPrefix(r.Opts.ReadmeYAML, "https://") && !exists(r.workPath(r.Opts.ReadmeYAML)) {
+		return nil
+	}
+	includes, err := r.ReadmeIncludes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, entry := range includes {
+		if entry != "docs/terraform.md" {
+			continue
+		}
+		terraformDocs, err := r.ensureTerraformDocs(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(r.Opts.Stdout, "terraform-docs: %s\n", terraformDocs)
+		break
+	}
 	return nil
 }
 
@@ -256,6 +382,37 @@ func (r *Runner) ensureGomplate(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return resolved.Path, nil
+}
+
+func (r *Runner) ensureTerraformDocs(ctx context.Context) (string, error) {
+	provisioner, err := toolspkg.NewProvisioner(toolspkg.Options{
+		ToolsDir:    r.Opts.ToolsDir,
+		WorkDir:     r.Opts.WorkDir,
+		ConfigPath:  r.Opts.ToolsConfigPath,
+		SkipInstall: r.Opts.SkipTerraformDocsInstall,
+		DryRun:      r.Opts.DryRun,
+		Stdout:      r.Opts.Stdout,
+		Stderr:      r.Opts.Stderr,
+	})
+	if err != nil {
+		return "", err
+	}
+	resolved, err := provisioner.EnsureTool(ctx, "terraform-docs", r.Opts.TerraformDocsPath, r.Opts.TerraformDocsVersion)
+	if err != nil {
+		return "", err
+	}
+	return resolved.Path, nil
+}
+
+func regularFile(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect %s: %w", path, err)
+	}
+	return info.Mode().IsRegular(), nil
 }
 
 // ResolveTemplate resolves the README gomplate template using runtime-overridable precedence.
