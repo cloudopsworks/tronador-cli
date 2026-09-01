@@ -8,6 +8,7 @@ runtime-configurable.
 
 ```bash
 tronador readme build
+tronador readme build terraform
 tronador readme init
 tronador readme lint
 tronador readme deps
@@ -25,34 +26,69 @@ Common flags:
 | `--includes-uri` | gomplate include datasource URI. |
 | `--gomplate` | gomplate executable path. |
 | `--gomplate-version` | gomplate version to download on demand, overriding the configured default/version env vars. |
+| `--make` | `make`/`gmake` executable used for README include targets. |
 | `--tools-dir` | User tool cache/install directory, default `~/.cloudopsworks/tronador` or `TRONADOR_TOOLS_DIR`. |
 | `--tools-config` | Tool provisioner JSON override file, default `TRONADOR_TOOLS_CONFIG` / `TRONADOR_TOOLS_CONFIG_PATH` plus project/user overrides. |
 | `--no-install-gomplate` | Fail instead of downloading gomplate when it is missing. |
 
-`readme build` invokes gomplate with the selected template and writes the README
-output. `readme lint` builds to a temporary file and fails if the committed
-README differs. `readme init` creates `README.yaml` only when it is missing.
+`readme build` parses the top-level `README.yaml.include` list and prepares each
+entry before invoking gomplate. Entries are trimmed, deduplicated, processed in
+source order, and restricted to relative paths inside `--workdir`.
+
+The default include gate has these strategies:
+
+| Include entry | Action | Failure behavior |
+| --- | --- | --- |
+| `docs/terraform.md` | Validate Terraform/OpenTofu module detection and run the same `terraform-docs` generator as `readme build terraform`. | Fails the build because the configured generated dependency is required. |
+| `docs/targets.md` | Execute `make docs/targets.md` from `--workdir`. | Fails the build because the built-in target is required. |
+| Any other entry | Execute Make with the entry unchanged as its target. | A Make failure is non-fatal: emit a warning and create the requested file containing only a Markdown warning comment. |
+
+Custom integrations can construct `readme.NewIncludeGate`, register exact
+entries with `IncludeGate.Register`, and pass it through
+`readme.Options.IncludeGate`. `readme.DefaultIncludeGate` returns the built-in
+registry so callers can extend it without replacing the default strategies.
+
+Use `readme build terraform` to generate only `docs/terraform.md` without
+requiring `README.yaml` or gomplate. `readme build tf` and `readme build tofu`
+are aliases for the same engine-neutral documentation operation.
+
+Terraform build flags:
+
+| Flag | Description |
+| --- | --- |
+| `--terraform-docs` | `terraform-docs` executable path. |
+| `--terraform-docs-version` | Version to download on demand. |
+| `--terraform-output` | Output path, default `docs/terraform.md` or `TERRAFORM_DOCS_OUTPUT`. |
+| `--terraform-docs-format` | Output format, default `md` or `TERRAFORM_DOCS_FORMAT`. |
+| `--no-install-terraform-docs` | Fail instead of downloading `terraform-docs` when it is missing. |
+
+`readme lint` performs the same include preparation before comparing the
+temporary README with the committed file. `readme init` creates
+`README.yaml` only when it is missing.
 
 ### On-demand tool provisioning
 
-README build/lint/deps resolve gomplate in this order:
+README build/lint/deps resolve each required tool (`gomplate` and, when the
+Terraform include strategy runs, `terraform-docs`) in this order:
 
-1. explicit `--gomplate` or `GOMPLATE`
+1. explicit executable flag or matching environment variable
 2. `PATH`
-3. the user tool directory, default `~/.cloudopsworks/tronador/gomplate`
-4. direct on-demand download of the requested gomplate version from the upstream
-   GitHub release into `~/.cloudopsworks/tronador`
+3. the user tool directory, default `~/.cloudopsworks/tronador/`
+4. direct on-demand download of the requested version from the upstream GitHub
+   release into `~/.cloudopsworks/tronador`
 
 Provisioning is per-tool and on-demand: the CLI downloads only the missing tool
 needed by the command being executed. It does not clone or use
 `tronador-packages`. Set `TRONADOR_TOOLS_INSTALL=false`,
-`TRONADOR_TOOLS_SKIP_INSTALL=true`, or pass `--no-install-gomplate` to require a
+`TRONADOR_TOOLS_SKIP_INSTALL=true`, or pass the tool-specific
+`--no-install-gomplate` / `--no-install-terraform-docs` flag to require a
 preinstalled executable.
 
 Tool metadata is JSON-driven. The binary ships an embedded `tools.json` with
 entries for:
 
 - `gomplate`
+- `terraform-docs`
 - `gh`
 - `boilerplate`
 - `gitversion`

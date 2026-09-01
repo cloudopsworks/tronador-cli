@@ -42,6 +42,7 @@ type TerraformOptions struct {
 	Output            string
 	TerraformDocsPath string
 	Format            string
+	SkipInit          bool
 }
 
 // CopyrightOptions controls source copyright header injection.
@@ -138,12 +139,18 @@ func (r *Runner) Terraform(ctx context.Context, opts TerraformOptions) error {
 	if opts.Format == "" {
 		opts.Format = "md"
 	}
-	terraformDocs, err := resolveExecutable(opts.TerraformDocsPath, "TERRAFORM_DOCS", "terraform-docs")
-	if err != nil {
-		return err
+	terraformDocs := opts.TerraformDocsPath
+	if !r.Opts.DryRun || terraformDocs == "" {
+		var err error
+		terraformDocs, err = resolveExecutable(terraformDocs, "TERRAFORM_DOCS", "terraform-docs")
+		if err != nil {
+			return err
+		}
 	}
-	if err := r.Init(); err != nil {
-		return err
+	if !opts.SkipInit {
+		if err := r.Init(); err != nil {
+			return err
+		}
 	}
 	args := []string{opts.Format, "."}
 	if r.Opts.DryRun {

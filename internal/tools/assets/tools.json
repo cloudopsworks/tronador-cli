@@ -84,6 +84,21 @@
       "archive_binary_path": "terraform"
     },
     {
+      "name": "terraform-docs",
+      "executable": "terraform-docs",
+      "default_version": "0.24.0",
+      "version_env_vars": ["TRONADOR_TERRAFORM_DOCS_VERSION", "TERRAFORM_DOCS_VERSION"],
+      "url_template": "https://github.com/terraform-docs/terraform-docs/releases/download/v{version}/terraform-docs-v{version}-{os}-{arch}.tar.gz",
+      "format": "tar.gz",
+      "archive_binary_path": "terraform-docs",
+      "platform_overrides": {
+        "windows": {
+          "url_template": "https://github.com/terraform-docs/terraform-docs/releases/download/v{version}/terraform-docs-v{version}-{os}-{arch}.zip",
+          "format": "zip"
+        }
+      }
+    },
+    {
       "name": "tofu",
       "executable": "tofu",
       "default_version": "1.11.4",

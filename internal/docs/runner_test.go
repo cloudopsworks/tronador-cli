@@ -59,6 +59,22 @@ printf '# Terraform Docs\n'
 	}
 }
 
+func TestTerraformDryRunAcceptsPlannedExecutablePath(t *testing.T) {
+	dir := t.TempDir()
+	var out strings.Builder
+	runner, err := NewRunner(Options{WorkDir: dir, DryRun: true, Stdout: &out, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	planned := filepath.Join(dir, "tools", "terraform-docs")
+	if err := runner.Terraform(context.Background(), TerraformOptions{TerraformDocsPath: planned}); err != nil {
+		t.Fatalf("Terraform() dry run error = %v", err)
+	}
+	if !strings.Contains(out.String(), "DRY-RUN: "+planned+" md . > docs/terraform.md") {
+		t.Fatalf("dry-run output = %q", out.String())
+	}
+}
+
 func TestCopyrightDryRunRequiresDescriptionAndPrintsCommand(t *testing.T) {
 	dir := t.TempDir()
 	var out strings.Builder

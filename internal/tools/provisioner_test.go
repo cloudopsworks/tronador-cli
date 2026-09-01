@@ -32,7 +32,7 @@ func TestEmbeddedConfigIncludesDefaultTools(t *testing.T) {
 		t.Fatalf("NewProvisioner() error = %v", err)
 	}
 	got := strings.Join(provisioner.Config.ToolNames(), ",")
-	for _, want := range []string{"boilerplate", "gh", "gitversion", "gomplate", "yq"} {
+	for _, want := range []string{"boilerplate", "gh", "gitversion", "gomplate", "terraform-docs", "yq"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("tool %s missing from config names %s", want, got)
 		}
@@ -141,7 +141,7 @@ func TestEnsureDryRunPrintsDirectDownload(t *testing.T) {
 func TestConfiguredToolsResolveFromJSONDryRun(t *testing.T) {
 	t.Setenv("PATH", "")
 	t.Setenv("HOME", t.TempDir())
-	for _, name := range []string{"gomplate", "gh", "boilerplate", "gitversion", "yq"} {
+	for _, name := range []string{"gomplate", "gh", "boilerplate", "gitversion", "terraform-docs", "yq"} {
 		t.Run(name, func(t *testing.T) {
 			var stdout bytes.Buffer
 			toolsDir := t.TempDir()

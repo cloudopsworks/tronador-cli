@@ -80,6 +80,132 @@ printf 'yaml=%s\nincludes=%s\nfile=%s\n' "$README_YAML" "$README_INCLUDES" "$REA
 	}
 }
 
+func TestDetectTerraformModuleUsesMarkerOrTerraformFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "canonical marker", path: filepath.Join(".cloudopsworks", ".terraform-module"), want: true},
+		{name: "terraform file", path: "variables.tf", want: true},
+		{name: "terraform json file", path: "main.tf.json", want: true},
+		{name: "unrelated file", path: "main.go", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mustWrite(t, filepath.Join(dir, tt.path), "")
+			runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+			if err != nil {
+				t.Fatalf("NewRunner() error = %v", err)
+			}
+			got, err := runner.DetectTerraformModule()
+			if err != nil {
+				t.Fatalf("DetectTerraformModule() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("DetectTerraformModule() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildGeneratesTerraformDocsBeforeReadmeForDetectedModule(t *testing.T) {
+	dir := t.TempDir()
+	terraformDocs := writeExecutable(t, dir, "terraform-docs", `#!/bin/sh
+printf '## Terraform inputs\n'
+`)
+	gomplate := writeExecutable(t, dir, "gomplate", `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+cat docs/terraform.md > "$out"
+`)
+	mustWrite(t, filepath.Join(dir, "README.yaml"), "name: test\ninclude:\n  - docs/terraform.md\n")
+	mustWrite(t, filepath.Join(dir, "variables.tf"), "variable \"name\" {}\n")
+	runner, err := NewRunner(Options{
+		WorkDir:           dir,
+		GomplatePath:      gomplate,
+		TerraformDocsPath: terraformDocs,
+		Stdout:            io.Discard,
+		Stderr:            io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.Build(context.Background()); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "## Terraform inputs\n" {
+		t.Fatalf("README.md = %q", got)
+	}
+}
+
+func TestBuildTerraformOnlyDoesNotRequireReadmeInputs(t *testing.T) {
+	dir := t.TempDir()
+	terraformDocs := writeExecutable(t, dir, "terraform-docs", `#!/bin/sh
+printf '## Terraform only\n'
+`)
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".terraform-module"), "")
+	runner, err := NewRunner(Options{
+		WorkDir:           dir,
+		TerraformDocsPath: terraformDocs,
+		Stdout:            io.Discard,
+		Stderr:            io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.BuildTerraform(context.Background()); err != nil {
+		t.Fatalf("BuildTerraform() error = %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "docs", "terraform.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "## Terraform only\n" {
+		t.Fatalf("docs/terraform.md = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("README.md should not be generated, stat error = %v", err)
+	}
+}
+
+func TestBuildSkipsTerraformDocsOutsideTerraformModule(t *testing.T) {
+	dir := t.TempDir()
+	gomplate := writeExecutable(t, dir, "gomplate", `#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--out" ]; then shift; out="$1"; fi
+  shift || true
+done
+printf 'readme only\n' > "$out"
+`)
+	mustWrite(t, filepath.Join(dir, "README.yaml"), "name: test\n")
+	runner, err := NewRunner(Options{
+		WorkDir:           dir,
+		GomplatePath:      gomplate,
+		TerraformDocsPath: filepath.Join(dir, "missing-terraform-docs"),
+		Stdout:            io.Discard,
+		Stderr:            io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	if err := runner.Build(context.Background()); err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+}
+
 func TestBuildUsesProvisionedGomplateFromToolsDir(t *testing.T) {
 	t.Setenv("PATH", "")
 	dir := t.TempDir()

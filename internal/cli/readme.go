@@ -10,19 +10,25 @@ import (
 )
 
 var (
-	readmeWorkDir           string
-	readmeFile              string
-	readmeYAML              string
-	readmeTemplateFile      string
-	readmeTemplateYAML      string
-	readmeIncludesURI       string
-	readmeGomplate          string
-	readmeGomplateVersion   string
-	readmeToolsDir          string
-	readmeToolsConfig       string
-	readmeNoInstallGomplate bool
-	readmeAssetRepo         string
-	readmeAssetRef          string
+	readmeWorkDir                string
+	readmeFile                   string
+	readmeYAML                   string
+	readmeTemplateFile           string
+	readmeTemplateYAML           string
+	readmeIncludesURI            string
+	readmeGomplate               string
+	readmeGomplateVersion        string
+	readmeTerraformDocs          string
+	readmeTerraformDocsVersion   string
+	readmeTerraformOutput        string
+	readmeTerraformFormat        string
+	readmeMake                   string
+	readmeToolsDir               string
+	readmeToolsConfig            string
+	readmeNoInstallGomplate      bool
+	readmeNoInstallTerraformDocs bool
+	readmeAssetRepo              string
+	readmeAssetRef               string
 
 	readmeAssetsGlobal       bool
 	readmeAssetsForce        bool
@@ -60,9 +66,15 @@ func init() {
 	readmeCmd.PersistentFlags().StringVar(&readmeIncludesURI, "includes-uri", "", "gomplate include datasource URI (default file://<workdir>/?type=text/plain)")
 	readmeCmd.PersistentFlags().StringVar(&readmeGomplate, "gomplate", "", "gomplate executable path")
 	readmeCmd.PersistentFlags().StringVar(&readmeGomplateVersion, "gomplate-version", "", "gomplate version to download on demand (default from tool config or configured env vars)")
+	readmeCmd.PersistentFlags().StringVar(&readmeTerraformDocs, "terraform-docs", "", "terraform-docs executable path")
+	readmeCmd.PersistentFlags().StringVar(&readmeTerraformDocsVersion, "terraform-docs-version", "", "terraform-docs version to download on demand")
+	readmeCmd.PersistentFlags().StringVar(&readmeTerraformOutput, "terraform-output", "", "Terraform docs output path (default docs/terraform.md)")
+	readmeCmd.PersistentFlags().StringVar(&readmeTerraformFormat, "terraform-docs-format", "", "terraform-docs output format (default md)")
+	readmeCmd.PersistentFlags().StringVar(&readmeMake, "make", "", "make/gmake executable used for README include targets")
 	readmeCmd.PersistentFlags().StringVar(&readmeToolsDir, "tools-dir", "", "Directory for provisioned Tronador tools (default ~/.cloudopsworks/tronador or TRONADOR_TOOLS_DIR)")
 	readmeCmd.PersistentFlags().StringVar(&readmeToolsConfig, "tools-config", "", "Tool provisioner JSON override file (default TRONADOR_TOOLS_CONFIG plus project/user overrides)")
 	readmeCmd.PersistentFlags().BoolVar(&readmeNoInstallGomplate, "no-install-gomplate", false, "Do not auto-provision gomplate when missing")
+	readmeCmd.PersistentFlags().BoolVar(&readmeNoInstallTerraformDocs, "no-install-terraform-docs", false, "Do not auto-provision terraform-docs when missing")
 	readmeCmd.PersistentFlags().StringVar(&readmeAssetRepo, "asset-repo", readmepkg.DefaultAssetRepo, "GitHub repo used for cached README assets")
 	readmeCmd.PersistentFlags().StringVar(&readmeAssetRef, "asset-ref", readmepkg.DefaultAssetRef, "Git ref used for cached README assets")
 
@@ -76,29 +88,35 @@ func init() {
 
 func newReadmeRunner(cmd *cobra.Command) (*readmepkg.Runner, error) {
 	return readmepkg.NewRunner(readmepkg.Options{
-		WorkDir:             readmeWorkDir,
-		ReadmeFile:          readmeFile,
-		ReadmeYAML:          readmeYAML,
-		TemplateFile:        readmeTemplateFile,
-		TemplateYAML:        readmeTemplateYAML,
-		IncludesURI:         readmeIncludesURI,
-		GomplatePath:        readmeGomplate,
-		GomplateVersion:     readmeGomplateVersion,
-		ToolsDir:            readmeToolsDir,
-		ToolsConfigPath:     readmeToolsConfig,
-		SkipGomplateInstall: readmeNoInstallGomplate,
-		AssetRepo:           readmeAssetRepo,
-		AssetRef:            readmeAssetRef,
-		DryRun:              commandDryRun(cmd),
-		Stdout:              cmd.OutOrStdout(),
-		Stderr:              cmd.ErrOrStderr(),
+		WorkDir:                  readmeWorkDir,
+		ReadmeFile:               readmeFile,
+		ReadmeYAML:               readmeYAML,
+		TemplateFile:             readmeTemplateFile,
+		TemplateYAML:             readmeTemplateYAML,
+		IncludesURI:              readmeIncludesURI,
+		GomplatePath:             readmeGomplate,
+		GomplateVersion:          readmeGomplateVersion,
+		TerraformDocsPath:        readmeTerraformDocs,
+		TerraformDocsVersion:     readmeTerraformDocsVersion,
+		TerraformDocsOutput:      readmeTerraformOutput,
+		TerraformDocsFormat:      readmeTerraformFormat,
+		MakePath:                 readmeMake,
+		ToolsDir:                 readmeToolsDir,
+		ToolsConfigPath:          readmeToolsConfig,
+		SkipGomplateInstall:      readmeNoInstallGomplate,
+		SkipTerraformDocsInstall: readmeNoInstallTerraformDocs,
+		AssetRepo:                readmeAssetRepo,
+		AssetRef:                 readmeAssetRef,
+		DryRun:                   commandDryRun(cmd),
+		Stdout:                   cmd.OutOrStdout(),
+		Stderr:                   cmd.ErrOrStderr(),
 	})
 }
 
 func newReadmeBuildCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "build",
-		Short: "Create README.md by building it from README.yaml",
+		Short: "Build README.md and its configured include dependencies",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runner, err := newReadmeRunner(cmd)
@@ -108,6 +126,20 @@ func newReadmeBuildCommand() *cobra.Command {
 			return runner.Build(context.Background())
 		},
 	}
+	cmd.AddCommand(&cobra.Command{
+		Use:     "terraform",
+		Aliases: []string{"tf", "tofu"},
+		Short:   "Build only Terraform/OpenTofu module documentation",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runner, err := newReadmeRunner(cmd)
+			if err != nil {
+				return err
+			}
+			return runner.BuildTerraform(context.Background())
+		},
+	})
+	return cmd
 }
 
 func newReadmeInitCommand() *cobra.Command {
