@@ -373,6 +373,101 @@ func TestSnapshotVersionIsLimitedToUntaggedJavaProjects(t *testing.T) {
 	}
 }
 
+func TestPlainVersionUsesMajorMinorPatchForNodeAndPython(t *testing.T) {
+	for _, tc := range []struct {
+		profile  string
+		marker   string
+		metadata string
+		contents string
+	}{
+		{profile: "node", marker: ".node", metadata: "package.json", contents: "{\n  \"version\": \"0.1.0\"\n}\n"},
+		{profile: "python", marker: ".python", metadata: "pyproject.toml", contents: "[project]\nversion = \"0.1.0\"\n"},
+	} {
+		t.Run(tc.profile, func(t *testing.T) {
+			workdir := fixture(t, tc.marker)
+			if err := os.WriteFile(filepath.Join(workdir, tc.metadata), []byte(tc.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			initializeGitRepository(t, workdir)
+			runGit(t, workdir, "tag", "v2.4.6-beta.1")
+
+			calls := []ToolCall{}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Plain: true, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+					calls = append(calls, call)
+					return ToolExecution{Stdout: "2.4.7\n"}, nil
+				},
+			})
+
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Version != "2.4.7" || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != "2.4.7\n" {
+				t.Fatalf("plain result = %+v", result)
+			}
+			if len(calls) != 1 || !contains(calls[0].Arguments, "MajorMinorPatch") || contains(calls[0].Arguments, "FullSemVer") {
+				t.Fatalf("plain GitVersion call = %+v", calls)
+			}
+			if got := string(mustRead(t, filepath.Join(workdir, tc.metadata))); !strings.Contains(got, "2.4.7") {
+				t.Fatalf("metadata = %q, want plain version", got)
+			}
+		})
+	}
+}
+
+func TestPlainVersionIsLimitedToNodeAndPythonProjects(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		marker     string
+		capability string
+	}{
+		{name: "other application version", marker: ".golang", capability: "version"},
+		{name: "Node non-version capability", marker: ".node", capability: "init"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := mustRunner(t, Options{WorkDir: fixture(t, tc.marker), Plain: true})
+			if _, err := runner.Run(context.Background(), tc.capability, nil); err == nil || codeOf(err) != "project_plain_unsupported" {
+				t.Fatalf("plain error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPlainCapabilityIsAdvertisedOnlyForNodeAndPythonVersion(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		want    bool
+	}{
+		{profile: "node", want: true},
+		{profile: "python", want: true},
+		{profile: "java", want: false},
+	} {
+		t.Run(tc.profile, func(t *testing.T) {
+			workdir := fixture(t, markerForProfile(t, tc.profile))
+			runner := mustRunner(t, Options{WorkDir: workdir})
+			detection, err := runner.Detect()
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptions, err := runner.Describe(detection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, description := range descriptions {
+				if description.ID == "version" {
+					if got := flagNamed(description.Flags, "plain"); got != tc.want {
+						t.Fatalf("plain advertised = %v, want %v; flags = %+v", got, tc.want, description.Flags)
+					}
+					return
+				}
+			}
+			t.Fatal("version capability missing")
+		})
+	}
+}
+
 func TestSnapshotCapabilityIsAdvertisedOnlyForJavaVersion(t *testing.T) {
 	for _, tc := range []struct {
 		profile string
@@ -505,7 +600,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 				{Operation: "generate-version"},
 				{Operation: "application-init"},
 			} {
-				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir, false)
+				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir, false, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -524,7 +619,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 					}
 				}
 			}
-			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir, false)
+			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir, false, false)
 			if err != nil {
 				t.Fatal(err)
 			}

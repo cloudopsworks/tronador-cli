@@ -32,6 +32,7 @@ type Options struct {
 	DryRun         bool
 	JSON           bool
 	Snapshot       bool
+	Plain          bool
 	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
@@ -251,6 +252,9 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 	if binding.SnapshotVersion {
 		flags = append(flags, FlagDefinition{Name: "snapshot", Type: "bool", Description: "generate the untagged Java project version as x.y.z-SNAPSHOT", Default: "false"})
 	}
+	if binding.PlainVersion {
+		flags = append(flags, FlagDefinition{Name: "plain", Type: "bool", Description: "generate the Node or Python project version as x.y.z", Default: "false"})
+	}
 	if binding.Executor == ExecutorNative && binding.ConfirmationPolicy == "yes_for_noninteractive" {
 		flags = append(flags, FlagDefinition{Name: "yes", Type: "bool", Description: "confirm destructive operations", Default: "false"})
 	}
@@ -308,6 +312,9 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	if r.Opts.Snapshot && !binding.SnapshotVersion {
 		return detection, OperationPlan{}, withDetection(snapshotUnsupportedError(binding.Capability), detection)
 	}
+	if r.Opts.Plain && !binding.PlainVersion {
+		return detection, OperationPlan{}, withDetection(plainUnsupportedError(binding.Capability), detection)
+	}
 	plan := OperationPlan{
 		Implementation: detection.ProfileID, Marker: detection.Marker, Capability: binding.Capability,
 		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
@@ -318,7 +325,7 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	var steps []OperationStep
 	if binding.Executor != ExecutorNative {
 		var stepErr error
-		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot)
+		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot, r.Opts.Plain)
 		if stepErr != nil {
 			return detection, OperationPlan{}, withDetection(stepErr, detection)
 		}
@@ -376,7 +383,7 @@ func countRequired(schema []ArgumentDefinition) int {
 	return count
 }
 
-func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot bool) ([]OperationStep, error) {
+func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot, plain bool) ([]OperationStep, error) {
 	call := func(tool string, args ...string) ToolCall {
 		return ToolCall{ToolName: tool, Arguments: append([]string(nil), args...), WorkingDirectory: workdir}
 	}
@@ -396,9 +403,13 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 	case "generate-version":
 		variable := "FullSemVer"
 		description := "calculate project version"
-		if snapshot {
+		if snapshot || plain {
 			variable = "MajorMinorPatch"
-			description = "calculate project snapshot version"
+			if snapshot {
+				description = "calculate project snapshot version"
+			} else {
+				description = "calculate plain project version"
+			}
 		}
 		return []OperationStep{tool("gitversion", description, gitVersionToolCall(workdir, "-output", "json", "-showvariable", variable), "", "", false)}, nil
 	case "terraform-init":
@@ -904,6 +915,17 @@ func snapshotUnsupportedError(capability string) *Error {
 	}
 }
 
+func plainUnsupportedError(capability string) *Error {
+	return &Error{
+		Code:       "project_plain_unsupported",
+		Command:    "project",
+		Capability: capability,
+		Hint:       "use --plain only with `tronador project version` in a Node or Python repository",
+		ExitStatus: 1,
+		Cause:      errors.New("--plain is supported only for Node and Python project version"),
+	}
+}
+
 func snapshotTaggedHeadError() *Error {
 	return &Error{
 		Code:       "project_snapshot_unsupported",
@@ -949,10 +971,13 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}
 	}
 	version := versionFromGitVersionOutput(execution.Stdout)
-	if tag.Found {
+	if tag.Found && !r.Opts.Plain {
 		version = tag.Normalized
 	} else if r.Opts.Snapshot {
 		version = snapshotVersion(version)
+	}
+	if r.Opts.Plain && !majorMinorPatchPattern.MatchString(version) {
+		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("GitVersion did not return a MajorMinorPatch version")}
 	}
 	if profile == "java" {
 		version = normalizeJavaVersion(version)
