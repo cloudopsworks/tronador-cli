@@ -4,8 +4,6 @@ TRONADOR_AUTO_INIT := true
 GITVERSION ?= $(INSTALL_PATH)/gitversion
 GH ?= $(INSTALL_PATH)/gh
 YQ ?= $(INSTALL_PATH)/yq
-GITVERSION_CONFIG := $(firstword $(wildcard .cloudopsworks/gitversion.yaml .cloudopsworks/gitversion.yml))
-GITVERSION_CONFIG_ARG := $(if $(GITVERSION_CONFIG),-config $(GITVERSION_CONFIG))
 
 -include $(shell curl -sSL -o .tronador "https://cowk.io/acc"; echo .tronador)
 
@@ -16,7 +14,7 @@ ifeq ($(GIT_IS_TAG),1)
 	@echo "$(GIT_TAG)" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+((-alpha|-beta).[0-9]?)?)(\+deploy-.*)?$$/\1/g' > VERSION
 else
 	# Translates + in version to - for helm/docker compatibility
-	@echo "$(shell $(GITVERSION) $(GITVERSION_CONFIG_ARG) -output json -showvariable FullSemVer | tr '+' '-')" > VERSION
+	@echo "$(shell $(GITVERSION) -output json -showvariable FullSemVer | tr '+' '-')" > VERSION
 endif
 
 # Modify pom.xml to change the project name with the $(PROJECT) variable
