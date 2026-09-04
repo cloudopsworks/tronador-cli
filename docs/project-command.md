@@ -48,22 +48,33 @@ candidate is available and fails when both are available.
 Initialization does not resolve an IaC engine.
 
 Every mutating capability except `project version` supports the global `--dry-run`
-operation plan without tool resolution. `project version --dry-run` is the explicit
-evaluated-preview exception: it always calculates GitVersion (using a repo-local
-configuration when present) but never changes project files. A tag at `HEAD` controls
-the rendered `VERSION` value; otherwise its `FullSemVer` is written with `+` translated
-to `-`. For Java projects, qualifier and build segments after `x.y.z` use hyphens:
-for example, `x.y.z-feature.branch_name.1+build_2` becomes
-`x.y.z-feature-branch-name-1-build-2`. For an untagged Java repository only, `tronador project version --snapshot`
-uses GitVersion's `MajorMinorPatch` and writes `x.y.z-SNAPSHOT` to `VERSION` and the
-root Maven project version; the flag is rejected for tagged `HEAD`s, non-Java projects,
-and non-version capabilities. It prints deterministic unified file
-patches (or `No file changes for version <version>.`) and JSON exposes only actual
-`file_changes`; unchanged and optional missing metadata files are omitted. GitVersion
-provisioning is allowed only to a tools directory outside the workdir, and successful
-preview suppresses provisioner/tool progress. Destructive Terragrunt cleanup requires
-`--yes`. Tool calls use typed argument arrays and never invoke Make, shell bootstrap
-scripts, or tag-management workflows.
+operation plan without tool resolution. Destructive Terragrunt cleanup requires `--yes`.
+Tool calls use typed argument arrays and never invoke Make, shell bootstrap scripts, or
+tag-management workflows.
+
+## Version generation
+
+`tronador project version` writes `VERSION` and the detected profile's metadata when it
+exists. Its default policy writes the tag at `HEAD`; when `HEAD` is untagged, it writes
+GitVersion's `FullSemVer` with `+` translated to `-`. Java additionally changes qualifier
+and build separators after `x.y.z` to hyphens: for example,
+`x.y.z-feature.branch_name.1+build_2` becomes `x.y.z-feature-branch-name-1-build-2`.
+
+| Command | Supported profiles | Result |
+| --- | --- | --- |
+| `tronador project version` | All application profiles | Default version policy described above. |
+| `tronador project version --plain` | Node and Python only | Uses GitVersion's `MajorMinorPatch` and writes exactly `x.y.z`, including when `HEAD` is tagged. |
+| `tronador project version --snapshot` | Untagged Java only | Uses GitVersion's `MajorMinorPatch` and writes `x.y.z-SNAPSHOT`. |
+
+The profile-specific flags are rejected for every other capability or profile. Use
+`tronador project version --help` for the executable's version-specific usage and flags.
+
+`project version --dry-run` is the evaluated-preview exception: it always calculates
+GitVersion (using a repo-local configuration when present) but never changes project
+files. It prints deterministic unified file patches (or `No file changes for version
+<version>.`) and JSON exposes only actual `file_changes`; unchanged and optional missing
+metadata files are omitted. GitVersion provisioning is allowed only to a tools directory
+outside the workdir, and successful preview suppresses provisioner/tool progress.
 
 ## Initialization mappings
 

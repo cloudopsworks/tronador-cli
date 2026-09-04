@@ -23,6 +23,7 @@ var (
 	projectYes            bool
 	projectJSON           bool
 	projectSnapshot       bool
+	projectPlain          bool
 )
 
 var projectCmd = &cobra.Command{
@@ -44,18 +45,44 @@ Examples:
 	RunE: runProjectCommand,
 }
 
+var projectVersionCmd = &cobra.Command{
+	Use:           "version",
+	Short:         "Generate and write the detected project's version",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	Long: `Generate and write the detected project's version.
+
+The default uses GitVersion's FullSemVer. When HEAD is tagged, the tag is
+written instead of GitVersion's calculated value. Version generation writes
+VERSION and profile metadata when it exists, such as package.json for Node or
+pyproject.toml for Python.
+
+Use --plain to write an exact x.y.z version from GitVersion's MajorMinorPatch
+for Node and Python projects. It applies even when HEAD is tagged. Use
+--snapshot to write x.y.z-SNAPSHOT from MajorMinorPatch for untagged Java
+projects.
+
+The version dry-run calculates GitVersion and previews only actual file
+changes; it never writes project files.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runProjectCommand(cmd, append([]string{"version"}, args...))
+	},
+}
+
 func init() {
-	projectCmd.Flags().StringVar(&projectWorkDir, "workdir", ".", "Target project directory")
-	projectCmd.Flags().StringVar(&projectToolsDir, "tools-dir", "", "Directory for provisioned Tronador tools")
-	projectCmd.Flags().StringVar(&projectToolsConfig, "tools-config", "", "Tool provisioner JSON override file")
-	projectCmd.Flags().BoolVar(&projectNoInstallTools, "no-install-tools", false, "Resolve tools only from explicit paths, PATH, or cache")
-	projectCmd.Flags().BoolVar(&projectAllowNetwork, "allow-network", false, "Permit missing declared tools to be provisioned")
-	projectCmd.Flags().StringArrayVar(&projectToolVersions, "tool-version", nil, "Pin one tool version as name=version")
-	projectCmd.Flags().StringArrayVar(&projectToolPaths, "tool-path", nil, "Use an explicit tool executable as name=path")
+	projectCmd.PersistentFlags().StringVar(&projectWorkDir, "workdir", ".", "Target project directory")
+	projectCmd.PersistentFlags().StringVar(&projectToolsDir, "tools-dir", "", "Directory for provisioned Tronador tools")
+	projectCmd.PersistentFlags().StringVar(&projectToolsConfig, "tools-config", "", "Tool provisioner JSON override file")
+	projectCmd.PersistentFlags().BoolVar(&projectNoInstallTools, "no-install-tools", false, "Resolve tools only from explicit paths, PATH, or cache")
+	projectCmd.PersistentFlags().BoolVar(&projectAllowNetwork, "allow-network", false, "Permit missing declared tools to be provisioned")
+	projectCmd.PersistentFlags().StringArrayVar(&projectToolVersions, "tool-version", nil, "Pin one tool version as name=version")
+	projectCmd.PersistentFlags().StringArrayVar(&projectToolPaths, "tool-path", nil, "Use an explicit tool executable as name=path")
+	projectCmd.PersistentFlags().BoolVar(&projectJSON, "json", false, "Emit stable JSON output")
+	projectCmd.PersistentFlags().BoolVar(&projectPlain, "plain", false, "Generate an exact x.y.z version using GitVersion's MajorMinorPatch (Node and Python only)")
+	projectCmd.PersistentFlags().BoolVar(&projectSnapshot, "snapshot", false, "Generate x.y.z-SNAPSHOT using GitVersion's MajorMinorPatch (untagged Java only)")
 	projectCmd.Flags().StringVar(&projectEngine, "engine", "tofu", "IaC engine: tofu (default), terraform, or auto")
 	projectCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm destructive operations")
-	projectCmd.Flags().BoolVar(&projectJSON, "json", false, "Emit stable JSON output")
-	projectCmd.Flags().BoolVar(&projectSnapshot, "snapshot", false, "Generate a Java snapshot version from an untagged HEAD")
+	projectCmd.AddCommand(projectVersionCmd)
 	rootCmd.AddCommand(projectCmd)
 }
 
@@ -71,11 +98,14 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 	if err := validateSnapshotCapability(args[0], projectSnapshot); err != nil {
 		return emitProjectError(cmd, err)
 	}
+	if err := validatePlainCapability(args[0], projectPlain); err != nil {
+		return emitProjectError(cmd, err)
+	}
 	runner, err := projectpkg.NewRunner(projectpkg.Options{
 		WorkDir: projectWorkDir, ToolsDir: projectToolsDir, ToolsConfig: projectToolsConfig,
 		NoInstallTools: projectNoInstallTools, AllowNetwork: projectAllowNetwork,
 		ToolVersions: versions, ToolPaths: paths, Engine: projectEngine, Yes: projectYes,
-		JSON: projectJSON, Snapshot: projectSnapshot,
+		JSON: projectJSON, Snapshot: projectSnapshot, Plain: projectPlain,
 		DryRun: commandDryRun(cmd), Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 	})
 	if err != nil {
@@ -188,6 +218,13 @@ func capabilityFlagNames(flags []projectpkg.FlagDefinition) string {
 func validateSnapshotCapability(capability string, snapshot bool) error {
 	if snapshot && !strings.EqualFold(strings.TrimSpace(capability), "version") {
 		return projectErrorForCLI("project_snapshot_unsupported", "--snapshot is supported only for `tronador project version`")
+	}
+	return nil
+}
+
+func validatePlainCapability(capability string, plain bool) error {
+	if plain && !strings.EqualFold(strings.TrimSpace(capability), "version") {
+		return projectErrorForCLI("project_plain_unsupported", "--plain is supported only for `tronador project version`")
 	}
 	return nil
 }
