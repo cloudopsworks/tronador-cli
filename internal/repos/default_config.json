@@ -104,6 +104,16 @@
       "migration": "python/510"
     },
     {
+      "name": "argocd",
+      "description": "ArgoCD project template",
+      "marker": ".argocd",
+      "repository": "cloudopsworks/argocd-project-template",
+      "merge": true,
+      "versioned": true,
+      "cicd": false,
+      "migration": "argocd/510"
+    },
+    {
       "name": "terragrunt",
       "description": "Terragrunt project template",
       "marker": ".iac",
@@ -188,6 +198,9 @@
         ],
         "flutter": [
           {"action": "unsupported", "message": "Flutter is available only for v5.10+ templates, no migration needed."}
+        ],
+        "argocd": [
+          {"action": "unsupported", "message": "ArgoCD is available only with the .cloudopsworks layout, no v5.10 migration is needed."}
         ]
       }
     },

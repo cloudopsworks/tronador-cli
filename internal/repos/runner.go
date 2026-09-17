@@ -450,7 +450,7 @@ func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, te
 			return err
 		}
 	}
-	if err := r.gitAdd(context.Background(), rootTemplateFiles...); err != nil {
+	if err := r.gitAdd(context.Background(), append([]string{"Makefile"}, rootTemplateFiles...)...); err != nil {
 		return err
 	}
 
@@ -1018,7 +1018,7 @@ func (r *Runner) Migrate(templateName, version string) error {
 
 func usesCommonMigration(templateName string) bool {
 	switch normalizeKey(templateName) {
-	case "terragrunt", "terraform", "androidsdk", "flutter":
+	case "terragrunt", "terraform", "androidsdk", "flutter", "argocd":
 		return false
 	default:
 		return true

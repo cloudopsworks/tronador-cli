@@ -21,6 +21,12 @@ The JSON catalog contains:
   config includes `510` plus reserved `511` and `512` slots for future upgrade
   paths.
 
+The default catalog includes the in-progress
+`cloudopsworks/argocd-project-template`. Repositories are detected through
+`.cloudopsworks/.argocd`; the template participates in versioned upgrades but
+does not enable CICD footer or boilerplate handling. Its root `Makefile` is
+template-owned and is copied during upgrades.
+
 ## Command mapping
 
 | Make target | CLI equivalent |
