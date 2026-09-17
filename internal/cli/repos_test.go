@@ -36,6 +36,16 @@ func TestReposAvailableAliasesAvail(t *testing.T) {
 	}
 }
 
+func TestRepoTemplateIncludesArgoCD(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"repo", "template", "argocd"})
+	if err != nil {
+		t.Fatalf("find repo template argocd: %v", err)
+	}
+	if cmd == nil || cmd.Name() != "argocd" {
+		t.Fatalf("repo template argocd resolved to %v", cmd)
+	}
+}
+
 func TestReposCommandSurfaceKeepsMigrateInternal(t *testing.T) {
 	if findReposChild("migrate") != nil {
 		t.Fatalf("repos migrate is exposed; migration must remain an internal workflow step")

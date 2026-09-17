@@ -47,6 +47,29 @@ func TestTerraformModuleTemplateConfigMatchesMakefileVersionedBehavior(t *testin
 	}
 }
 
+func TestArgoCDTemplateConfigSupportsWorkInProgressRepository(t *testing.T) {
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	tmpl, ok := cfg.FindTemplate("argocd")
+	if !ok {
+		t.Fatalf("expected argocd template in default config")
+	}
+	if tmpl.Marker != ".argocd" {
+		t.Fatalf("argocd marker = %q, want .argocd", tmpl.Marker)
+	}
+	if tmpl.Repository != "cloudopsworks/argocd-project-template" {
+		t.Fatalf("argocd repository = %q, want cloudopsworks/argocd-project-template", tmpl.Repository)
+	}
+	if !tmpl.Merge || !tmpl.Versioned {
+		t.Fatalf("argocd template must support versioned upgrades: %+v", tmpl)
+	}
+	if tmpl.CICD || tmpl.Boilerplate {
+		t.Fatalf("argocd template must not enable CICD footer or boilerplate handling: %+v", tmpl)
+	}
+}
+
 func TestDetectActiveTemplateUsesBlueprintLayout(t *testing.T) {
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1")
@@ -65,6 +88,27 @@ func TestDetectActiveTemplateUsesBlueprintLayout(t *testing.T) {
 	}
 	if state.BlueprintPath != ".cloudopsworks" || state.Pre510 {
 		t.Fatalf("state = %+v, want .cloudopsworks non-pre510", state)
+	}
+}
+
+func TestDetectActiveArgoCDTemplate(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v0.1.0")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".argocd"), "")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	tmpl, state, err := runner.ActiveTemplate()
+	if err != nil {
+		t.Fatalf("ActiveTemplate() error = %v", err)
+	}
+	if tmpl.Name != "argocd" {
+		t.Fatalf("template = %s, want argocd", tmpl.Name)
+	}
+	if state.Version != "v0.1.0" || state.Pre510 {
+		t.Fatalf("state = %+v, want versioned .cloudopsworks layout", state)
 	}
 }
 
@@ -273,6 +317,47 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 	trunkBasedConfig := filepath.Join(dir, ".cloudopsworks", "gitversion_trunkbased.yaml")
 	if got := mustRead(t, trunkBasedConfig); got != "mode: ContinuousDeployment\n" {
 		t.Fatalf("trunk-based GitVersion config = %q, want template configuration", got)
+	}
+}
+
+func TestArgoCDUpgradeRouteCopiesVersionedTemplate(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v0.1.0\n")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".argocd"), "")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "scan.yml"), "name: scan\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".gitignore"), "*.tmp\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "-include .tronador\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v0.1.1\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", ".argocd"), "")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	tmpl, state, err := runner.ActiveTemplate()
+	if err != nil {
+		t.Fatalf("ActiveTemplate() error = %v", err)
+	}
+	if err := runner.applyVersionedTemplate(tmpl, state, "v0.1.1"); err != nil {
+		t.Fatalf("applyVersionedTemplate() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks", "_VERSION")); got != "v0.1.1\n" {
+		t.Fatalf(".cloudopsworks/_VERSION = %q, want v0.1.1", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "scan.yml")); got != "name: scan\n" {
+		t.Fatalf("workflow = %q, want ArgoCD template workflow", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, "Makefile")); got != "-include .tronador\n" {
+		t.Fatalf("Makefile = %q, want ArgoCD template Makefile", got)
+	}
+	staged := runGit(t, dir, "diff", "--cached", "--name-only")
+	if !strings.Contains(staged, "Makefile\n") {
+		t.Fatalf("new ArgoCD Makefile was not staged: %s", staged)
 	}
 }
 
