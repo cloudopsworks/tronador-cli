@@ -267,6 +267,18 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 		if !localHasSpan {
 			return false
 		}
+		uniqueCommentedTarget := false
+		if targetHasSpan && targetSpan.commented {
+			uniqueCommentedTarget = countCommentedPath(targetLines, childPath, targetSpan.indent) == 1
+			if !uniqueCommentedTarget {
+				selected, ok := compatibleCommentedTargetSpan(targetLines, childPath, localValue)
+				if ok {
+					targetSpan = selected
+					targetSpans[childPath] = selected
+					uniqueCommentedTarget = true
+				}
+			}
+		}
 		if !targetHasSpan {
 			if path != "" {
 				if !insertRawLocalChild(path, childPath, key, localValue, localSpan, targetLines, localLines, targetSpans, localSpans, replacements) {
@@ -297,7 +309,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 			continue
 		}
 		if targetIndex < 0 || targetSpan.commented {
-			if !targetSpan.commented || countCommentedPath(targetLines, childPath, targetSpan.indent) != 1 {
+			if !targetSpan.commented || !uniqueCommentedTarget {
 				return false
 			}
 			candidateReplacements, ok := []rawReplacement(nil), false
@@ -581,6 +593,55 @@ func countCommentedPath(lines []string, path string, indent int) int {
 		}
 	}
 	return count
+}
+
+// compatibleCommentedTargetSpan resolves an otherwise ambiguous commented
+// path only when exactly one candidate has the same YAML value kind as the
+// active local value. Templates can intentionally document both a deprecated
+// scalar form and its replacement mapping form under the same key. Choosing by
+// kind preserves the applicable target slot without guessing between multiple
+// candidates of the same shape.
+func compatibleCommentedTargetSpan(lines []string, path string, local *yaml.Node) (rawYAMLSpan, bool) {
+	if local == nil {
+		return rawYAMLSpan{}, false
+	}
+	var matches []rawYAMLSpan
+	for _, entry := range yamlRawSpanEntries(lines) {
+		if entry.path != path || !entry.span.commented {
+			continue
+		}
+		span := entry.span
+		if local.Kind == yaml.SequenceNode {
+			span.end = commentedSequenceSpanEnd(lines, span)
+		}
+		kind, ok := commentedCandidateValueKind(lines[span.start:span.end], pathLeaf(path))
+		if ok && kind == local.Kind {
+			matches = append(matches, span)
+		}
+	}
+	if len(matches) != 1 {
+		return rawYAMLSpan{}, false
+	}
+	return matches[0], true
+}
+
+func commentedCandidateValueKind(lines []string, wantedKey string) (yaml.Kind, bool) {
+	if !safeCommentedCandidate(lines, wantedKey) {
+		return 0, false
+	}
+	plain := make([]string, 0, len(lines))
+	for _, line := range lines {
+		plain = append(plain, uncommentStructuralLine(line))
+	}
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.Join(plain, "\n")+"\n"), &node); err != nil {
+		return 0, false
+	}
+	root := documentRoot(&node)
+	if root == nil || root.Kind != yaml.MappingNode || len(root.Content) != 2 || root.Content[0].Value != wantedKey {
+		return 0, false
+	}
+	return root.Content[1].Kind, true
 }
 
 // safeCommentedCandidate only recognizes a block when it can be reconstructed

@@ -201,6 +201,37 @@ func TestRenderYAMLTargetBaselinePreservesInlineCommentLexicalSpacing(t *testing
 	}
 }
 
+func TestRenderYAMLTargetBaselineSelectsCompatibleCommentedAlternative(t *testing.T) {
+	target := `golang:
+  main_file: .
+#  goreleaser: true # deprecated scalar form
+#  goreleaser:      # replacement mapping form
+#    enabled: true
+#semgrep:
+#  enabled: true
+cloud: aws | none
+`
+	local := `golang:
+  main_file: .
+  goreleaser: true
+semgrep:
+  enabled: true
+cloud: none
+`
+
+	first := renderCognitoYAML(t, target, local)
+	assertContainsAll(t, first,
+		"golang:\n  main_file: .\n  goreleaser: true",
+		"#  goreleaser:      # replacement mapping form\n#    enabled: true",
+		"semgrep:\n  enabled: true",
+		"cloud: none",
+	)
+	if strings.Contains(first, "\n    goreleaser:") || strings.Contains(first, "\n    enabled:") {
+		t.Fatalf("fallback indentation leaked into compatible commented alternative:\n%s", first)
+	}
+	assertCognitoSecondRenderIsStable(t, target, first)
+}
+
 func renderCognitoYAML(t *testing.T, target, local string) string {
 	t.Helper()
 	var targetNode, localNode yaml.Node
