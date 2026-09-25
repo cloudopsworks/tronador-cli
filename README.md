@@ -104,16 +104,41 @@ See [docs/iac-command.md](docs/iac-command.md) for supported source forms, mutat
 - `repos clean`, `repos clean template`, and `repos template clean` — clean generated or temporary template files.
 - `repos upgrade [version]` — run the full template upgrade workflow; `[version]` is optional.
 - `repos recover` — overlay template files without committing.
-- `repos push` — stage and commit template upgrade results.
+- `repos push` — commit the changes already staged by the caller.
 - `repos cicd update` — update the workflow-version metadata footer.
 
 `repos upgrade` preserves implementation-owned GitHub templates: issue templates
 including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
 when missing; `.github/dependabot.yml` is copied only when the template has it
 and the implementation repository does not; reserved `98_*` and `99_*`
-template-only issue forms are never propagated. Existing `auto-assign.yml`
-configuration is preserved. The template `.gitignore` content is managed in a
-marker-delimited block while user content outside the block is preserved; an
+template-only issue forms are never propagated. Target generation is detected
+from active CloudOps workflow blueprint references (not application `_VERSION`);
+missing or mixed references stop the upgrade. For v5.10 targets, all
+`.cloudopsworks` configuration YAML uses the template as a documented/default
+baseline while retaining active repository values. This includes root policy YAML
+such as `cloudopsworks-ci.yaml`, labeler, GitVersion, and auto-assignment
+configuration, plus applicable `vars`, Helm, API-gateway, and preview
+configuration; local-only YAML paths are preserved with warnings. Only an
+explicitly configured opaque boilerplate subtree is byte-for-byte
+exact-refreshed; root policy YAML is value-aware merged, not treated as opaque.
+Input scaffold selection first treats any local `# Agents:` declarations as
+authoritative. Declarations may use `|` alternatives for `cloud` or `cloud_type`;
+every declared combination must resolve to exactly one same template baseline.
+Otherwise, the file is preserved with a warning and Tronador does not fall back
+to an exact filename, mobile, or global selection. Without local Agents metadata,
+it prefers an exact relative filename, then one active Android/XCode/Flutter
+mobile family, and finally
+`cloud`/`cloud_type` from `vars/inputs-global.yaml` (including Kubernetes,
+Lambda, Beanstalk, App Engine, Cloud Run, and library targets).
+Exact or custom `dev`/`uat`/`prod` files retain their local names; missing or
+ambiguous baselines preserve the local file with a warning. Unsafe duplicate,
+alias/anchor, or multi-document YAML stops
+the upgrade before `_VERSION` changes; `--dry-run` reports the plan without
+mutation. v5.9-layout upgrades migrate and merge only target-matching legacy
+root CloudOps YAML (including auto-assignment); arbitrary GitHub operational YAML
+is not migrated as configuration. Targets that remain pre-v5.10 copy
+auto-assign files only when missing. The template `.gitignore` content is managed
+in a marker-delimited block while user content outside the block is preserved; an
 unmarked or malformed file is treated as user-owned and receives a fresh managed
 block.
 
