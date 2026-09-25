@@ -142,7 +142,8 @@ release:
       name_template: install.sh
     - glob: ./scripts/install.ps1
       name_template: install.ps1
-  name_template: Release {{ .Tag }}
+  name_template: "{{ .Tag }}"
+  prerelease: auto
 changelog:
   disable: true
 notarize:
