@@ -239,7 +239,7 @@ func newReposRecoverCommand() *cobra.Command {
 func newReposPushCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "push",
-		Short: "Stage and commit template upgrade changes",
+		Short: "Commit caller-staged template upgrade changes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runner, err := newReposRunner(cmd)
 			if err != nil {

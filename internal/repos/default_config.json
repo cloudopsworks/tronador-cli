@@ -149,7 +149,7 @@
       "description": "Move pre-v5.10 GitHub blueprint files into .cloudopsworks layout.",
       "common": [
         {"action": "ensureDir", "destination": ".cloudopsworks"},
-        {"action": "moveMany", "sources": [".github/vars", ".github/values", ".github/cloudopsworks*.yaml", ".github/LICENSE", ".github/Makefile", ".github/_VERSION", ".github/labeler.yml"], "destination": ".cloudopsworks", "optional": true},
+        {"action": "moveMany", "sources": [".github/vars", ".github/values", ".github/LICENSE", ".github/Makefile"], "destination": ".cloudopsworks", "optional": true},
         {"action": "gitAdd", "sources": [".github"]}
       ],
       "templates": {
@@ -178,16 +178,12 @@
           {"action": "move", "source": ".github/.docker", "destination": ".cloudopsworks", "optional": true}
         ],
         "terragrunt": [
-          {"action": "ensureDir", "destination": ".cloudopsworks"},
-          {"action": "moveMany", "sources": [".github/cloudopsworks*.yaml", ".github/LICENSE", ".github/Makefile", ".github/_VERSION", ".github/labeler.yml", ".github/.iac"], "destination": ".cloudopsworks", "optional": true},
-          {"action": "move", "source": ".github/.inputs_cicd", "destination": ".cloudopsworks", "optional": true},
-          {"action": "gitAdd", "sources": [".github"]}
+          {"action": "moveMany", "sources": [".github/.iac"], "destination": ".cloudopsworks", "optional": true},
+          {"action": "move", "source": ".github/.inputs_cicd", "destination": ".cloudopsworks", "optional": true}
         ],
         "terraform": [
           {"action": "ensureDir", "destination": ".cloudopsworks/boilerplate"},
           {"action": "move", "source": ".github/.terraform-module", "destination": ".cloudopsworks", "optional": true},
-          {"action": "moveMany", "sources": [".github/auto*.yml"], "destination": ".cloudopsworks", "optional": true},
-          {"action": "move", "source": ".github/_VERSION", "destination": ".cloudopsworks", "optional": true, "when": "missing:.cloudopsworks/_VERSION"},
           {"action": "move", "source": ".github/.provider", "destination": ".cloudopsworks", "optional": true},
           {"action": "move", "source": ".cloudopsworks/aws", "destination": ".cloudopsworks/boilerplate", "optional": true},
           {"action": "move", "source": ".cloudopsworks/gcp", "destination": ".cloudopsworks/boilerplate", "optional": true},

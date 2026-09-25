@@ -7,16 +7,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func (r *Runner) copyFileIfExists(src, dst string) error {
-	if !exists(src) {
+	if err := r.preflightSourceAncestors(src); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(src); errors.Is(err, os.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return err
 	}
 	return r.copyFile(src, dst)
 }
 
 func (r *Runner) copyFile(src, dst string) error {
+	if err := r.preflightSourceLeaf(src); err != nil {
+		return err
+	}
 	if r.Opts.DryRun {
 		fmt.Fprintf(r.Opts.Stdout, "DRY-RUN cp %s %s\n", src, dst)
 		return nil
@@ -28,27 +37,18 @@ func (r *Runner) copyFile(src, dst string) error {
 	if info.IsDir() {
 		return fmt.Errorf("copyFile source is a directory: %s", src)
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	in, err := os.Open(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
+	_, err = r.writeFileIfChanged(dst, data, info.Mode())
+	return err
 }
 
 func (r *Runner) copyFileAtomically(src, dst string) error {
+	if err := r.preflightSourceLeaf(src); err != nil {
+		return err
+	}
 	if r.Opts.DryRun {
 		fmt.Fprintf(r.Opts.Stdout, "DRY-RUN cp %s %s\n", src, dst)
 		return nil
@@ -121,6 +121,9 @@ func (r *Runner) copyFileAtomically(src, dst string) error {
 // writeFileIfChanged atomically writes content when it differs from the
 // existing file. It returns whether the destination bytes changed.
 func (r *Runner) writeFileIfChanged(path string, content []byte, mode os.FileMode) (bool, error) {
+	if err := r.safeFileDestination(path); err != nil {
+		return false, err
+	}
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return false, fmt.Errorf("refusing to replace symlink: %s", path)
@@ -174,6 +177,33 @@ func (r *Runner) writeFileIfChanged(path string, content []byte, mode os.FileMod
 		return false, err
 	}
 	return true, nil
+}
+
+// safeFileDestination rejects symlink traversal and non-directory ancestors so
+// every atomic write remains within its intended repository tree.
+func (r *Runner) safeFileDestination(path string) error {
+	root := filepath.Clean(r.Opts.WorkDir)
+	rel, err := filepath.Rel(root, filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("destination outside workdir: %s", path)
+	}
+	for parent := filepath.Dir(filepath.Clean(path)); ; parent = filepath.Dir(parent) {
+		info, err := os.Lstat(parent)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return fmt.Errorf("unsafe destination ancestor: %s", parent)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if parent == root {
+			return nil
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return nil
+		}
+	}
 }
 
 func mkdirAllTracked(path string, mode os.FileMode) ([]string, error) {
