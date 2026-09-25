@@ -1,7 +1,9 @@
 package repos
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -126,6 +128,7 @@ func TestMigrateGo510MovesPre510Layout(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".github", ".golang"), "")
 	mustWrite(t, filepath.Join(dir, ".github", "cloudopsworks-ci.yaml"), "name: ci")
 	mustWrite(t, filepath.Join(dir, ".github", "vars", "inputs.yaml"), "x: y")
+	mustWrite(t, filepath.Join(dir, ".github", "auto-assign.yml"), "reviewers: []")
 
 	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
@@ -135,17 +138,15 @@ func TestMigrateGo510MovesPre510Layout(t *testing.T) {
 		t.Fatalf("Migrate() error = %v", err)
 	}
 	for _, path := range []string{
-		".cloudopsworks/_VERSION",
 		".cloudopsworks/.golang",
-		".cloudopsworks/cloudopsworks-ci.yaml",
 		".cloudopsworks/vars/inputs.yaml",
 	} {
 		if !exists(filepath.Join(dir, path)) {
 			t.Fatalf("expected %s to exist after migration", path)
 		}
 	}
-	if exists(filepath.Join(dir, ".github", "_VERSION")) {
-		t.Fatalf("expected .github/_VERSION to move")
+	if !exists(filepath.Join(dir, ".github", "_VERSION")) {
+		t.Fatal("migration must defer legacy release marker removal to Stack")
 	}
 }
 
@@ -273,7 +274,7 @@ func TestTerraformModuleUpgradeRouteCopiesTemplateVersion(t *testing.T) {
 
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v1.6.27\n")
 	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".terraform-module"), "")
-	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "name: new\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "uses: cloudopsworks/blueprints/cd/checkout@v5.10\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "dependabot.yml"), "updates: []\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "secret_scanning.yml"), "secret-scanning: enabled\n")
 	mustWrite(t, filepath.Join(dir, ".template", ".github", "codeql", "codeql-config.yml"), "name: default\n")
@@ -861,6 +862,268 @@ func TestUnversionedTemplateUpgradeRouteCopiesMissingGitHubConfigurations(t *tes
 	}
 }
 
+func TestMigrateTerragrunt510MovesRecursiveConfigurationAndStagesEffects(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	for path, content := range map[string]string{
+		".github/.iac":                        "",
+		".github/.inputs_cicd":                "",
+		".github/LICENSE":                     "license\n",
+		".github/vars/custom/local-only.yaml": "local: true\n",
+		".github/vars/custom/script.txt":      "preserve\n",
+		".github/values/prod/values.yaml":     "replicas: 2\n",
+		".github/cloudopsworks-ci.yaml":       "pipeline: legacy\n",
+		".github/gitversion_trunkbased.yaml":  "mode: Mainline\n",
+		".github/_VERSION":                    "v5.9.0\n",
+	} {
+		mustWrite(t, filepath.Join(dir, filepath.FromSlash(path)), content)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Migrate("terragrunt", "510"); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	for _, path := range []string{
+		".cloudopsworks/.iac",
+		".cloudopsworks/.inputs_cicd",
+		".cloudopsworks/LICENSE",
+		".cloudopsworks/vars/custom/local-only.yaml",
+		".cloudopsworks/vars/custom/script.txt",
+		".cloudopsworks/values/prod/values.yaml",
+	} {
+		if !exists(filepath.Join(dir, filepath.FromSlash(path))) {
+			t.Fatalf("migration did not move %s", path)
+		}
+	}
+	staged := runGit(t, dir, "diff", "--cached", "--name-status", "--no-renames")
+	for _, effect := range []string{
+		"D\t.github/vars/custom/local-only.yaml",
+		"A\t.cloudopsworks/vars/custom/local-only.yaml",
+		"D\t.github/vars/custom/script.txt",
+		"A\t.cloudopsworks/vars/custom/script.txt",
+		"D\t.github/.iac",
+		"A\t.cloudopsworks/.iac",
+		"D\t.github/.inputs_cicd",
+		"A\t.cloudopsworks/.inputs_cicd",
+	} {
+		if !strings.Contains(staged, effect+"\n") {
+			t.Fatalf("migration effect %s was not staged:\n%s", effect, staged)
+		}
+	}
+}
+
+func TestMigrateTerraform510MovesLegacyConfigurationAndProvider(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	for path, content := range map[string]string{
+		".github/.terraform-module":           "",
+		".github/.provider":                   "aws\n",
+		".github/vars/custom/local-only.yaml": "local: true\n",
+		".github/values/prod/values.yaml":     "replicas: 2\n",
+		".github/cloudopsworks-ci.yaml":       "pipeline: legacy\n",
+		".github/gitversion_trunkbased.yaml":  "mode: Mainline\n",
+		".github/LICENSE":                     "license\n",
+		".github/Makefile":                    "legacy\n",
+		".github/labeler.yml":                 "labels: {}\n",
+		".github/auto-assign.yml":             "reviewers: []\n",
+		".github/_VERSION":                    "v5.9.0\n",
+	} {
+		mustWrite(t, filepath.Join(dir, filepath.FromSlash(path)), content)
+	}
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Migrate("terraform-module", "510"); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	for _, path := range []string{
+		".cloudopsworks/.terraform-module",
+		".cloudopsworks/.provider",
+		".cloudopsworks/vars/custom/local-only.yaml",
+		".cloudopsworks/values/prod/values.yaml",
+		".cloudopsworks/LICENSE",
+		".cloudopsworks/Makefile",
+	} {
+		if !exists(filepath.Join(dir, filepath.FromSlash(path))) {
+			t.Fatalf("migration did not move %s", path)
+		}
+	}
+}
+
+func TestStackV510MigrationCommitsOnlyUpgradeEffects(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	for path, content := range map[string]string{
+		".github/_VERSION":                "v5.9.0\n",
+		".github/.golang":                 "",
+		".github/workflows/build.yml":     "name: old\n",
+		".github/workflows/stale.yml":     "name: stale\n",
+		".github/vars/inputs-global.yaml": "cloud: aws\ncloud_type: lambda\n",
+		".github/cloudopsworks-ci.yaml":   "pipeline: local\n",
+		"README.local":                    "base\n",
+	} {
+		mustWrite(t, filepath.Join(dir, filepath.FromSlash(path)), content)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	mustWrite(t, filepath.Join(dir, "README.local"), "unrelated tracked work\n")
+	runGit(t, dir, "add", "README.local")
+	mustWrite(t, filepath.Join(dir, "scratch.txt"), "unrelated untracked work\n")
+	for path, content := range map[string]string{
+		".template/.github/workflows/build.yml":            "uses: cloudopsworks/blueprints/cd/checkout@v5.10\n",
+		".template/Makefile":                               "all:\n\t@true\n",
+		".template/.cloudopsworks/_VERSION":                "v5.10.2\n",
+		".template/.cloudopsworks/vars/inputs-global.yaml": "cloud: aws\ncloud_type: lambda\ntarget_default: kept\n",
+		".template/.cloudopsworks/cloudopsworks-ci.yaml":   "pipeline: template\n",
+		".template/.cloudopsworks/boilerplate/target.sh":   "target boilerplate\n",
+	} {
+		mustWrite(t, filepath.Join(dir, filepath.FromSlash(path)), content)
+	}
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := RepositoryState{WorkDir: dir, BlueprintPath: ".github", VersionFile: ".github/_VERSION", Pre510: true, Version: "v5.9.0"}
+	tmpl := Template{Name: "go", Merge: true, Versioned: true, CICD: true, Boilerplate: true, BoilerplatePathPre510: ".cloudopsworks/legacy", BoilerplatePathV510Plus: ".cloudopsworks/boilerplate"}
+	if err := runner.Stack(context.Background(), StackOptions{Template: tmpl, State: state, PullBranch: "test", TemplateHash: "target-hash", V510Plus: "v5.10"}); err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks", "_VERSION")); got != "v5.10.2\n" {
+		t.Fatalf("target version = %q", got)
+	}
+	assertContainsAll(t, mustRead(t, filepath.Join(dir, ".cloudopsworks", "cloudopsworks-ci.yaml")), "pipeline: local")
+	assertContainsAll(t, mustRead(t, filepath.Join(dir, ".cloudopsworks", "vars", "inputs-global.yaml")), "target_default: kept")
+	if content := mustRead(t, filepath.Join(dir, ".cloudopsworks", "cloudopsworks-ci.yaml")); !strings.Contains(content, "#workflow-version-tag: v5.10.2 - hash: target-hash") {
+		t.Fatalf("CICD footer did not use target version:\n%s", content)
+	}
+	if content := runGit(t, dir, "show", "HEAD:.cloudopsworks/cloudopsworks-ci.yaml"); !strings.Contains(content, "#workflow-version-tag: v5.10.2 - hash: target-hash") {
+		t.Fatalf("committed CICD footer did not use target version:\n%s", content)
+	}
+	committed := runGit(t, dir, "show", "--format=", "--name-only", "HEAD")
+	for _, path := range []string{".cloudopsworks/boilerplate/target.sh", ".github/workflows/stale.yml"} {
+		if !strings.Contains(committed, path+"\n") {
+			t.Fatalf("expected upgrade effect %s was not committed:\n%s", path, committed)
+		}
+	}
+	if strings.Contains(committed, "README.local\n") || strings.Contains(committed, "scratch.txt\n") {
+		t.Fatalf("unrelated work was committed:\n%s", committed)
+	}
+	status := runGit(t, dir, "status", "--short")
+	if !strings.Contains(status, "M  README.local") || !strings.Contains(status, "?? scratch.txt") {
+		t.Fatalf("unrelated work was not preserved:\n%s", status)
+	}
+	if staged := runGit(t, dir, "diff", "--cached", "--name-only"); staged != "README.local\n" {
+		t.Fatalf("pre-staged unrelated work changed: %q", staged)
+	}
+}
+
+func TestStackPreV510AndUnversionedRoutesCommitRecordedEffects(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	for _, test := range []struct {
+		name      string
+		versioned bool
+		want      []string
+	}{
+		{name: "versioned", versioned: true, want: []string{".github/_VERSION", ".github/workflows/build.yml", "Makefile"}},
+		{name: "unversioned", want: []string{".github/workflows/build.yml", "Makefile"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init")
+			runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+			runGit(t, dir, "config", "user.name", "tronador-cli test")
+			mustWrite(t, filepath.Join(dir, ".github", "_VERSION"), "v5.8.0\n")
+			mustWrite(t, filepath.Join(dir, ".github", "workflows", "build.yml"), "name: old\n")
+			mustWrite(t, filepath.Join(dir, "Makefile"), "old\n")
+			runGit(t, dir, "add", ".")
+			runGit(t, dir, "commit", "-m", "initial")
+			mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "uses: cloudopsworks/blueprints/cd/checkout@v5.9\n")
+			mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "target\n")
+			if test.versioned {
+				mustWrite(t, filepath.Join(dir, ".template", ".github", "_VERSION"), "v5.9.1\n")
+			}
+
+			runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := RepositoryState{WorkDir: dir, BlueprintPath: ".github", VersionFile: ".github/_VERSION", Version: "v5.8.0"}
+			tmpl := Template{Name: "go", Merge: true, Versioned: test.versioned}
+			if err := runner.Stack(context.Background(), StackOptions{Template: tmpl, State: state, PullBranch: "test", TemplateHash: "target-hash"}); err != nil {
+				t.Fatalf("Stack() error = %v", err)
+			}
+			committed := runGit(t, dir, "show", "--format=", "--name-only", "HEAD")
+			for _, path := range test.want {
+				if !strings.Contains(committed, path+"\n") {
+					t.Fatalf("Stack() did not commit %s:\n%s", path, committed)
+				}
+			}
+		})
+	}
+}
+
+func TestStackV510DryRunUsesPostMigrationState(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".github", "_VERSION"), "v5.9.0\n")
+	mustWrite(t, filepath.Join(dir, ".github", ".golang"), "")
+	mustWrite(t, filepath.Join(dir, ".github", "cloudopsworks-ci.yaml"), "pipeline: local\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "uses: cloudopsworks/blueprints/cd/checkout@v5.10\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "all:\n\t@true\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v5.10.2\n")
+	mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "cloudopsworks-ci.yaml"), "pipeline: target\n")
+	out := &bytes.Buffer{}
+	runner, err := NewRunner(Options{WorkDir: dir, DryRun: true, Stdout: out, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := RepositoryState{WorkDir: dir, BlueprintPath: ".github", VersionFile: ".github/_VERSION", Pre510: true, Version: "v5.9.0"}
+	tmpl := Template{Name: "go", Merge: true, Versioned: true, CICD: true}
+	if err := runner.Stack(context.Background(), StackOptions{Template: tmpl, State: state, PullBranch: "test", TemplateHash: "target-hash", V510Plus: "v5.10"}); err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	if exists(filepath.Join(dir, ".cloudopsworks")) {
+		t.Fatal("dry-run created the post-migration layout")
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "_VERSION")); got != "v5.9.0\n" {
+		t.Fatalf("dry-run changed legacy version: %q", got)
+	}
+	if !strings.Contains(out.String(), "DRY-RUN write "+filepath.Join(dir, ".cloudopsworks", "cloudopsworks-ci.yaml")) {
+		t.Fatalf("dry-run did not use the deterministic post-migration CICD path:\n%s", out.String())
+	}
+	if count := strings.Count(out.String(), "--literal-pathspecs add -A --"); count != 1 {
+		t.Fatalf("dry-run staged effects %d times, want one transaction boundary:\n%s", count, out.String())
+	}
+	if !strings.Contains(out.String(), "--literal-pathspecs commit --only") {
+		t.Fatalf("dry-run did not print exact-path commit intent:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "version: v5.10.2") || strings.Contains(out.String(), "Repository upgraded to version: v5.9.0") {
+		t.Fatalf("dry-run did not report validated target version:\n%s", out.String())
+	}
+}
+
 func TestVersionedTemplateCommitIncludesRootTemplateFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -920,6 +1183,236 @@ func TestVersionedTemplateCommitIncludesRootTemplateFiles(t *testing.T) {
 	}
 }
 
+func TestCommitUpgradeEffectsDropsEphemeralUntrackedPaths(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	mustWrite(t, filepath.Join(dir, "README.local"), "initial\n")
+	runGit(t, dir, "add", "README.local")
+	runGit(t, dir, "commit", "-m", "initial")
+	mustWrite(t, filepath.Join(dir, "Makefile"), "target\n")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.effects = newUpgradeEffects()
+	runner.effects.add("Makefile", ".github/workflows/ephemeral.yml")
+	if err := runner.commitUpgradeEffects(context.Background(), RepositoryState{Version: "v5.10.0"}); err != nil {
+		t.Fatalf("commitUpgradeEffects() error = %v", err)
+	}
+	committed := runGit(t, dir, "show", "--format=", "--name-only", "HEAD")
+	if !strings.Contains(committed, "Makefile\n") || strings.Contains(committed, "ephemeral.yml\n") {
+		t.Fatalf("commit paths = %q, want only existing effect", committed)
+	}
+}
+
+func TestRecoverLeavesGitIndexUntouched(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	for path, content := range map[string]string{
+		".cloudopsworks/_VERSION":              "v5.10.1\n",
+		".cloudopsworks/.golang":               "",
+		".cloudopsworks/cloudopsworks-ci.yaml": "pipeline: local\n",
+		".github/workflows/old.yml":            "name: old\n",
+	} {
+		mustWrite(t, filepath.Join(dir, filepath.FromSlash(path)), content)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	before := runGit(t, dir, "write-tree")
+
+	runner, err := NewRunner(Options{WorkDir: dir, PullBranch: "main", Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range runner.Config.Templates {
+		if runner.Config.Templates[index].Name == "go" {
+			runner.Config.Templates[index].Boilerplate = true
+			runner.Config.Templates[index].BoilerplatePathV510Plus = ".cloudopsworks/boilerplate"
+		}
+	}
+	runner.gitClient = recoverFixtureGitClient{}
+	runner.suppressStaging = true
+	if err := runner.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover() with prior suppression error = %v", err)
+	}
+	if !runner.suppressStaging {
+		t.Fatal("Recover() did not restore prior suppressStaging=true")
+	}
+	runner.suppressStaging = false
+	if err := runner.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover() with prior staging enabled error = %v", err)
+	}
+	if runner.suppressStaging {
+		t.Fatal("Recover() did not restore prior suppressStaging=false")
+	}
+	if after := runGit(t, dir, "write-tree"); after != before {
+		t.Fatalf("Recover() changed the index: before=%s after=%s", before, after)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "target.yml")); got != "name: target\n" {
+		t.Fatalf("Recover() did not overlay fixture workflow: %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks", "boilerplate", "target.sh")); got != "target boilerplate\n" {
+		t.Fatalf("Recover() did not overlay boilerplate: %q", got)
+	}
+	if !strings.Contains(mustRead(t, filepath.Join(dir, ".cloudopsworks", "cloudopsworks-ci.yaml")), "#workflow-version-tag: v5.10.1 - hash:") {
+		t.Fatal("Recover() did not update CICD footer")
+	}
+}
+
+func TestPushRejectsNonUpgradeStagedPath(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	mustWrite(t, filepath.Join(dir, "README.local"), "unrelated\n")
+	runGit(t, dir, "add", "README.local")
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Push(context.Background(), Template{}, RepositoryState{}); err == nil || !strings.Contains(err.Error(), "non-upgrade") {
+		t.Fatalf("Push() error = %v, want staged non-upgrade path rejection", err)
+	}
+	if staged := runGit(t, dir, "diff", "--cached", "--name-only"); staged != "README.local\n" {
+		t.Fatalf("Push() changed caller index: %q", staged)
+	}
+}
+
+func TestPushCommitsCallerStagedUpgradeBytesNotLaterWorktreeBytes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "Tronador CLI Test")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "vars.yaml"), "value: base\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "vars.yaml"), "value: staged\n")
+	runGit(t, dir, "add", ".cloudopsworks/vars.yaml")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "vars.yaml"), "value: worktree\n")
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Push(context.Background(), Template{}, RepositoryState{}); err != nil {
+		t.Fatalf("Push() error = %v", err)
+	}
+	if got := runGit(t, dir, "show", "HEAD:.cloudopsworks/vars.yaml"); got != "value: staged\n" {
+		t.Fatalf("committed bytes = %q, want staged bytes", got)
+	}
+}
+
+func TestDefaultV510MigrationMovesOnlyAutoAssign(t *testing.T) {
+	cfg, err := LoadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "auto*.yml") {
+		t.Fatalf("migration still uses broad auto YAML glob: %s", data)
+	}
+}
+
+func TestGitStageExactRejectsTraversalAndDirectories(t *testing.T) {
+	dir, runner, _ := configUpgradeRunner(t, false)
+	mustWrite(t, filepath.Join(dir, "nested", "file.txt"), "content\n")
+	for _, path := range []string{"../outside", "nested"} {
+		if err := runner.gitStageExact(context.Background(), path); err == nil {
+			t.Fatalf("gitStageExact(%q) accepted unsafe path", path)
+		}
+	}
+}
+
+func TestEffectPathValidationFailsAtStagingCall(t *testing.T) {
+	_, runner, _ := configUpgradeRunner(t, false)
+	runner.effects = newUpgradeEffects()
+	if err := runner.gitAdd(context.Background(), "../outside"); err == nil {
+		t.Fatal("gitAdd accepted unsafe effect path")
+	}
+	if err := runner.gitStageExact(context.Background(), "../outside"); err == nil {
+		t.Fatal("gitStageExact accepted unsafe effect path")
+	}
+}
+
+func TestConfigValidateRejectsUnsafeTemplatePaths(t *testing.T) {
+	for _, path := range []string{".", ".cloudopsworks/..", "../template", "/tmp/template"} {
+		cfg := &Config{SchemaVersion: "1", TemplateDirectory: path}
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("Validate accepted unsafe templateDirectory %q", path)
+		}
+	}
+}
+
+func TestStackPreflightRejectsManagedSymlinkBeforeMutation(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	for _, hazard := range []string{"Makefile", ".cloudopsworks/hooks", ".cloudopsworks"} {
+		t.Run(hazard, func(t *testing.T) {
+			dir := t.TempDir()
+			runGit(t, dir, "init")
+			runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+			runGit(t, dir, "config", "user.name", "Tronador CLI Test")
+			mustWrite(t, filepath.Join(dir, ".github", "_VERSION"), "v5.9.0\n")
+			mustWrite(t, filepath.Join(dir, ".github", "workflows", "old.yml"), "name: old\n")
+			mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "uses: cloudopsworks/blueprints/cd/checkout@v5.10\n")
+			mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "target\n")
+			mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "_VERSION"), "v5.10.2\n")
+			mustWrite(t, filepath.Join(dir, ".template", ".cloudopsworks", "hooks", "target.sh"), "target\n")
+			runGit(t, dir, "add", ".")
+			runGit(t, dir, "commit", "-m", "initial")
+			outside := filepath.Join(t.TempDir(), "sentinel")
+			mustWrite(t, outside, "outside\n")
+			dest := filepath.Join(dir, hazard)
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, dest); err != nil {
+				t.Fatal(err)
+			}
+			index := runGit(t, dir, "write-tree")
+			runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := RepositoryState{WorkDir: dir, BlueprintPath: ".github", VersionFile: ".github/_VERSION", Pre510: true, Version: "v5.9.0"}
+			err = runner.Stack(context.Background(), StackOptions{Template: Template{Name: "go", Merge: true, Versioned: true}, State: state, TemplateHash: "hash"})
+			if err == nil {
+				t.Fatal("Stack accepted managed symlink")
+			}
+			if got := mustRead(t, filepath.Join(dir, ".github", "workflows", "old.yml")); got != "name: old\n" {
+				t.Fatalf("workflow mutated: %q", got)
+			}
+			if got := mustRead(t, filepath.Join(dir, ".github", "_VERSION")); got != "v5.9.0\n" {
+				t.Fatalf("legacy version mutated: %q", got)
+			}
+			if got := mustRead(t, outside); got != "outside\n" {
+				t.Fatalf("outside bytes mutated: %q", got)
+			}
+			if got := runGit(t, dir, "write-tree"); got != index {
+				t.Fatalf("index mutated: %s != %s", got, index)
+			}
+		})
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -950,6 +1443,32 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+type recoverFixtureGitClient struct{}
+
+func (recoverFixtureGitClient) Clone(_ context.Context, _ string, destination string) error {
+	for path, content := range map[string]string{
+		".github/workflows/target.yml":                   "name: target\n",
+		".cloudopsworks/boilerplate/target.sh":           "target boilerplate\n",
+		".cloudopsworks/boilerplate/stale-template.yaml": "template: true\n",
+	} {
+		if err := os.MkdirAll(filepath.Join(destination, filepath.Dir(path)), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(destination, path), []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (recoverFixtureGitClient) RemoveRemote(context.Context, string, string) error { return nil }
+func (recoverFixtureGitClient) Checkout(context.Context, string, string) (string, error) {
+	return "fixture-hash", nil
+}
+func (recoverFixtureGitClient) OriginOwnerRepo(context.Context, string) (string, string, error) {
+	return "", "", errors.New("fixture has no origin")
+}
+
 type cloneWritingGitClient struct{}
 
 func (cloneWritingGitClient) Clone(_ context.Context, _ string, destination string) error {
@@ -967,4 +1486,72 @@ func (cloneWritingGitClient) Checkout(context.Context, string, string) (string, 
 
 func (cloneWritingGitClient) OriginOwnerRepo(context.Context, string) (string, string, error) {
 	return "", "", errors.New("unused")
+}
+
+func TestDetectSupportsLegacyFlutterMobileMarker(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", "_VERSION"), "v5.10.1\n")
+	mustWrite(t, filepath.Join(dir, ".cloudopsworks", ".fluttermobile"), "")
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl, _, err := runner.ActiveTemplate()
+	if err != nil {
+		t.Fatalf("ActiveTemplate() error = %v", err)
+	}
+	if tmpl.Name != "flutter" {
+		t.Fatalf("template = %q, want flutter", tmpl.Name)
+	}
+}
+
+func TestCommitUpgradeEffectsNoOpPreservesUnrelatedIndex(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	mustWrite(t, filepath.Join(dir, "Makefile"), "baseline\n")
+	mustWrite(t, filepath.Join(dir, "README.local"), "baseline\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+
+	// This staged edit is unrelated to the recorded effect path and must survive
+	// both no-op attempts and a later exact-path upgrade commit.
+	mustWrite(t, filepath.Join(dir, "README.local"), "unrelated staged work\n")
+	runGit(t, dir, "add", "README.local")
+	head := runGit(t, dir, "rev-parse", "HEAD")
+
+	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		runner.effects = newUpgradeEffects()
+		runner.effects.add("Makefile")
+		if err := runner.commitUpgradeEffects(context.Background(), RepositoryState{Version: "v5.10.0"}); err != nil {
+			t.Fatalf("no-op attempt %d: commitUpgradeEffects() error = %v", attempt+1, err)
+		}
+		if got := runGit(t, dir, "rev-parse", "HEAD"); got != head {
+			t.Fatalf("no-op attempt %d created a commit: got %s, want %s", attempt+1, got, head)
+		}
+		if staged := runGit(t, dir, "diff", "--cached", "--name-only"); staged != "README.local\n" {
+			t.Fatalf("no-op attempt %d changed unrelated index: %q", attempt+1, staged)
+		}
+	}
+
+	mustWrite(t, filepath.Join(dir, "Makefile"), "upgraded\n")
+	runner.effects = newUpgradeEffects()
+	runner.effects.add("Makefile")
+	if err := runner.commitUpgradeEffects(context.Background(), RepositoryState{Version: "v5.10.0"}); err != nil {
+		t.Fatalf("changed effect: commitUpgradeEffects() error = %v", err)
+	}
+	if got := runGit(t, dir, "show", "--format=", "--name-only", "HEAD"); got != "Makefile\n" {
+		t.Fatalf("changed effect commit paths = %q, want Makefile only", got)
+	}
+	if staged := runGit(t, dir, "diff", "--cached", "--name-only"); staged != "README.local\n" {
+		t.Fatalf("changed effect altered unrelated index: %q", staged)
+	}
 }
