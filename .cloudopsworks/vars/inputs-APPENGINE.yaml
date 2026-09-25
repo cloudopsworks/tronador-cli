@@ -56,4 +56,4 @@ appengine:
 #      name: "<connector name>"
   # Reference: https://cloud.google.com/appengine/docs/standard/reference/app-yaml?tab=java#handlers_element
   http_handlers: []
-  env_variables: { }
+  env_variables: {}

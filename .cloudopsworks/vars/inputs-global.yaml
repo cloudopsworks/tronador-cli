@@ -15,8 +15,12 @@ golang:
 #  dist: linux
 #  arch: amd64
 #  image_variant: alpine:3.21
-#  disable_cgo: true # uncomment to disable CGO (pure golang build), useful on some cases
+#  disable_cgo: true     # uncomment to disable CGO (pure golang build), useful on some cases
   goreleaser: true # uncomment to enable goreleaser, the tool is disabled by default, it is recommended to put cloud_type to `none` in case of using GoReleaser, no deployment will be made
+#  goreleaser:           # New way to enable goreleaser, the tool is disabled by default.
+#    enabled: true       # uncomment to enable goreleaser, the tool is disabled by default, it is recommended to put cloud_type to `none` in case of using GoReleaser, no deployment will be made.
+#    chocolatey: true    # uncomment to enable chocolatey package generation, if enabled it will run goreleaser on a windows runner, requires to have .goreleaser-windows.yaml file in the root of the repository, disabled by default.
+#    macos: true         # uncomment to enable macOS package generation, if enabled it will run goreleaser on a macOS runner, requires to have .goreleaser-macos.yaml file in the root of the repository, disabled by default.
 #
 # Set Snyk processing to true if want to enable, the tool is disabled by default
 #snyk:
@@ -153,4 +157,4 @@ cloud: none
 # Cloud deployment type depends on the target cloud
 cloud_type: none
 # Indicate the Runner that will be used for the deployment - usually will be a hosted runner
-#runner_set: "macos-latest"
+# runner_set: "arc-runner-set"

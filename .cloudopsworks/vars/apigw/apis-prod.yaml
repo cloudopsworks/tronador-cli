@@ -5,7 +5,7 @@ apigw_definitions:
     mapping: test-apis/api/2.0
     domain_name: apigw.sample.com
     file_name: test
-    stage_variables:  # comment out if not needed
+    stage_variables: # comment out if not needed
       - name: api_variable
         value: api_value
 aws:
@@ -56,7 +56,7 @@ aws:
   #custom_parameters: # This enables to use custom ${} parameters within the API definition files
   #  - name: url
   #    value: test-api.dev.sample.com
-  stage_variables:  # comment out if not needed or lambda function does not require stage variables
+  stage_variables: # comment out if not needed or lambda function does not require stage variables
     - name: url
       value: test-api.sample.com
   #lambda_options: # Available for HTTP APIs only
@@ -69,15 +69,7 @@ aws:
   #  content_handling: CONVERT_TO_TEXT | CONVERT_TO_BINARY # defaults to CONVERT_TO_TEXT
   authorizers:
     - name: Lambda-Auth
-      #scheme:
-      #  name: Authorization
-      #  in: header
-      #  type: apiKey
-      #  authtype: custom
       authtype: lambda
-      #result_ttl_seconds: 10
-      #identity_source: method.request.header.Authorization
-      #type: request
       lambda:
         function: lambda-auth-prod
         exec_role: lambda-auth-prod-lambda-exec-role

@@ -349,77 +349,162 @@ these targets — never fetch or apply template changes manually.
 
 1. Run `make repos/available` to see the current and latest available versions.
 2. Choose the appropriate target (default: `make repos/upgrade` for a routine patch upgrade).
-3. Review the diff — the upgrade replaces `.github/workflows/`, reconciles applicable
-   `.cloudopsworks/` YAML with the target baseline and active local values, and refreshes
-   only explicitly configured opaque boilerplate byte-for-byte. Application source files
-   are never touched.
+3. Review the diff — the upgrade overwrites `.github/workflows/` and selected `.cloudopsworks/` metadata; application source files are never touched.
 4. Commit the result with: `chore: upgrade from <template-name> <old-version> → <new-version> +semver: patch`
 5. Use `/cw-release` to create and merge the hotfix PR (see [Release Workflow — use `cw-release`](#release-workflow--use-cw-release)).
 
-> **Note:** Root CloudOps YAML, including labeler and GitVersion configuration, is
-> value-aware merged rather than overwritten. Only a template's explicitly configured
-> opaque boilerplate subtree receives an exact refresh. Do not manually edit an opaque
-> subtree unless its template contract permits it.
+> **Note:** `Makefile`, `.github/`, `.cloudopsworks/labeler.yml`, `.cloudopsworks/Makefile`,
+> and `.cloudopsworks/LICENSE` are owned by the template and will be overwritten on every upgrade.
+> Do not edit these files manually in derived repositories.
 
 ---
 
-## Configuration-aware template upgrades
+## AI-assisted upgrade of `.cloudopsworks/vars` configuration files
 
-Use `make repos/upgrade*` for every template upgrade. Do not fetch or apply
-CloudOps configuration files manually: the command resolves the target template,
-plans the configuration refresh, and performs the upgrade as one workflow.
+This section is a machine-readable protocol for AI agents performing a seamless, non-destructive upgrade of all configuration files under `.cloudopsworks/vars/` when a new template version is released. Follow the steps below in order.
 
-### Configuration refresh behavior
+### Upgrade overview
 
-For a v5.10 target, Tronador processes every applicable YAML file in the target
-`.cloudopsworks/` tree, including root policy YAML and `vars/` YAML. Target YAML
-provides the structure, comments, and defaults; active local values overlay that
-baseline recursively. This applies to root files such as `cloudopsworks-ci.yaml`,
-labeler, GitVersion, and auto-assignment configuration, as well as applicable
-`vars/helm/`, `vars/apigw/`, and `vars/preview/` files.
+The template version locked into this repository is recorded in `.cloudopsworks/_VERSION`. The canonical upstream source is the GitHub repository `cloudopsworks/go-app-template`, pinned to the tag that matches the content of `_VERSION`.
 
-A template's explicitly configured opaque boilerplate subtree is the exception:
-it is refreshed byte-for-byte and is not YAML-merged. Root policy YAML is not
-opaque boilerplate. Local-only YAML files and unmapped active paths are retained
-and reported as preservation warnings rather than discarded.
+An upgrade merges new keys, updated comments, and structural changes from the upstream template into local files **without overwriting values the operator has already set**.
 
-A v5.9-layout to v5.10 upgrade migrates only target-matching legacy root CloudOps
-YAML, including auto-assignment configuration. It does not treat arbitrary GitHub
-operational YAML as CloudOps configuration.
+---
 
-### Input scaffold selection
+### Step 1 — determine current and target versions
 
-A local `vars/inputs-*.yaml` file keeps its filename. Tronador selects its target
-baseline in this order:
+1. Read `.cloudopsworks/_VERSION` to get the **current locked version** (e.g., `v1.4.15`).
+2. The **target version** is either supplied by the operator or is the latest release tag on `cloudopsworks/go-app-template`.
+3. Fetch any upstream file from GitHub using the pattern:
+   ```
+   https://raw.githubusercontent.com/cloudopsworks/go-app-template/<version>/<path>
+   ```
+   Example:
+   ```
+   https://raw.githubusercontent.com/cloudopsworks/go-app-template/v1.4.15/.cloudopsworks/vars/inputs-global.yaml
+   ```
 
-1. When present, one or more local `# Agents:` declarations matched to exactly one same template
-   baseline. A declaration may use `|` alternatives for `cloud` or `cloud_type`;
-   every declared combination must resolve to that same baseline. Otherwise, the
-   local file is preserved with a warning and Tronador does not fall back to an
-   exact filename, mobile, or global selection.
-2. When no local `# Agents:` metadata is present, an exact relative filename in the
-   target `.cloudopsworks/` tree.
-3. One active mobile family from `vars/inputs-global.yaml`: Android, XCode, or a
-   Flutter platform selection. Simultaneously active Android and XCode families
-   are ambiguous and do not select a scaffold.
-4. The `cloud` and `cloud_type` context from `vars/inputs-global.yaml`, mapped to
-   Kubernetes, AWS Lambda, AWS Beanstalk, GCP App Engine, GCP Cloud Run, or a
-   library/no-deployment scaffold.
+---
 
-Within `vars/helm/`, `vars/apigw/`, and `vars/preview/`, exact filenames are also
-preferred. Otherwise, Tronador uses one unambiguous target from the same file
-family and `dev`, `uat`, or `prod` environment. Helm applies for Kubernetes
-configuration or existing Helm YAML. API-gateway and preview configuration apply
-when present locally or enabled in global inputs. A missing or ambiguous baseline
-preserves the local file and emits a warning.
+### Step 2 — identify the deployment type for each environment file
 
-### Safety and completion
+Each `inputs-<name>.yaml` file under `.cloudopsworks/vars/` maps to a specific upstream template. Determine the type using the following priority order:
 
-Tronador stops before changing `_VERSION` if any processed YAML contains duplicate
-mapping keys, aliases/anchors, or multiple documents. It writes `_VERSION` only
-after the configuration refresh succeeds. `--dry-run` fetches and analyses the
-selected target, then reports planned YAML writes and preservation warnings without
-modifying repository files.
+**Priority 1 — `Agents:` header comment**
+
+If the file contains an `# Agents:` line in its header block, read `cloud` and `cloud_type` directly from it:
+
+```yaml
+# Agents: cloud=aws ; cloud_type=lambda
+```
+
+Multiple valid combinations may be listed separated by `|`:
+
+```yaml
+# Agents: cloud=aws|gcp|azure ; cloud_type=kubernetes
+```
+
+**Priority 2 — fallback to `inputs-global.yaml`**
+
+If no `# Agents:` line is present, read the active `cloud` and `cloud_type` values from `.cloudopsworks/vars/inputs-global.yaml` and apply the mapping table below.
+
+**`cloud` / `cloud_type` → upstream template file:**
+
+| `cloud`                  | `cloud_type`                   | Upstream template file         |
+|--------------------------|--------------------------------|--------------------------------|
+| `aws`                    | `eks` or `kubernetes`          | `inputs-KUBERNETES-ENV.yaml`   |
+| `azure`                  | `aks` or `kubernetes`          | `inputs-KUBERNETES-ENV.yaml`   |
+| `gcp`                    | `gke` or `kubernetes`          | `inputs-KUBERNETES-ENV.yaml`   |
+| `aws`                    | `lambda`                       | `inputs-LAMBDA-ENV.yaml`       |
+| `aws`                    | `beanstalk`                    | `inputs-BEANSTALK-ENV.yaml`    |
+| `gcp`                    | `appengine`                    | `inputs-APPENGINE.yaml`        |
+| `gcp`                    | `cloudrun`                     | `inputs-CLOUDRUN.yaml`         |
+| `aws` / `gcp` / `azure`  | `none` or library mode         | `inputs-LIB-ENV.yaml`          |
+
+`inputs-global.yaml` always maps to the upstream `inputs-global.yaml` regardless of cloud type.
+
+---
+
+### Step 3 — upgrade deployment target files
+
+The deployment target files identified by the Step 2 mapping table — such as `inputs-KUBERNETES-ENV.yaml`, `inputs-LAMBDA-ENV.yaml`, `inputs-BEANSTALK-ENV.yaml`, `inputs-APPENGINE.yaml`, `inputs-CLOUDRUN.yaml`, `inputs-LIB-ENV.yaml`, and mobile equivalents such as `inputs-ANDROID-ENV.yaml` and `inputs-XCODE-ENV.yaml` — are **scaffolding templates**. They provide placeholder structures and documented examples, not finalized operator configuration.
+
+**Do not merge these files. Overwrite them.**
+
+Upgrade procedure for each deployment target file:
+
+1. **Before overwriting** — inspect the local file and record any operator-configured values (keys that have been uncommented and set to non-placeholder values).
+2. **Replace the file** — overwrite the local file entirely with the upstream template version.
+3. **Re-apply operator values** — after overwriting, set each previously recorded operator-configured value at its corresponding key in the new file.
+4. **Copy in absent files** — if a deployment target file is present in the upstream template but absent locally, copy it in from the upstream template as a new file.
+
+---
+
+### Step 4 — merge `inputs-global.yaml`
+
+`inputs-global.yaml` requires special handling because it contains mandatory operator identity fields alongside a large body of optional commented-out sections.
+
+Merge procedure:
+
+1. **Retain the four mandatory identity fields** verbatim at the top of the file:
+   ```yaml
+   organization_name: "..."
+   organization_unit: "..."
+   environment_name: "..."
+   repository_owner: "..."
+   ```
+2. **Retain `cloud` and `cloud_type`** exactly as the operator set them.
+3. **For every optional commented-out section** in the upstream template, check the local file:
+   - If the operator **has uncommented and configured it** — keep the operator's values; update only surrounding comment text if it changed upstream.
+   - If the section **is still fully commented out locally** — replace the entire commented block with the upstream version, capturing any new fields or updated documentation within it.
+4. **Append new optional sections** that appear in the upstream template but are entirely absent locally, in fully commented-out form, preserving their upstream position and comments.
+
+---
+
+### Step 5 — upgrade subdirectory files
+
+Apply the merge rules from Step 4 to every file in the following subdirectories, matching each local file to its corresponding upstream file at the same relative path:
+
+- `.cloudopsworks/vars/preview/inputs.yaml`
+- `.cloudopsworks/vars/preview/values.yaml`
+- `.cloudopsworks/vars/apigw/apis-global.yaml`
+- `.cloudopsworks/vars/apigw/apis-dev.yaml`
+- `.cloudopsworks/vars/apigw/apis-uat.yaml`
+- `.cloudopsworks/vars/apigw/apis-prod.yaml`
+- `.cloudopsworks/vars/helm/values-dev.yaml`
+- `.cloudopsworks/vars/helm/values-uat.yaml`
+- `.cloudopsworks/vars/helm/values-prod.yaml`
+
+---
+
+### Step 6 — update `_VERSION`
+
+After all merges are verified correct, write the target version string (e.g., `v1.4.16`) to `.cloudopsworks/_VERSION`. This is the final step.
+
+---
+
+### Upgrade invariants
+
+An agent performing this upgrade must **never**:
+
+- Overwrite a field the operator has explicitly set to a non-placeholder value.
+- Remove a commented-out operator value without first reporting it.
+- Change the YAML structure of any active (uncommented) operator section.
+- Alter a file's opening description comment (`# This file contains...`) unless the upstream version changed it.
+- Modify `.cloudopsworks/cloudopsworks-ci.yaml`, `gitversion_*.yaml`, or any file under `.github/workflows/` as part of a vars upgrade — those follow their own upgrade path.
+- Update `_VERSION` before all file merges are complete.
+
+---
+
+### Conflict resolution
+
+When a merge cannot be resolved automatically (for example, the upstream template restructured a section that the operator has customized):
+
+1. Emit a diff showing both the upstream template block and the local operator block side by side.
+2. Pause and present the conflict to the operator, asking which version to keep or whether a manual merge is needed.
+3. Never silently choose one side.
+
+---
 
 ## Release Workflow — use `cw-release`
 

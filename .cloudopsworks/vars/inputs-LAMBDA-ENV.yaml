@@ -93,35 +93,16 @@ lambda:
   ##
   # Optionals: function Urls
   functionUrls: []
-  #  - id: prod
-  #    qualifier: "prod"
-  #    authorizationType: "AWS_IAM"
-  #    cors:
-  #      allowCredentials: true
-  #      allowMethods:
-  #        - "GET"
-  #        - "POST"
-  #      allowOrigins:
-  #        - "*"
-  #      allowHeaders:
-  #        - "date"
-  #        - "keep-alive"
-  #      exposeHeaders:
-  #        - "date"
-  #        - "keep-alive"
-  #      maxAge: 86400
-  #  - id: "dev"
-  #    authorizationType: "NONE"
   ##
   # Optionals: event bridge scheduling
   #            Remove comment on items to enable
   schedule:
-    enabled: false        # (optional) Enable or disable singe schedule
+    enabled: false # (optional) Enable or disable singe schedule
   #  schedule_group: "my-schedule-group" # (optional) Schedule group name, schedule group must already exists
   #  flexible:
   #    enabled: true
   #    maxWindow: 20 # Minutes
-    expression: "rate(1 hour)"  # (optional) Schedule expression, can be cron or rate, required if enabled is true
+    expression: "rate(1 hour)" # (optional) Schedule expression, can be cron or rate, required if enabled is true
   #  timezone: "UTC-3"
   #  suspended: false
   #  payload: {} | ""             # (optional) Payload to send to the Lambda function, can be YAML (will be converted to JSON), JSON or string, defaults to null
@@ -140,10 +121,7 @@ lambda:
     enabled: false
     create_security_group: false
     security_groups: []
-    #  - sg-1234567890abcdef0
-    #  - sg-1234567890abcdef1
     subnets: []
-    #  - subnet-1234567890abcdef0
 
   ##
   # Optional: logging config
@@ -219,9 +197,6 @@ lambda:
 
   ## Lambda Layers
   layers: []
-  #  - arn: arn:aws:lambda:us-east-1:123456789012:layer:my-layer:1
-  #  - arn: arn:aws:lambda:us-east-1:123456789012:layer:my-layer:2
-  #  - arn: arn:aws:lambda:us-east-1:901920570463:layer:aws-otel-java-agent-amd64-ver-1-32-0:4
   ## Others will come later
 
 ##
