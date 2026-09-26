@@ -34,6 +34,40 @@ func (f *fakeRunner) saw(parts ...string) bool {
 	}
 	return false
 }
+
+func (f *fakeRunner) sawPrefix(parts ...string) bool {
+	for _, c := range f.calls {
+		callParts := append([]string{c.name}, c.args...)
+		if len(callParts) < len(parts) {
+			continue
+		}
+		matched := true
+		for index, part := range parts {
+			if callParts[index] != part {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func TestFakeRunnerSawPrefixKeepsExactSawSemantics(t *testing.T) {
+	f := &fakeRunner{}
+	if _, err := f.Run(context.Background(), "gh", "pr", "create", "--base", "develop"); err != nil {
+		t.Fatal(err)
+	}
+	if f.saw("gh", "pr", "create") {
+		t.Fatal("saw must remain exact")
+	}
+	if !f.sawPrefix("gh", "pr", "create") {
+		t.Fatal("sawPrefix did not detect a command with additional arguments")
+	}
+}
+
 func TestFeatureStartUsesWOWBase(t *testing.T) {
 	for _, tc := range []struct{ wow, base string }{{"gitflow", "develop"}, {"githubflow", "main"}, {"trunk", "main"}} {
 		t.Run(tc.wow, func(t *testing.T) {
@@ -58,7 +92,7 @@ func TestFeatureFinishRequiresExactRemoteParity(t *testing.T) {
 	if e == nil || !strings.Contains(e.Error(), "exactly published") {
 		t.Fatalf("got %v", e)
 	}
-	if f.saw("gh", "pr", "create") {
+	if f.sawPrefix("gh", "pr", "create") {
 		t.Fatal("PR created despite parity failure")
 	}
 }
@@ -72,7 +106,7 @@ func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
 	if tag != "v1.2.3-alpha.1+deploy-test" {
 		t.Fatal(tag)
 	}
-	if !f.saw("git", "push", "origin", tag) {
+	if !f.saw("git", "push", "origin", "refs/tags/"+tag+":refs/tags/"+tag) {
 		t.Fatalf("not exact tag: %#v", f.calls)
 	}
 }
@@ -117,7 +151,7 @@ func TestSupportStartFetchesTagsBeforeValidatingTag(t *testing.T) {
 		if got == "git fetch origin --tags" {
 			fetch = i
 		}
-		if got == "git rev-parse --verify v1.2.3^{commit}" {
+		if got == "git rev-parse --verify refs/tags/v1.2.3^{commit}" {
 			verify = i
 		}
 	}

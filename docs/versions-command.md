@@ -160,10 +160,11 @@ operates on the current release branch.
 The normal finish creates a guarded pull request into the primary branch. In
 GitFlow it also creates a second guarded pull request from the release branch
 to `develop`, so both integration lines are explicit. With `--local`, Tronador
-merges the release to the primary branch, creates and pushes an annotated
-version tag, and removes the release branch locally and from `origin`. GitFlow
-then merges that release back into `develop` and pushes `develop`; the other
-workflows do not use `develop`.
+merges the release to the primary branch and creates and pushes an annotated
+version tag. GitFlow then merges that release back into `develop` and pushes
+`develop`; the other workflows do not use `develop`. Only after every required
+merge and push succeeds does it remove the release branch locally and from
+`origin`.
 
 ### Resuming a local finish
 
