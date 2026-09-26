@@ -588,11 +588,13 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 
 func TestReleaseFinishGitflowCreatesPRsForMainAndDevelop(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                    "sha\n",
-		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                    "sha\trefs/heads/release/v1.2.3\n",
-		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                      "origin/main\n",
-		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):    "0\n",
-		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"): "0\n",
+		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "merged", "--json", "number", "--jq", "length"):    "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
@@ -1104,11 +1106,12 @@ func TestHotfixLocalFinishUsesRemoteOnlySupportLine(t *testing.T) {
 
 func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                    "sha\n",
-		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                    "sha\trefs/heads/release/v1.2.3\n",
-		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                      "origin/main\n",
-		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):    "1\n",
-		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"): "0\n",
+		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "1\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
@@ -1116,6 +1119,25 @@ func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) 
 	}
 	if f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") || !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "develop", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") {
 		t.Fatalf("retry did not create only missing PR: %#v", f.calls)
+	}
+}
+
+func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "merged", "--json", "number", "--jq", "length"):    "1\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
+	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
+		t.Fatal(err)
+	}
+	if f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") || !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "develop", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") {
+		t.Fatalf("merged-main retry did not create only missing develop PR: %#v", f.calls)
 	}
 }
 

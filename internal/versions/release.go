@@ -93,21 +93,36 @@ func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) 
 }
 
 func (w *Workflows) ensureReleasePR(ctx context.Context, branch, base, version string) error {
-	out, err := w.gh(ctx, "pr", "list", "--head", branch, "--base", base, "--state", "open", "--json", "number", "--jq", "length")
+	open, err := w.releasePRCount(ctx, branch, base, "open")
 	if err != nil {
-		return fmt.Errorf("check existing release PR %s -> %s: %w", branch, base, err)
+		return err
 	}
-	count, err := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil || count < 0 {
-		return fmt.Errorf("check existing release PR %s -> %s: expected numeric count, got %q", branch, base, strings.TrimSpace(out))
+	if open > 0 {
+		return nil
 	}
-	if count > 0 {
+	merged, err := w.releasePRCount(ctx, branch, base, "merged")
+	if err != nil {
+		return err
+	}
+	if merged > 0 {
 		return nil
 	}
 	if _, err = w.gh(ctx, "pr", "create", "--head", branch, "-B", base, "-b", fmt.Sprintf("Release %s", version), "-t", fmt.Sprintf("chore: Release %s from %s", version, branch)); err != nil {
 		return fmt.Errorf("create release PR %s -> %s: %w", branch, base, err)
 	}
 	return nil
+}
+
+func (w *Workflows) releasePRCount(ctx context.Context, branch, base, state string) (int, error) {
+	out, err := w.gh(ctx, "pr", "list", "--head", branch, "--base", base, "--state", state, "--json", "number", "--jq", "length")
+	if err != nil {
+		return 0, fmt.Errorf("check existing %s release PR %s -> %s: %w", state, branch, base, err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || count < 0 {
+		return 0, fmt.Errorf("check existing %s release PR %s -> %s: expected numeric count, got %q", state, branch, base, strings.TrimSpace(out))
+	}
+	return count, nil
 }
 func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version string) error {
 	if w.isDryRun() {
