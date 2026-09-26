@@ -308,3 +308,44 @@ func TestLocalFinishRejectsPreSchemaV4JournalBeforeRemoteMutation(t *testing.T) 
 		t.Fatal("source was deleted after old journal rejection")
 	}
 }
+
+func TestPublishFinishedAndDeleteRemoteRejectsCorruptGitFlowPlanAfterSourceDeletion(t *testing.T) {
+	ctx := context.Background()
+	for _, corrupt := range []string{"missing-develop", "wrong-desired"} {
+		t.Run(corrupt, func(t *testing.T) {
+			f := newAtomicFinishFixture(t, true)
+			if err := f.w.publishFinishedAndDeleteRemote(ctx, f.path, f.j, f.targets, f.tag); err != nil {
+				t.Fatalf("complete atomic publication: %v", err)
+			}
+			if got := f.remoteRef(t, "refs/heads/"+f.source); got != "" {
+				t.Fatalf("fixture source remains remote: %q", got)
+			}
+
+			bad := *f.j
+			bad.RemoteTargets = append([]finishRemoteTarget(nil), f.j.RemoteTargets...)
+			switch corrupt {
+			case "missing-develop":
+				bad.RemoteTargets = bad.RemoteTargets[:1]
+			case "wrong-desired":
+				bad.RemoteTargets[1].DesiredSHA = bad.RemoteTargets[1].BeforeSHA
+			}
+			if err := writeAtomic(f.path, &bad); err != nil {
+				t.Fatal(err)
+			}
+			journalBefore, err := os.ReadFile(f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.w.publishFinishedAndDeleteRemote(ctx, f.path, &bad, f.targets, f.tag); err == nil {
+				t.Fatalf("source-absent replay accepted %s plan corruption", corrupt)
+			}
+			journalAfter, err := os.ReadFile(f.path)
+			if err != nil || string(journalAfter) != string(journalBefore) {
+				t.Fatalf("corrupt replay advanced journal: err=%v before=%s after=%s", err, journalBefore, journalAfter)
+			}
+			if _, err := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); err != nil {
+				t.Fatalf("local source was removed after corrupt replay: %v", err)
+			}
+		})
+	}
+}

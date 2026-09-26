@@ -26,6 +26,12 @@ func (w *Workflows) publishFinishedAndDeleteRemote(ctx context.Context, path str
 			return err
 		}
 	}
+	// Validate the complete immutable plan before accepting either execution
+	// path. In particular, a missing source is not proof that a truncated or
+	// corrupted journal completed this workflow.
+	if err := w.validateFinishedRemotePlan(ctx, j, targets, tag); err != nil {
+		return err
+	}
 	remoteSource, exists, err := w.remoteBranchSHA(ctx, j.Source)
 	if err != nil {
 		return fmt.Errorf("verify finished source %s: %w", j.Source, err)
@@ -35,9 +41,6 @@ func (w *Workflows) publishFinishedAndDeleteRemote(ctx context.Context, path str
 	}
 	if remoteSource != j.SourceSHA {
 		return fmt.Errorf("finished source %s changed: expected %s, got %s", j.Source, j.SourceSHA, remoteSource)
-	}
-	if err := w.validateFinishedRemotePlan(ctx, j, targets, tag); err != nil {
-		return err
 	}
 	if err := w.verifyRemotePlanBeforePublish(ctx, j, tag); err != nil {
 		return err
