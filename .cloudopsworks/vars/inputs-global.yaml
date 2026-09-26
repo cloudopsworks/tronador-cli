@@ -5,7 +5,7 @@ organization_unit: "Tronador"
 environment_name: "tronador-cli"
 repository_owner: "cloudopsworks" # Required
 #
-## Default Go version is 1.25, uncomment to build with different version,
+## Default Go version is 1.26.5, uncomment to build with a different version,
 ## Dist is the OS distribution, arch is the architecture
 ## Image variant should be used for the specific version of OS image to run
 golang:
