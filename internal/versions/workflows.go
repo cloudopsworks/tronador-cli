@@ -131,7 +131,7 @@ func (w *Workflows) remoteParitySHA(ctx context.Context, branch string) (string,
 	if err := w.ensureSafeRef(branch); err != nil {
 		return "", err
 	}
-	local, e := w.git(ctx, "rev-parse", "--verify", branch+"^{commit}")
+	local, e := w.git(ctx, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
 	if e != nil {
 		return "", fmt.Errorf("local branch %s is required for parity verification: %w", branch, e)
 	}
@@ -177,7 +177,7 @@ func (w *Workflows) checkoutFetchedBase(ctx context.Context, b string) error {
 	if _, e := w.git(ctx, "pull", "--ff-only", w.remote, b); e != nil {
 		return e
 	}
-	local, e := w.git(ctx, "rev-parse", "--verify", b+"^{commit}")
+	local, e := w.git(ctx, "rev-parse", "--verify", "refs/heads/"+b+"^{commit}")
 	if e != nil {
 		return fmt.Errorf("resolve local base %s after synchronization: %w", b, e)
 	}

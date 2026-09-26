@@ -44,7 +44,7 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 	const tag = "v1.2.3-alpha.1+deploy-test"
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                                       "feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "abc\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "abc\n",
 		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                         "abc\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "abc\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
@@ -156,7 +156,7 @@ func TestTagPublishUsesExplicitTagRefspec(t *testing.T) {
 	const tag = "v1.2.3-alpha.1+deploy-test"
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                                       "feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "abc\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "abc\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "abc\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 		key("gitversion", "-showvariable", "SemVer"):                                 "1.2.3-alpha.1\n",
@@ -318,7 +318,7 @@ func TestFeatureFinishUsesWorkflowSpecificPullRequestBase(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
 				key("git", "branch", "--show-current"):                                       "feature/a\n",
-				key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "abc\n",
+				key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "abc\n",
 				key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "abc\trefs/heads/feature/a\n",
 				key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 			}}
@@ -731,6 +731,36 @@ func TestLocalFinishPublishesExactTagWhenBranchHasSameName(t *testing.T) {
 	}
 }
 
+func TestLocalBranchParityIgnoresSameNamedTag(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	gitTest(t, repo, "config", "core.warnAmbiguousRefs", "false")
+	branch := "hotfix/v0.2.0"
+	gitTest(t, repo, "checkout", "-b", branch)
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "published source")
+	gitTest(t, repo, "push", "-u", "origin", branch)
+	gitTest(t, repo, "tag", "-a", branch, "-m", "same named tag")
+	gitTest(t, repo, "push", "origin", "refs/tags/"+branch+":refs/tags/"+branch)
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "unpublished local advance")
+
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.RequireParity(ctx, branch); err == nil || !strings.Contains(err.Error(), "exactly published") {
+		t.Fatalf("named parity accepted tag-shadowed local branch: %v", err)
+	}
+	if err = w.HotfixFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "exactly published") {
+		t.Fatalf("local finish accepted unpublished tag-shadowed source: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, ".git", "tronador", "versions-journal.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("unpublished source wrote journal: %v", statErr)
+	}
+	if got := gitTest(t, repo, "log", "--format=%s", "main", "-1"); strings.Contains(got, "unpublished local advance") {
+		t.Fatalf("unpublished source was merged into main: %q", got)
+	}
+}
+
 func TestLocalFinishResumesRecordedTagAfterTargetAdvances(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -889,7 +919,7 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 	const tag = "v1.2.3-alpha.1+deploy-test"
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                                       "feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "source\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "source\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "source\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 		key("gitversion", "-showvariable", "SemVer"):                                 "1.2.3-alpha.1\n",
@@ -907,7 +937,7 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 
 func TestReleaseFinishGitflowCreatesPRsForMainAndDevelop(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/release/v1.2.3^{commit}"):                                                           "sha\n",
 		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "0\n",
@@ -929,7 +959,7 @@ func TestReleaseFinishGitflowCreatesPRsForMainAndDevelop(t *testing.T) {
 func TestPurgeRejectsUnmergedBranchBeforeCheckoutOrDelete(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "sha\n",
 		key("git", "branch", "--show-current"):                                       "main\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 	}, errs: map[string]error{key("git", "merge-base", "--is-ancestor", "feature/a", "refs/remotes/origin/main"): fmt.Errorf("not merged")}}
@@ -1271,7 +1301,7 @@ func TestPurgeDeletesMergedLocalOnlyBranchWithSafeDelete(t *testing.T) {
 func TestCheckoutBaseRejectsLocalAheadOfFetchedOriginBeforeCreate(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
-		key("git", "rev-parse", "--verify", "main^{commit}"):                         "local-ahead\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):              "local-ahead\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/main^{commit}"):     "origin-head\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
@@ -1294,7 +1324,7 @@ func TestCheckoutBaseRejectsLocalAheadOfFetchedOriginBeforeCreate(t *testing.T) 
 			checkout = i
 		case "git pull --ff-only origin main":
 			pull = i
-		case "git rev-parse --verify main^{commit}":
+		case "git rev-parse --verify refs/heads/main^{commit}":
 			local = i
 		case "git rev-parse --verify refs/remotes/origin/main^{commit}":
 			remote = i
@@ -1308,7 +1338,7 @@ func TestCheckoutBaseRejectsLocalAheadOfFetchedOriginBeforeCreate(t *testing.T) 
 func TestHotfixStartSynchronizesSelectedSupportBeforeDerivingVersion(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                                             "support/v1.2.0\n",
-		key("git", "rev-parse", "--verify", "support/v1.2.0^{commit}"):                     "support-head\n",
+		key("git", "rev-parse", "--verify", "refs/heads/support/v1.2.0^{commit}"):          "support-head\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"): "support-head\n",
 		key("gitversion", "-showvariable", "MajorMinorPatch"):                              "1.2.3\n",
 	}}
@@ -1380,7 +1410,7 @@ func TestHotfixStartUsesRemoteOnlySupportTrackingBase(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/support/"): "origin/support/v1.2.0\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"):      "support\n",
-		key("git", "rev-parse", "--verify", "support/v1.2.0^{commit}"):                          "support\n",
+		key("git", "rev-parse", "--verify", "refs/heads/support/v1.2.0^{commit}"):               "support\n",
 	}}
 	f.errs = map[string]error{key("git", "show-ref", "--verify", "--quiet", "refs/heads/support/v1.2.0"): fmt.Errorf("missing local support")}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
@@ -1425,7 +1455,7 @@ func TestHotfixLocalFinishUsesRemoteOnlySupportLine(t *testing.T) {
 
 func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/release/v1.2.3^{commit}"):                                                           "sha\n",
 		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "1\n",
@@ -1443,7 +1473,7 @@ func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) 
 
 func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                      "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/release/v1.2.3^{commit}"):                                                           "sha\n",
 		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                        "origin/main\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "0\n",
@@ -1463,7 +1493,7 @@ func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
 func TestPurgeRemoteDeleteUsesLeaseBeforeDeletingLocal(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "sha\n",
 		key("git", "branch", "--show-current"):                                       "main\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 	}}
@@ -1493,7 +1523,7 @@ func TestPurgeRetainsLocalBranchWhenLeaseRejectsConcurrentAdvance(t *testing.T) 
 	lease := "--force-with-lease=refs/heads/feature/a:sha"
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
-		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "sha\n",
 		key("git", "branch", "--show-current"):                                       "main\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 	}, errs: map[string]error{key("git", "push", lease, "origin", ":refs/heads/feature/a"): fmt.Errorf("stale info")}}
@@ -1540,7 +1570,7 @@ func TestFeatureStartRejectsUnpublishedLocalBaseAhead(t *testing.T) {
 func TestHotfixStartWithoutVersionUsesSynchronizedMainOutsideSupport(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                                   "feature/unrelated\n",
-		key("git", "rev-parse", "--verify", "main^{commit}"):                     "main-head\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):          "main-head\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/main^{commit}"): "main-head\n",
 		key("gitversion", "-showvariable", "MajorMinorPatch"):                    "1.2.3\n",
 	}}
