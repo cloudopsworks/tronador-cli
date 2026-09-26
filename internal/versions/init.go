@@ -453,19 +453,30 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if branch != "main" && branch != "master" {
-		return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out main or master first", branch)
+	primary := r.mainBranch
+	if primary != "" {
+		if !safeRef(primary) {
+			return false, fmt.Errorf("invalid configured main branch %q", primary)
+		}
+		if branch != primary {
+			return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out configured main branch %q first", branch, primary)
+		}
+	} else {
+		if branch != "main" && branch != "master" {
+			return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out main or master first", branch)
+		}
+		primary = branch
 	}
 	local, err := r.git(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		return false, err
 	}
-	remote, err := r.git(ctx, "rev-parse", "refs/remotes/origin/"+branch)
+	remote, err := r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
 	if err != nil {
-		return false, fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", branch, err)
+		return false, fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
 	}
 	if local != remote {
-		return false, fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", branch, branch)
+		return false, fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
 	}
 	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/heads/develop"); err == nil {
 		localDevelop, localErr := r.git(ctx, "rev-parse", "refs/heads/develop")
@@ -473,7 +484,7 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 			return false, localErr
 		}
 		if localDevelop != remote {
-			return false, fmt.Errorf("refusing to publish local develop: it is not equal to origin/%s", branch)
+			return false, fmt.Errorf("refusing to publish local develop: it is not equal to origin/%s", primary)
 		}
 		if _, err := r.git(ctx, "push", "--set-upstream", "origin", "develop"); err != nil {
 			return false, err
@@ -482,7 +493,7 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	} else if !isExitStatus(err, 1) {
 		return false, err
 	}
-	if _, err := r.git(ctx, "checkout", "-b", "develop", branch); err != nil {
+	if _, err := r.git(ctx, "checkout", "-b", "develop", primary); err != nil {
 		return false, err
 	}
 	if _, err := r.git(ctx, "push", "--set-upstream", "origin", "develop"); err != nil {
