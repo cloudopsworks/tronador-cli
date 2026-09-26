@@ -156,7 +156,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "checkout-main":
 			e = w.checkoutFetchedBase(ctx, target)
 		case "merge-main":
-			e = w.checkoutReleaseBranch(ctx, target)
+			e = w.checkoutFinishBranch(ctx, target)
 			if e == nil {
 				e = w.mergeContinue(ctx)
 			}
@@ -164,7 +164,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
 			}
 		case "merge-develop":
-			e = w.checkoutReleaseBranch(ctx, "develop")
+			e = w.checkoutFinishBranch(ctx, "develop")
 			if e == nil {
 				e = w.mergeContinue(ctx)
 			}
@@ -172,7 +172,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
 			}
 		case "tag":
-			e = w.checkoutReleaseBranch(ctx, target)
+			e = w.checkoutFinishBranch(ctx, target)
 			if e == nil {
 				e = w.recordFinishTagTarget(ctx, p, j)
 			}
@@ -180,7 +180,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), j.TagTargetSHA)
 			}
 		case "push-main":
-			e = w.checkoutReleaseBranch(ctx, target)
+			e = w.checkoutFinishBranch(ctx, target)
 			if e == nil {
 				_, e = w.git(ctx, "push", w.remote, target)
 			}
@@ -189,7 +189,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "checkout-develop":
 			e = w.checkoutFetchedBase(ctx, "develop")
 		case "push-develop":
-			e = w.checkoutReleaseBranch(ctx, "develop")
+			e = w.checkoutFinishBranch(ctx, "develop")
 			if e == nil {
 				_, e = w.git(ctx, "push", w.remote, "develop")
 			}
@@ -206,27 +206,6 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		}
 	}
 	return clearJournal(p)
-}
-
-func (w *Workflows) checkoutReleaseBranch(ctx context.Context, branch string) error {
-	current, err := w.Current(ctx)
-	if err != nil {
-		return err
-	}
-	if current == branch {
-		return nil
-	}
-	if _, err = w.git(ctx, "checkout", branch); err != nil {
-		return err
-	}
-	current, err = w.Current(ctx)
-	if err != nil {
-		return err
-	}
-	if current != branch {
-		return fmt.Errorf("expected current branch %s, got %s", branch, current)
-	}
-	return nil
 }
 
 func (w *Workflows) verifyReleaseFinished(ctx context.Context, target, sourceSHA, tag string) error {

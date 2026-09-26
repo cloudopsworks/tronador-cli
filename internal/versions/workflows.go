@@ -190,6 +190,30 @@ func (w *Workflows) checkoutFetchedBase(ctx context.Context, b string) error {
 	}
 	return nil
 }
+
+// checkoutFinishBranch reasserts the expected branch before a replayable
+// finish mutation. A journal can resume after the user has checked out another
+// branch, so relying on HEAD would direct a merge at the wrong target.
+func (w *Workflows) checkoutFinishBranch(ctx context.Context, branch string) error {
+	current, err := w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current == branch {
+		return nil
+	}
+	if _, err = w.git(ctx, "checkout", branch); err != nil {
+		return err
+	}
+	current, err = w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current != branch {
+		return fmt.Errorf("expected current branch %s, got %s", branch, current)
+	}
+	return nil
+}
 func branchValue(branch, prefix string) (string, bool) {
 	for _, p := range []string{prefix + "/", shortPrefix(prefix) + "/"} {
 		if strings.HasPrefix(branch, p) && len(branch) > len(p) {
