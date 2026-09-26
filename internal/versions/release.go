@@ -113,13 +113,6 @@ func (w *Workflows) ensureReleasePR(ctx context.Context, branch, base, version s
 	if open > 0 {
 		return nil
 	}
-	merged, err := w.releasePRCount(ctx, branch, base, "merged")
-	if err != nil {
-		return err
-	}
-	if merged > 0 {
-		return nil
-	}
 	if _, err = w.gh(ctx, "pr", "create", "--head", branch, "-B", base, "-b", fmt.Sprintf("Release %s", version), "-t", fmt.Sprintf("chore: Release %s from %s", version, branch)); err != nil {
 		return fmt.Errorf("create release PR %s -> %s: %w", branch, base, err)
 	}

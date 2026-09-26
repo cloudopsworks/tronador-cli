@@ -175,3 +175,33 @@ func TestReleaseFinishRemoteRechecksSourceParityAfterFetch(t *testing.T) {
 		t.Fatalf("ReleaseFinish made ancestry or PR decisions after stale source parity: %#v", r.calls)
 	}
 }
+
+func TestReleaseFinishRemoteCreatesPRForAdvancedSourceDespiteHistoricalMergedPR(t *testing.T) {
+	branch := "release/v1.2.3"
+	f := &fakeRunner{replies: map[string]string{
+		// S1 was merged historically, but the currently published release head
+		// is S2 and must be evaluated independently.
+		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):                                                "s2\n",
+		key("git", "ls-remote", "origin", "refs/heads/"+branch):                                                              "s2\trefs/heads/" + branch + "\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):                                                    "refs/remotes/origin/main\n",
+		key("gh", "pr", "list", "--head", branch, "--base", "main", "--state", "open", "--json", "number", "--jq", "length"): "0\n",
+		// A legacy implementation queried this and incorrectly treated the S1
+		// result as proof that S2 no longer needs a PR.
+		key("gh", "pr", "list", "--head", branch, "--base", "main", "--state", "merged", "--json", "number", "--jq", "length"): "1\n",
+	}, errs: map[string]error{
+		key("git", "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/origin/main"): exitStatusOne(t),
+	}}
+	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("gh", "pr", "create", "--head", branch, "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from "+branch) {
+		t.Fatalf("advanced source did not create main PR: %#v", f.calls)
+	}
+	if f.sawPrefix("gh", "pr", "list", "--head", branch, "--base", "main", "--state", "merged") {
+		t.Fatalf("historical merged PR was consulted for current source: %#v", f.calls)
+	}
+}

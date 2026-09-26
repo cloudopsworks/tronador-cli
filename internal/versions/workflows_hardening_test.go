@@ -1567,7 +1567,7 @@ func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) 
 	}
 }
 
-func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
+func TestReleaseFinishRetryCreatesPRsAfterHistoricalMergedMainPR(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "rev-parse", "--verify", "refs/heads/release/v1.2.3^{commit}"):                                                           "sha\n",
 		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                      "sha\trefs/heads/release/v1.2.3\n",
@@ -1584,8 +1584,11 @@ func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
 		t.Fatal(err)
 	}
-	if f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") || !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "develop", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") {
-		t.Fatalf("merged-main retry did not create only missing develop PR: %#v", f.calls)
+	if !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") || !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "develop", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") {
+		t.Fatalf("historical merged PR did not create PRs for current source: %#v", f.calls)
+	}
+	if f.sawPrefix("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "merged") {
+		t.Fatalf("historical merged PR was consulted for current source: %#v", f.calls)
 	}
 }
 
