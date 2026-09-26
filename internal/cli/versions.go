@@ -52,10 +52,9 @@ func init() {
 
 func newVersionsInitCommand() *cobra.Command {
 	command := &cobra.Command{
-		Use:           "init",
-		Short:         "Select and install a GitVersion branching workflow",
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:          "init",
+		Short:        "Select and install a GitVersion branching workflow",
+		SilenceUsage: true,
 		Long: `Validate all three .cloudopsworks/gitversion_<workflow>.yaml files,
 then atomically replace .cloudopsworks/gitversion.yaml with the selected one.
 
@@ -151,12 +150,11 @@ func newVersionsWorkflow(cmd *cobra.Command) (*versions.Workflows, error) {
 
 func versionsAction(use, short, long string, args cobra.PositionalArgs, action func(context.Context, *versions.Workflows, []string) error) *cobra.Command {
 	return &cobra.Command{
-		Use:           use,
-		Short:         short,
-		Long:          long,
-		Args:          args,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:          use,
+		Short:        short,
+		Long:         long,
+		Args:         args,
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
 				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would run versions %s\n", use)
@@ -282,10 +280,9 @@ the installed GitVersion configuration declares WayOfWork=gitflow.`,
 func newVersionsTagCommand() *cobra.Command {
 	var publish bool
 	command := &cobra.Command{
-		Use:           "tag [qualifier]",
-		Short:         "Create a GitVersion tag",
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:          "tag [qualifier]",
+		Short:        "Create a GitVersion tag",
+		SilenceUsage: true,
 		Long: `Create the tag calculated by GitVersion. On main it uses MajorMinorPatch;
 on another branch it uses SemVer. The optional qualifier is compatible with the
 legacy gitflow version tag target and becomes +deploy-<qualifier>. --publish

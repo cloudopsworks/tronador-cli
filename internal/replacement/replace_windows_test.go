@@ -72,20 +72,48 @@ func TestReplacePathUsesMoveFileForInitialCreation(t *testing.T) {
 }
 
 func TestReplacePathReportsZeroErrno(t *testing.T) {
-	directory := t.TempDir()
-	destination := filepath.Join(directory, "destination")
-	if err := os.WriteFile(destination, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	originalReplace := windowsReplaceFile
-	t.Cleanup(func() { windowsReplaceFile = originalReplace })
-	windowsReplaceFile = func(*uint16, *uint16) (uintptr, error) {
-		return 0, syscall.Errno(0)
-	}
+	for _, test := range []struct {
+		name      string
+		existing  bool
+		operation string
+		configure func()
+	}{
+		{
+			name:      "ReplaceFileW",
+			existing:  true,
+			operation: "ReplaceFileW",
+			configure: func() {
+				windowsReplaceFile = func(*uint16, *uint16) (uintptr, error) { return 0, syscall.Errno(0) }
+			},
+		},
+		{
+			name:      "MoveFileExW",
+			operation: "MoveFileExW",
+			configure: func() {
+				windowsMoveFile = func(*uint16, *uint16) (uintptr, error) { return 0, syscall.Errno(0) }
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			directory := t.TempDir()
+			destination := filepath.Join(directory, "destination")
+			if test.existing {
+				if err := os.WriteFile(destination, []byte("old"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			originalReplace, originalMove := windowsReplaceFile, windowsMoveFile
+			t.Cleanup(func() {
+				windowsReplaceFile = originalReplace
+				windowsMoveFile = originalMove
+			})
+			test.configure()
 
-	err := replacePath(filepath.Join(directory, "temporary"), destination)
-	if err == nil || !strings.Contains(err.Error(), "without an error code") {
-		t.Fatalf("replacePath error = %v, want meaningful zero-errno error", err)
+			err := replacePath(filepath.Join(directory, "temporary"), destination)
+			if err == nil || !strings.Contains(err.Error(), test.operation) || !strings.Contains(err.Error(), "without an error code") {
+				t.Fatalf("replacePath error = %v, want meaningful %s zero-errno error", err, test.operation)
+			}
+		})
 	}
 }
 

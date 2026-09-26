@@ -29,6 +29,28 @@ func TestVersionsCommandIsRootNamespaceWithCompatibilityAliases(t *testing.T) {
 	}
 }
 
+func TestVersionsGuardFailuresPrintOnceForAliases(t *testing.T) {
+	oldGitFlow, oldGitHubFlow := versionsGitFlow, versionsGitHubFlow
+	t.Cleanup(func() {
+		versionsGitFlow, versionsGitHubFlow = oldGitFlow, oldGitHubFlow
+		rootCmd.SetArgs(nil)
+	})
+
+	var stderr bytes.Buffer
+	rootCmd.SetArgs([]string{"gf", "init", "--gitflow", "--githubflow"})
+	rootCmd.SetErr(&stderr)
+	defer rootCmd.SetErr(nil)
+
+	_, err := rootCmd.ExecuteC()
+	if err == nil {
+		t.Fatal("versions init with conflicting workflow flags unexpectedly succeeded")
+	}
+	const want = "only one of --gitflow, --githubflow, --trunkbased, or --trunk may be used"
+	if got := strings.Count(stderr.String(), want); got != 1 {
+		t.Fatalf("stderr mentions guard failure %d times; want once:\n%s", got, stderr.String())
+	}
+}
+
 func TestVersionsWayOfWorkAcceptsTrunkAliasAndRejectsMultipleFlags(t *testing.T) {
 	oldGitFlow, oldGitHubFlow, oldTrunkBased, oldTrunk := versionsGitFlow, versionsGitHubFlow, versionsTrunkBased, versionsTrunk
 	t.Cleanup(func() {

@@ -62,7 +62,7 @@ func replacePath(source, destination string) error {
 	if errors.Is(statErr, os.ErrNotExist) {
 		result, callErr := windowsMoveFile(sourceUTF16, destinationUTF16)
 		if result == 0 {
-			return fmt.Errorf("create destination with MoveFileExW: %w", callErr)
+			return fmt.Errorf("create destination with MoveFileExW: %w", windowsCallError(callErr))
 		}
 		return nil
 	}
@@ -71,7 +71,7 @@ func replacePath(source, destination string) error {
 	}
 	result, callErr := windowsReplaceFile(destinationUTF16, sourceUTF16)
 	if result == 0 {
-		return fmt.Errorf("replace destination with ReplaceFileW: %w", callErr)
+		return fmt.Errorf("replace destination with ReplaceFileW: %w", windowsCallError(callErr))
 	}
 	return nil
 }
