@@ -114,7 +114,8 @@ func TestPurgeRevalidatesTargetsAfterCheckoutRefresh(t *testing.T) {
 					t.Fatalf("release did not revalidate refreshed main before rejecting develop: %#v", r.calls)
 				}
 			}
-			if r.sawPrefix("git", "push", "--force-with-lease") || r.sawPrefix("git", "branch", "-d") {
+			remoteDelete := []string{"git", "push", "--force-with-lease=refs/heads/" + tc.branch + ":source-sha", "origin", ":refs/heads/" + tc.branch}
+			if r.sawPrefix(remoteDelete...) || r.sawPrefix("git", "branch", "-d") {
 				t.Fatalf("purge deleted after target rewrite: %#v", r.calls)
 			}
 		})
