@@ -123,13 +123,10 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if err != nil {
 		return err
 	}
-	// Test against every freshly fetched remote base before changing branches or
-	// deleting either copy. GitFlow releases must be integrated into both main
-	// and develop; all other workflows retain their single-base behavior.
-	for _, base := range bases {
-		if _, err = w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
-			return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
-		}
+	// Prove merge safety before checking out of the source branch. This keeps an
+	// unmerged branch checked out instead of moving the user to a base branch.
+	if err = w.verifyPurgeBases(ctx, branch, bases); err != nil {
+		return err
 	}
 	current, err := w.Current(ctx)
 	if err != nil {
@@ -140,6 +137,12 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 			return err
 		}
 	}
+	// checkoutBase fetches and pulls. Re-prove every target after that network
+	// boundary and immediately before deletion, otherwise a rewritten target can
+	// invalidate the earlier ancestry proof while the source lease still passes.
+	if err = w.verifyPurgeBases(ctx, branch, bases); err != nil {
+		return err
+	}
 	if len(remoteFields) > 0 {
 		if err = w.deleteRemoteBranch(ctx, branch, remoteSHA); err != nil {
 			return err
@@ -149,6 +152,17 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 		_, err = w.git(ctx, "branch", "-d", branch)
 	}
 	return err
+}
+
+func (w *Workflows) verifyPurgeBases(ctx context.Context, branch string, bases []string) error {
+	// Test every required freshly fetched remote base. GitFlow releases require
+	// both main and develop; the other workflows retain their single base.
+	for _, base := range bases {
+		if _, err := w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
+			return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
+		}
+	}
+	return nil
 }
 
 func (w *Workflows) purgeBases(ctx context.Context, branch string) ([]string, error) {
