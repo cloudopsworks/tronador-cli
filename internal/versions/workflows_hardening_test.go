@@ -149,7 +149,7 @@ func TestHotfixLocalFinishResumesAfterConflictAndRejectsOtherWorkflowJournal(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = w.HotfixFinish(ctx, "0.1.1", true); err == nil || !strings.Contains(err.Error(), "merge") {
+	if err = w.HotfixFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "merge") {
 		t.Fatalf("first local finish error = %v, want merge conflict", err)
 	}
 	if err = w.ReleaseFinish(ctx, "0.2.0", true); err == nil || !strings.Contains(err.Error(), "unfinished hotfix-finish workflow") {
@@ -158,7 +158,7 @@ func TestHotfixLocalFinishResumesAfterConflictAndRejectsOtherWorkflowJournal(t *
 
 	writeFile(t, filepath.Join(repo, "conflict.txt"), "resolved\n")
 	gitTest(t, repo, "add", "conflict.txt")
-	if err = w.HotfixFinish(ctx, "0.1.1", true); err != nil {
+	if err = w.HotfixFinish(ctx, "", true); err != nil {
 		t.Fatalf("resumed local finish: %v", err)
 	}
 	if got := gitTest(t, repo, "show", "main:conflict.txt"); got != "resolved\n" {
@@ -202,12 +202,12 @@ func TestReleaseLocalFinishResumesAfterConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = w.ReleaseFinish(ctx, "0.2.0", true); err == nil || !strings.Contains(err.Error(), "merge") {
+	if err = w.ReleaseFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "merge") {
 		t.Fatalf("first local finish error = %v, want merge conflict", err)
 	}
 	writeFile(t, filepath.Join(repo, "conflict.txt"), "resolved\n")
 	gitTest(t, repo, "add", "conflict.txt")
-	if err = w.ReleaseFinish(ctx, "0.2.0", true); err != nil {
+	if err = w.ReleaseFinish(ctx, "", true); err != nil {
 		t.Fatalf("resumed local release finish: %v", err)
 	}
 	if got := gitTest(t, repo, "branch", "--show-current"); got != "develop\n" {

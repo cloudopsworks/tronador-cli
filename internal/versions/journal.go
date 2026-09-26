@@ -50,6 +50,51 @@ func (w *Workflows) readJournal(ctx context.Context) (*journal, string, error) {
 	}
 	return &j, p, nil
 }
+
+// resumeLocalFinishName resolves a persisted local-finish breadcrumb before
+// looking at HEAD. A failed merge leaves HEAD on the target branch, so current
+// branch inference cannot recover the source name. The journal remains the
+// authoritative source only when it belongs to this exact worktree/workflow.
+func (w *Workflows) resumeLocalFinishName(ctx context.Context, operation, prefix string) (string, bool, error) {
+	j, _, err := w.readJournal(ctx)
+	if err != nil || j == nil {
+		return "", j != nil, err
+	}
+	if j.Version != journalSchemaVersion || j.WayOfWork != w.wow || j.Operation != operation || j.SourceSHA == "" || !safeRef(j.Source) || !safeRef(j.Target) || !reflect.DeepEqual(j.Steps, w.localFinishSteps(operation)) || j.Done < 0 || j.Done > len(j.Steps) {
+		return "", true, fmt.Errorf("unfinished workflow journal does not match the requested %s finish; resolve it before continuing", prefix)
+	}
+	worktree, err := w.journalWorktree(ctx)
+	if err != nil {
+		return "", true, err
+	}
+	repository, err := w.journalRepository(ctx)
+	if err != nil {
+		return "", true, err
+	}
+	if j.Worktree != worktree || j.Repository != repository {
+		return "", true, fmt.Errorf("unfinished workflow journal does not belong to this repository/worktree")
+	}
+	name, ok := branchValue(j.Source, prefix)
+	if !ok {
+		return "", true, fmt.Errorf("unfinished workflow journal source %q is not a %s branch", j.Source, prefix)
+	}
+	return name, true, nil
+}
+
+func (w *Workflows) localFinishSteps(operation string) []string {
+	switch operation {
+	case "hotfix-finish":
+		return []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-remote", "delete-local"}
+	case "release-finish":
+		steps := []string{"checkout-main", "merge-main", "tag", "push-main", "push-tag"}
+		if w.hasDevelop() {
+			steps = append(steps, "checkout-develop", "merge-develop", "push-develop")
+		}
+		return append(steps, "delete-remote", "delete-local")
+	default:
+		return nil
+	}
+}
 func writeAtomic(path string, v *journal) error {
 	b, e := json.MarshalIndent(v, "", "  ")
 	if e != nil {

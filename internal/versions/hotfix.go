@@ -100,6 +100,13 @@ func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) HotfixFinish(ctx context.Context, name string, local bool) error {
+	if local && name == "" {
+		if resumed, found, err := w.resumeLocalFinishName(ctx, "hotfix-finish", "hotfix"); err != nil {
+			return err
+		} else if found {
+			name = resumed
+		}
+	}
 	n, e := w.hotfixName(ctx, name)
 	if e != nil {
 		return e
