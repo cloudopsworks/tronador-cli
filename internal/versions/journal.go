@@ -280,6 +280,13 @@ func (w *Workflows) recordFinishTagTarget(ctx context.Context, path string, j *j
 }
 
 func (w *Workflows) validateJournalTagTarget(ctx context.Context, j *journal) error {
+	canonical, err := w.git(ctx, "rev-parse", "--verify", j.TagTargetSHA+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve journaled tag target %q: %w", j.TagTargetSHA, err)
+	}
+	if strings.TrimSpace(canonical) != j.TagTargetSHA {
+		return fmt.Errorf("journaled tag target %q must be a canonical commit object ID", j.TagTargetSHA)
+	}
 	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.SourceSHA, j.TagTargetSHA); err != nil {
 		return fmt.Errorf("journaled tag target does not contain source %s: %w", j.Source, err)
 	}

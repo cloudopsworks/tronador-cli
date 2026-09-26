@@ -543,53 +543,62 @@ func TestLocalFinishRejectsCorruptRecordedTagTargetBeforeMutation(t *testing.T) 
 		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
 		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
 	} {
-		for _, tagPresent := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/tag-present-%t", tc.name, tagPresent), func(t *testing.T) {
-				_, repo := setupWorkflowRemote(t, false)
-				baseSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
-				branch := tc.prefix + "/v0.2.0"
-				gitTest(t, repo, "checkout", "-b", branch)
-				gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
-				gitTest(t, repo, "push", "-u", "origin", branch)
-				sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
-				gitTest(t, repo, "checkout", "main")
-				gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
-				mainBefore := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
-				if tagPresent {
-					gitTest(t, repo, "tag", "-a", "v0.2.0", baseSHA, "-m", "corrupt target")
-				}
+		for _, targetKind := range []string{"wrong-sha", "symbolic", "abbreviated"} {
+			for _, tagPresent := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/tag-present-%t", tc.name, targetKind, tagPresent), func(t *testing.T) {
+					_, repo := setupWorkflowRemote(t, false)
+					baseSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+					branch := tc.prefix + "/v0.2.0"
+					gitTest(t, repo, "checkout", "-b", branch)
+					gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
+					gitTest(t, repo, "push", "-u", "origin", branch)
+					sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+					gitTest(t, repo, "checkout", "main")
+					gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
+					mainBefore := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+					if tagPresent {
+						gitTest(t, repo, "tag", "-a", "v0.2.0", baseSHA, "-m", "corrupt target")
+					}
 
-				w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				steps := w.localFinishSteps(tc.operation)
-				j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
-				if err != nil {
-					t.Fatal(err)
-				}
-				boundary, err := finishTagBoundary(steps)
-				if err != nil {
-					t.Fatal(err)
-				}
-				j.Done, j.TagTargetSHA = boundary, baseSHA
-				if err = writeAtomic(path, j); err != nil {
-					t.Fatal(err)
-				}
+					w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					steps := w.localFinishSteps(tc.operation)
+					j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					boundary, err := finishTagBoundary(steps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					corruptTarget := baseSHA
+					switch targetKind {
+					case "symbolic":
+						corruptTarget = "main"
+					case "abbreviated":
+						corruptTarget = baseSHA[:12]
+					}
+					j.Done, j.TagTargetSHA = boundary, corruptTarget
+					if err = writeAtomic(path, j); err != nil {
+						t.Fatal(err)
+					}
 
-				if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "journaled tag target does not contain source") {
-					t.Fatalf("corrupt tag target was accepted: %v", err)
-				}
-				if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main")); got != mainBefore {
-					t.Fatalf("target changed after corrupt journal rejection: got %s, want %s", got, mainBefore)
-				}
-				if !tagPresent && gitTest(t, repo, "tag", "-l", "v0.2.0") != "" {
-					t.Fatal("tag was created from corrupt journal")
-				}
-				if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
-					t.Fatalf("source was deleted after corrupt journal rejection: %q", got)
-				}
-			})
+					if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "journaled tag target") {
+						t.Fatalf("corrupt tag target was accepted: %v", err)
+					}
+					if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main")); got != mainBefore {
+						t.Fatalf("target changed after corrupt journal rejection: got %s, want %s", got, mainBefore)
+					}
+					if !tagPresent && gitTest(t, repo, "tag", "-l", "v0.2.0") != "" {
+						t.Fatal("tag was created from corrupt journal")
+					}
+					if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+						t.Fatalf("source was deleted after corrupt journal rejection: %q", got)
+					}
+				})
+			}
 		}
 	}
 }
