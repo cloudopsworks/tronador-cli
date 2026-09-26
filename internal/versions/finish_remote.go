@@ -18,6 +18,9 @@ func (w *Workflows) publishFinishedAndDeleteRemote(ctx context.Context, path str
 	if err := w.ensureSafeRef(j.Source); err != nil {
 		return err
 	}
+	if err := w.validateJournalSourceIdentity(ctx, j); err != nil {
+		return err
+	}
 	if err := w.ensureSafeRef(tag); err != nil {
 		return err
 	}

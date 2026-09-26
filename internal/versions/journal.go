@@ -76,6 +76,9 @@ func (w *Workflows) resumeLocalFinishName(ctx context.Context, operation, prefix
 	if j.Version != journalSchemaVersion || j.WayOfWork != w.wow || j.Operation != operation || j.SourceSHA == "" || !safeRef(j.Source) || !safeRef(j.Target) || !reflect.DeepEqual(j.Steps, w.localFinishSteps(operation)) || j.Done < 0 || j.Done > len(j.Steps) {
 		return "", true, fmt.Errorf("unfinished workflow journal does not match the requested %s finish; resolve it before continuing", prefix)
 	}
+	if err := w.validateJournalSourceIdentity(ctx, j); err != nil {
+		return "", true, err
+	}
 	worktree, err := w.journalWorktree(ctx)
 	if err != nil {
 		return "", true, err
@@ -171,6 +174,9 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 // or be proven absent: a crash after the server accepts deletion but before the
 // journal advances must remain restartable, and no target mutation remains.
 func (w *Workflows) revalidateJournalSource(ctx context.Context, j *journal) error {
+	if err := w.validateJournalSourceIdentity(ctx, j); err != nil {
+		return err
+	}
 	deleteStep, err := journalStepBoundary(j.Steps, "publish-and-delete-remote")
 	if err != nil {
 		return err
@@ -287,6 +293,21 @@ func (w *Workflows) recordFinishTagTarget(ctx context.Context, path string, j *j
 	}
 	if err := writeAtomic(path, j); err != nil {
 		return fmt.Errorf("record finish tag target: %w", err)
+	}
+	return nil
+}
+
+// validateJournalSourceIdentity rejects journal source identities that Git can
+// reinterpret. A journal may outlive branch deletion, so the persisted source
+// must be the canonical object ID of a local commit before any replay can
+// merge, publish, or clean up refs.
+func (w *Workflows) validateJournalSourceIdentity(ctx context.Context, j *journal) error {
+	canonical, err := w.git(ctx, "rev-parse", "--verify", j.SourceSHA+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve journaled source %q: %w", j.SourceSHA, err)
+	}
+	if strings.TrimSpace(canonical) != j.SourceSHA {
+		return fmt.Errorf("journaled source %q must be a canonical commit object ID", j.SourceSHA)
 	}
 	return nil
 }
@@ -416,12 +437,18 @@ func (w *Workflows) startJournal(ctx context.Context, op, source, target, source
 		if j.Version != journalSchemaVersion || j.WayOfWork != w.wow || j.Repository != repository || j.Worktree != worktree || j.SourceSHA == "" || !reflect.DeepEqual(j.Steps, steps) || j.Done < 0 || j.Done > len(j.Steps) {
 			return nil, "", fmt.Errorf("unfinished workflow journal does not match this repository, workflow, or expected step plan; resolve it before continuing")
 		}
+		if err := w.validateJournalSourceIdentity(ctx, j); err != nil {
+			return nil, "", err
+		}
 		return j, p, nil
 	}
 	if sourceSHA == "" {
 		return nil, "", fmt.Errorf("cannot create finish journal without exact published source SHA")
 	}
 	j = &journal{Version: journalSchemaVersion, WayOfWork: w.wow, Repository: repository, Worktree: worktree, Operation: op, Source: source, SourceSHA: sourceSHA, Target: target, Steps: append([]string(nil), steps...), Created: time.Now().UTC()}
+	if e = w.validateJournalSourceIdentity(ctx, j); e != nil {
+		return nil, "", e
+	}
 	if e = writeAtomic(p, j); e != nil {
 		return nil, "", e
 	}

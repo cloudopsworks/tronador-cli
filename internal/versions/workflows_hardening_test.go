@@ -1686,3 +1686,67 @@ func TestHotfixStartWithoutVersionUsesSynchronizedMainOutsideSupport(t *testing.
 		t.Fatalf("hotfix did not use main outside support: %#v", f.calls)
 	}
 }
+
+func TestLocalFinishRejectsNonCanonicalJournalSourceBeforeMutation(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, prefix string
+		finish                  func(*Workflows) error
+	}{
+		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
+		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
+	} {
+		for _, sourceKind := range []string{"symbolic", "abbreviated", "corrupt"} {
+			t.Run(tc.name+"/"+sourceKind, func(t *testing.T) {
+				_, repo := setupWorkflowRemote(t, false)
+				branch := tc.prefix + "/v0.2.0"
+				gitTest(t, repo, "checkout", "-b", branch)
+				gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
+				gitTest(t, repo, "push", "-u", "origin", branch)
+				sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+				gitTest(t, repo, "checkout", "--no-guess", "main")
+
+				w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, w.localFinishSteps(tc.operation))
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch sourceKind {
+				case "symbolic":
+					j.SourceSHA = "main"
+				case "abbreviated":
+					j.SourceSHA = sourceSHA[:12]
+				case "corrupt":
+					j.SourceSHA = "not-a-commit"
+				}
+				if err = writeAtomic(path, j); err != nil {
+					t.Fatal(err)
+				}
+				journalBefore, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mainBefore := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+				if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "journaled source") {
+					t.Fatalf("non-canonical source identity was accepted: %v", err)
+				}
+				if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main")); got != mainBefore {
+					t.Fatalf("target changed after source identity rejection: got %s, want %s", got, mainBefore)
+				}
+				if got := gitTest(t, repo, "tag", "-l", "v0.2.0"); got != "" {
+					t.Fatalf("tag created after source identity rejection: %q", got)
+				}
+				if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+					t.Fatalf("source was deleted after source identity rejection: %q", got)
+				}
+				journalAfter, readErr := os.ReadFile(path)
+				if readErr != nil || string(journalAfter) != string(journalBefore) {
+					t.Fatalf("journal changed after source identity rejection: read=%v before=%s after=%s", readErr, journalBefore, journalAfter)
+				}
+			})
+		}
+	}
+}

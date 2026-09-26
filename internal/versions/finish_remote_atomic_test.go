@@ -234,6 +234,7 @@ func TestPublishFinishedAndDeleteRemoteUsesOneAtomicPushWithoutPrepublication(t 
 	)
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/hotfix/v1.2.3"):                          source + "\trefs/heads/hotfix/v1.2.3\n",
+		key("git", "rev-parse", "--verify", source+"^{commit}"):                                source + "\n",
 		key("git", "rev-parse", "--verify", tagObject+"^{commit}"):                             tagTarget + "\n",
 		key("git", "rev-parse", "--verify", before+"^{commit}"):                                before + "\n",
 		key("git", "rev-parse", "--verify", desired+"^{commit}"):                               desired + "\n",
@@ -450,6 +451,51 @@ func TestReleaseFinishRejectsCorruptPersistedGitFlowReplayPlanWithoutCleanup(t *
 			for ref, want := range refsBefore {
 				if got := f.remoteRef(t, ref); got != want {
 					t.Fatalf("remote %s changed after corrupt replay: got %q want %q", ref, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestReleaseFinishRejectsNonCanonicalSourceIdentityAfterAcceptedAtomicTransaction(t *testing.T) {
+	ctx := context.Background()
+	for _, sourceKind := range []string{"symbolic", "abbreviated", "corrupt"} {
+		t.Run(sourceKind, func(t *testing.T) {
+			f := newGitFlowReleaseReplayFixture(t)
+			bad := *f.j
+			switch sourceKind {
+			case "symbolic":
+				bad.SourceSHA = "main"
+			case "abbreviated":
+				bad.SourceSHA = f.j.SourceSHA[:12]
+			case "corrupt":
+				bad.SourceSHA = "not-a-commit"
+			}
+			if err := writeAtomic(f.path, &bad); err != nil {
+				t.Fatal(err)
+			}
+			journalBefore, err := os.ReadFile(f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refsBefore := map[string]string{
+				"refs/heads/main":    f.remoteRef(t, "refs/heads/main"),
+				"refs/heads/develop": f.remoteRef(t, "refs/heads/develop"),
+				"refs/tags/" + f.tag: f.remoteRef(t, "refs/tags/"+f.tag),
+			}
+			if err = f.w.ReleaseFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "journaled source") {
+				t.Fatalf("non-canonical source identity was accepted: %v", err)
+			}
+			journalAfter, readErr := os.ReadFile(f.path)
+			if readErr != nil || string(journalAfter) != string(journalBefore) {
+				t.Fatalf("journal changed after source identity rejection: read=%v before=%s after=%s", readErr, journalBefore, journalAfter)
+			}
+			if _, statErr := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); statErr != nil {
+				t.Fatalf("local release source removed after source identity rejection: %v", statErr)
+			}
+			for ref, want := range refsBefore {
+				if got := f.remoteRef(t, ref); got != want {
+					t.Fatalf("remote %s changed after source identity rejection: got %q want %q", ref, got, want)
 				}
 			}
 		})
