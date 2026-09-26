@@ -1,0 +1,221 @@
+package versions
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+func (w *Workflows) CurrentVersion(ctx context.Context) (string, error) {
+	o, e := w.run.Run(ctx, "gitversion", "-showvariable", "MajorMinorPatch")
+	if e != nil {
+		return "", e
+	}
+	v := normalizeVersion(strings.TrimSpace(o))
+	if !semverRE.MatchString(v) {
+		return "", fmt.Errorf("gitversion returned invalid MajorMinorPatch %q", v)
+	}
+	return v, nil
+}
+func (w *Workflows) HotfixStart(ctx context.Context, version string) error {
+	// Fetch exactly once before choosing a support line. Version calculation must
+	// happen only after its chosen base is checked out and proven equal to origin.
+	if _, err := w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
+		return err
+	}
+	base, err := w.hotfixStartBase(ctx, version)
+	if err != nil {
+		return err
+	}
+	if err = w.checkoutFetchedBase(ctx, base); err != nil {
+		return err
+	}
+	if version == "" {
+		v, e := w.CurrentVersion(ctx)
+		if e != nil {
+			return e
+		}
+		version, e = bump(v, "patch")
+		if e != nil {
+			return e
+		}
+	}
+	version = normalizeVersion(version)
+	if err = w.ensureSafeRef(version); err != nil {
+		return err
+	}
+	_, err = w.git(ctx, "checkout", "-b", "hotfix/"+version, base)
+	return err
+}
+
+func (w *Workflows) hotfixStartBase(ctx context.Context, version string) (string, error) {
+	main, err := w.Main(ctx)
+	if err != nil || !w.hasDevelop() {
+		return main, err
+	}
+	if version != "" {
+		return w.hotfixTarget(ctx, normalizeVersion(version))
+	}
+	// Without an explicit version, the only unambiguous support-line signal is
+	// the current support branch. Otherwise calculate the next patch from main.
+	current, err := w.Current(ctx)
+	if err != nil {
+		return "", err
+	}
+	if _, _, support := supportLine(current); support {
+		return current, nil
+	}
+	return main, nil
+}
+func (w *Workflows) hotfixName(ctx context.Context, name string) (string, error) {
+	if name != "" {
+		name = normalizeVersion(name)
+		if e := w.ensureSafeRef(name); e != nil {
+			return "", e
+		}
+		return name, nil
+	}
+	b, e := w.Current(ctx)
+	if e != nil {
+		return "", e
+	}
+	n, ok := branchValue(b, "hotfix")
+	if !ok {
+		return "", fmt.Errorf("hotfix version is required unless current branch is hotfix/*")
+	}
+	return n, nil
+}
+func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
+	n, e := w.hotfixName(ctx, name)
+	if e != nil {
+		return e
+	}
+	b := "hotfix/" + n
+	if _, e = w.git(ctx, "checkout", b); e != nil {
+		return e
+	}
+	_, e = w.git(ctx, "push", "--set-upstream", w.remote, b)
+	return e
+}
+func (w *Workflows) HotfixFinish(ctx context.Context, name string, local bool) error {
+	n, e := w.hotfixName(ctx, name)
+	if e != nil {
+		return e
+	}
+	branch := "hotfix/" + n
+	if !local {
+		if e = w.RequireParity(ctx, branch); e != nil {
+			return e
+		}
+		main, e := w.Main(ctx)
+		if e != nil {
+			return e
+		}
+		_, e = w.gh(ctx, "pr", "create", "--head", branch, "-B", main, "-b", fmt.Sprintf("Hotfix Release %s, will merge into %s", branch, main), "-t", fmt.Sprintf("chore: Hotfix Release from %s", branch))
+		return e
+	}
+	return w.finishHotfixLocal(ctx, branch, n)
+}
+func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version string) error {
+	if w.isDryRun() {
+		return nil
+	}
+	unlock, e := w.acquireJournalLock(ctx)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	target, e := w.hotfixTarget(ctx, version)
+	if e != nil {
+		return e
+	}
+	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-local", "delete-remote"})
+	if e != nil {
+		return e
+	}
+	for j.Done < len(j.Steps) {
+		s := j.Steps[j.Done]
+		if s == "delete-local" {
+			if err := w.verifyFinished(ctx, target, branch, version); err != nil {
+				return err
+			}
+		}
+		switch s {
+		case "checkout-target":
+			e = w.checkoutBase(ctx, target)
+		case "merge":
+			e = w.mergeContinue(ctx)
+			if e == nil {
+				_, e = w.git(ctx, "merge", "--no-ff", branch, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
+			}
+		case "tag":
+			e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), target)
+		case "push-target":
+			_, e = w.git(ctx, "push", w.remote, target)
+		case "push-tag":
+			_, e = w.git(ctx, "push", w.remote, version)
+		case "delete-local":
+			e = w.deleteLocalBranch(ctx, branch)
+		case "delete-remote":
+			e = w.deleteRemoteBranch(ctx, branch)
+		}
+		if e != nil {
+			return fmt.Errorf("%s: %w", s, e)
+		}
+		if e = w.advanceJournal(p, j); e != nil {
+			return e
+		}
+	}
+	return clearJournal(p)
+}
+
+// hotfixTarget preserves the legacy support-branch behavior: if a support
+// branch exists for the hotfix major/minor line, it receives the fix instead
+// of main. GitHub Flow and trunk-based repositories always use main.
+func (w *Workflows) hotfixTarget(ctx context.Context, version string) (string, error) {
+	main, err := w.Main(ctx)
+	if err != nil || !w.hasDevelop() {
+		return main, err
+	}
+	m := semverRE.FindStringSubmatch(version)
+	if m == nil {
+		return "", fmt.Errorf("invalid hotfix version %q", version)
+	}
+	out, err := w.git(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads/support/")
+	if err != nil {
+		return "", err
+	}
+	var matches []string
+	for _, candidate := range strings.Fields(out) {
+		major, minor, ok := supportLine(candidate)
+		if ok && major == m[1] && minor == m[2] {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) == 0 {
+		return main, nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("ambiguous support branches for hotfix %s: %s", version, strings.Join(matches, ", "))
+	}
+	return matches[0], nil
+}
+
+var supportBranchRE = regexp.MustCompile(`^support/v(\d+)\.(\d+)(?:\.\d+)?(?:[-+][^/]+)?$`)
+
+func supportLine(branch string) (major, minor string, ok bool) {
+	m := supportBranchRE.FindStringSubmatch(branch)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
+func (w *Workflows) HotfixPurge(ctx context.Context, name string) error {
+	n, e := w.hotfixName(ctx, name)
+	if e != nil {
+		return e
+	}
+	return w.purge(ctx, "hotfix/"+n)
+}
