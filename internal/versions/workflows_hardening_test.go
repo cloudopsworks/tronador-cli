@@ -1034,6 +1034,9 @@ func TestReleaseFinishGitflowCreatesPRsForMainAndDevelop(t *testing.T) {
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "merged", "--json", "number", "--jq", "length"):    "0\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
+	}, errs: map[string]error{
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/main"):    exitStatusOne(t),
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/develop"): exitStatusOne(t),
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
@@ -1551,6 +1554,9 @@ func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) 
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):      "1\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
+	}, errs: map[string]error{
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/main"):    exitStatusOne(t),
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/develop"): exitStatusOne(t),
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
@@ -1570,6 +1576,9 @@ func TestReleaseFinishRetrySkipsMergedMainPRAndCreatesDevelopPR(t *testing.T) {
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "merged", "--json", "number", "--jq", "length"):    "1\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"):   "0\n",
 		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "merged", "--json", "number", "--jq", "length"): "0\n",
+	}, errs: map[string]error{
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/main"):    exitStatusOne(t),
+		key("git", "merge-base", "--is-ancestor", "refs/heads/release/v1.2.3", "refs/remotes/origin/develop"): exitStatusOne(t),
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {

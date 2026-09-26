@@ -77,6 +77,11 @@ func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) 
 		if e = w.RequireParity(ctx, branch); e != nil {
 			return e
 		}
+		// PR decisions must use current target refs. A stale tracking branch can
+		// otherwise create an empty PR for a release already merged remotely.
+		if _, e = w.git(ctx, "fetch", w.remote, "--prune"); e != nil {
+			return e
+		}
 		main, e := w.Main(ctx)
 		if e != nil {
 			return e
@@ -93,6 +98,13 @@ func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) 
 }
 
 func (w *Workflows) ensureReleasePR(ctx context.Context, branch, base, version string) error {
+	contained, err := w.releaseTargetContains(ctx, branch, base)
+	if err != nil {
+		return err
+	}
+	if contained {
+		return nil
+	}
 	open, err := w.releasePRCount(ctx, branch, base, "open")
 	if err != nil {
 		return err
@@ -111,6 +123,20 @@ func (w *Workflows) ensureReleasePR(ctx context.Context, branch, base, version s
 		return fmt.Errorf("create release PR %s -> %s: %w", branch, base, err)
 	}
 	return nil
+}
+
+// releaseTargetContains proves whether the exact local release source is in a
+// freshly fetched remote target. Exit status 1 is Git's documented "not an
+// ancestor" result; every other failure is unsafe to treat as absence.
+func (w *Workflows) releaseTargetContains(ctx context.Context, branch, base string) (bool, error) {
+	_, err := w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base)
+	if err == nil {
+		return true, nil
+	}
+	if isExitStatus(err, 1) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check whether release %s is merged into %s: %w", branch, base, err)
 }
 
 func (w *Workflows) releasePRCount(ctx context.Context, branch, base, state string) (int, error) {

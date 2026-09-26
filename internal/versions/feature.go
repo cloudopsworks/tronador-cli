@@ -119,21 +119,24 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if !localExists && len(remoteFields) == 0 {
 		return nil // already purged
 	}
-	base, err := w.purgeBase(ctx, branch)
+	bases, err := w.purgeBases(ctx, branch)
 	if err != nil {
 		return err
 	}
-	// Test against the freshly fetched remote base, rather than a possibly stale
-	// local tracking branch. This rejects unmerged source work.
-	if _, err = w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
-		return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
+	// Test against every freshly fetched remote base before changing branches or
+	// deleting either copy. GitFlow releases must be integrated into both main
+	// and develop; all other workflows retain their single-base behavior.
+	for _, base := range bases {
+		if _, err = w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
+			return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
+		}
 	}
 	current, err := w.Current(ctx)
 	if err != nil {
 		return err
 	}
 	if current == branch {
-		if err = w.checkoutBase(ctx, base); err != nil {
+		if err = w.checkoutBase(ctx, bases[0]); err != nil {
 			return err
 		}
 	}
@@ -148,8 +151,26 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	return err
 }
 
+func (w *Workflows) purgeBases(ctx context.Context, branch string) ([]string, error) {
+	if w.hasDevelop() && strings.HasPrefix(branch, "release/") {
+		main, err := w.Main(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if main == "develop" {
+			return []string{main}, nil
+		}
+		return []string{main, "develop"}, nil
+	}
+	base, err := w.purgeBase(ctx, branch)
+	if err != nil {
+		return nil, err
+	}
+	return []string{base}, nil
+}
+
 func (w *Workflows) purgeBase(ctx context.Context, branch string) (string, error) {
-	if w.hasDevelop() && (strings.HasPrefix(branch, "feature/") || strings.HasPrefix(branch, "feat/") || strings.HasPrefix(branch, "release/")) {
+	if w.hasDevelop() && (strings.HasPrefix(branch, "feature/") || strings.HasPrefix(branch, "feat/")) {
 		return "develop", nil
 	}
 	return w.Main(ctx)
