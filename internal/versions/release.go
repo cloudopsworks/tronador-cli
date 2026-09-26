@@ -159,7 +159,10 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "tag":
 			e = w.checkoutReleaseBranch(ctx, target)
 			if e == nil {
-				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), target)
+				e = w.recordFinishTagTarget(ctx, p, j)
+			}
+			if e == nil {
+				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), j.TagTargetSHA)
 			}
 		case "push-main":
 			e = w.checkoutReleaseBranch(ctx, target)

@@ -161,7 +161,10 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
 			}
 		case "tag":
-			e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), target)
+			e = w.recordFinishTagTarget(ctx, p, j)
+			if e == nil {
+				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), j.TagTargetSHA)
+			}
 		case "push-target":
 			_, e = w.git(ctx, "push", w.remote, target)
 		case "push-tag":

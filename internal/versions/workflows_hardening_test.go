@@ -481,6 +481,59 @@ func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *tes
 	}
 }
 
+func TestLocalFinishResumesRecordedTagAfterTargetAdvances(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, prefix string
+		finish                  func(*Workflows) error
+	}{
+		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
+		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, false)
+			branch := tc.prefix + "/v0.2.0"
+			gitTest(t, repo, "checkout", "-b", branch)
+			writeFile(t, filepath.Join(repo, tc.name+".txt"), tc.name+"\n")
+			gitTest(t, repo, "add", tc.name+".txt")
+			gitTest(t, repo, "commit", "-m", tc.name)
+			gitTest(t, repo, "push", "-u", "origin", branch)
+			sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+			gitTest(t, repo, "checkout", "main")
+			gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
+			tagTargetSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+			gitTest(t, repo, "tag", "-a", "v0.2.0", "-m", tc.name)
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := w.localFinishSteps(tc.operation)
+			j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			boundary, err := finishTagBoundary(steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Done, j.TagTargetSHA = boundary, tagTargetSHA
+			if err = writeAtomic(path, j); err != nil {
+				t.Fatal(err)
+			}
+
+			writeFile(t, filepath.Join(repo, "later.txt"), "later\n")
+			gitTest(t, repo, "add", "later.txt")
+			gitTest(t, repo, "commit", "-m", "advance main")
+			gitTest(t, repo, "push", "origin", "main")
+			if err = tc.finish(w); err != nil {
+				t.Fatalf("resume after target advance: %v", err)
+			}
+			assertBranchAbsent(t, repo, branch)
+		})
+	}
+}
+
 func setupWorkflowRemote(t *testing.T, develop bool) (string, string) {
 	t.Helper()
 	root := t.TempDir()

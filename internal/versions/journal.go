@@ -16,17 +16,18 @@ import (
 const journalSchemaVersion = 3
 
 type journal struct {
-	Version    int       `json:"version"`
-	WayOfWork  string    `json:"wayOfWork"`
-	Repository string    `json:"repository"`
-	Worktree   string    `json:"worktree"`
-	Operation  string    `json:"operation"`
-	Source     string    `json:"source"`
-	SourceSHA  string    `json:"sourceSHA"`
-	Target     string    `json:"target"`
-	Steps      []string  `json:"steps"`
-	Done       int       `json:"done"`
-	Created    time.Time `json:"created"`
+	Version      int       `json:"version"`
+	WayOfWork    string    `json:"wayOfWork"`
+	Repository   string    `json:"repository"`
+	Worktree     string    `json:"worktree"`
+	Operation    string    `json:"operation"`
+	Source       string    `json:"source"`
+	SourceSHA    string    `json:"sourceSHA"`
+	Target       string    `json:"target"`
+	TagTargetSHA string    `json:"tagTargetSHA,omitempty"`
+	Steps        []string  `json:"steps"`
+	Done         int       `json:"done"`
+	Created      time.Time `json:"created"`
 }
 
 func (w *Workflows) journalPath(ctx context.Context) (string, error) {
@@ -233,12 +234,39 @@ func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journ
 	if j.Done < boundary {
 		return fmt.Errorf("existing annotated tag %s is incompatible with unfinished local finish state", tag)
 	}
-	targetCommit, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
-	if err != nil {
-		return fmt.Errorf("resolve finished target %s: %w", j.Target, err)
+	if j.TagTargetSHA != "" {
+		if commit != j.TagTargetSHA {
+			return fmt.Errorf("existing annotated tag %s is incompatible with journaled tag target", tag)
+		}
+		return nil
 	}
-	if commit != strings.TrimSpace(targetCommit) {
-		return fmt.Errorf("existing annotated tag %s is incompatible with finished target %s", tag, j.Target)
+	// Journals written before tagTargetSHA was introduced can still resume only
+	// when the tag proves a completed source merge and remains in the target's
+	// ancestry. This accepts a target that advanced after an interrupted tag
+	// step without accepting an unrelated same-named tag.
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.SourceSHA, commit); err != nil {
+		return fmt.Errorf("existing annotated tag %s does not contain journaled source: %w", tag, err)
+	}
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", commit, j.Target); err != nil {
+		return fmt.Errorf("existing annotated tag %s is incompatible with finished target %s: %w", tag, j.Target, err)
+	}
+	return nil
+}
+
+// recordFinishTagTarget persists the exact target commit before creating its
+// version tag. A crash after tag creation can then replay safely even if the
+// mutable target branch advances before the retry.
+func (w *Workflows) recordFinishTagTarget(ctx context.Context, path string, j *journal) error {
+	if j.TagTargetSHA != "" {
+		return nil
+	}
+	sha, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve finish tag target %s: %w", j.Target, err)
+	}
+	j.TagTargetSHA = strings.TrimSpace(sha)
+	if err := writeAtomic(path, j); err != nil {
+		return fmt.Errorf("record finish tag target: %w", err)
 	}
 	return nil
 }
