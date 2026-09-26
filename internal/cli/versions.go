@@ -102,21 +102,29 @@ Workflows: --gitflow, --githubflow, --trunkbased (or --trunk).`,
 }
 
 func versionsWayOfWork() (versions.WayOfWork, error) {
-	var choices []versions.WayOfWork
+	var choice versions.WayOfWork
+	selected := 0
 	if versionsGitFlow {
-		choices = append(choices, versions.WayOfWorkGitFlow)
+		choice = versions.WayOfWorkGitFlow
+		selected++
 	}
 	if versionsGitHubFlow {
-		choices = append(choices, versions.WayOfWorkGitHubFlow)
+		choice = versions.WayOfWorkGitHubFlow
+		selected++
 	}
-	if versionsTrunkBased || versionsTrunk {
-		choices = append(choices, versions.WayOfWorkTrunkBased)
+	if versionsTrunkBased {
+		choice = versions.WayOfWorkTrunkBased
+		selected++
 	}
-	if len(choices) > 1 {
+	if versionsTrunk {
+		choice = versions.WayOfWorkTrunkBased
+		selected++
+	}
+	if selected > 1 {
 		return "", fmt.Errorf("only one of --gitflow, --githubflow, --trunkbased, or --trunk may be used")
 	}
-	if len(choices) == 1 {
-		return choices[0], nil
+	if selected == 1 {
+		return choice, nil
 	}
 	return "", nil
 }

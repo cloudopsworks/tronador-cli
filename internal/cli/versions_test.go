@@ -39,9 +39,22 @@ func TestVersionsWayOfWorkAcceptsTrunkAliasAndRejectsMultipleFlags(t *testing.T)
 	if err != nil || got != versions.WayOfWorkTrunkBased {
 		t.Fatalf("trunk alias = %q, %v", got, err)
 	}
-	versionsGitFlow = true
-	if _, err := versionsWayOfWork(); err == nil {
-		t.Fatal("multiple workflow flags accepted")
+	for _, test := range []struct {
+		name                                   string
+		gitflow, githubflow, trunkbased, trunk bool
+	}{
+		{name: "gitflow-githubflow", gitflow: true, githubflow: true},
+		{name: "gitflow-trunk", gitflow: true, trunk: true},
+		{name: "githubflow-trunkbased", githubflow: true, trunkbased: true},
+		{name: "literal-trunk-alias-pair", trunkbased: true, trunk: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			versionsGitFlow, versionsGitHubFlow = test.gitflow, test.githubflow
+			versionsTrunkBased, versionsTrunk = test.trunkbased, test.trunk
+			if _, err := versionsWayOfWork(); err == nil {
+				t.Fatal("multiple workflow flags accepted")
+			}
+		})
 	}
 }
 
