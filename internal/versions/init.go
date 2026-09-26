@@ -593,6 +593,9 @@ func (r *Runner) git(ctx context.Context, args ...string) (string, error) {
 // ensureDevelop is intentionally conservative: it only creates a branch when
 // the checked-out primary branch exactly equals its origin tracking ref.
 func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
+	if err := r.validateGitFlowPrimaryDistinct(ctx); err != nil {
+		return false, err
+	}
 	if r.dryRun {
 		return false, nil
 	}
@@ -671,6 +674,39 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// validateGitFlowPrimaryDistinct rejects the invalid topology where develop is
+// both GitFlow's integration branch and its primary release branch. A supplied
+// primary is checked without Git I/O; otherwise origin/HEAD is the discovered
+// primary when available. This runs before the existing-develop idempotency
+// return so an already-created develop cannot mask the invalid topology.
+func (r *Runner) validateGitFlowPrimaryDistinct(ctx context.Context) error {
+	if r.mainBranch != "" {
+		if r.mainBranch == "develop" {
+			return errors.New("gitflow primary branch must not be develop")
+		}
+		return nil
+	}
+	originHead, err := r.git(ctx, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+	if err != nil {
+		if isExitStatus(err, 1) {
+			return nil
+		}
+		return fmt.Errorf("resolve origin/HEAD for GitFlow topology: %w", err)
+	}
+	const originPrefix = "refs/remotes/origin/"
+	if !strings.HasPrefix(originHead, originPrefix) {
+		return fmt.Errorf("invalid origin/HEAD target %q", originHead)
+	}
+	primary := strings.TrimPrefix(originHead, originPrefix)
+	if !safeRef(primary) {
+		return fmt.Errorf("invalid origin/HEAD target %q", originHead)
+	}
+	if primary == "develop" {
+		return errors.New("gitflow primary branch must not be develop")
+	}
+	return nil
 }
 
 // resolveDefaultPrimary first uses origin/HEAD when it identifies a safe,

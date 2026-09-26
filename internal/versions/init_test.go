@@ -47,6 +47,7 @@ func TestInitSelectsDisabledConfigAndPreservesScalarLayout(t *testing.T) {
 "status --porcelain") exit 0;;
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") exit 1;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
 "show-ref --verify --quiet refs/heads/develop") exit 1;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)

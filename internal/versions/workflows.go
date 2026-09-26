@@ -67,6 +67,31 @@ func NewWorkflows(o WorkflowOptions) (*Workflows, error) {
 	}
 	return &Workflows{dir: o.Dir, wow: normalizeWOW(o.WayOfWork), remote: o.Remote, main: o.MainBranch, mainConfigured: o.MainBranch != "", run: o.Runner}, nil
 }
+
+// validateGitFlowTopology prevents a GitFlow repository from treating develop
+// as both its integration branch and primary release branch. The check is
+// deliberately performed before every GitFlow operation that can mutate Git,
+// and Main applies the same invariant to discovered remote defaults.
+func (w *Workflows) validateGitFlowTopology(ctx context.Context) error {
+	if !w.hasDevelop() {
+		return nil
+	}
+	if w.mainConfigured {
+		if w.main == "develop" {
+			return errors.New("gitflow primary branch must not be develop")
+		}
+		return nil
+	}
+	_, err := w.Main(ctx)
+	return err
+}
+
+func (w *Workflows) validateGitFlowPrimary(branch string) error {
+	if w.hasDevelop() && branch == "develop" {
+		return errors.New("gitflow primary branch must not be develop")
+	}
+	return nil
+}
 func normalizeWOW(v string) string {
 	v = strings.ToLower(strings.ReplaceAll(v, "-", ""))
 	if v == "trunk" {
@@ -86,6 +111,9 @@ func (w *Workflows) hasDevelop() bool { return w.wow == "gitflow" }
 // exactly one live branch at the selected remote. It deliberately avoids
 // remote-tracking refs because they can be stale before an operation fetches.
 func (w *Workflows) validateConfiguredMainLive(ctx context.Context) error {
+	if err := w.validateGitFlowPrimary(w.main); err != nil {
+		return err
+	}
 	if !w.mainConfigured {
 		return nil
 	}
@@ -109,6 +137,9 @@ func (w *Workflows) validateConfiguredMainLive(ctx context.Context) error {
 }
 func (w *Workflows) Main(ctx context.Context) (string, error) {
 	if w.main != "" {
+		if err := w.validateGitFlowPrimary(w.main); err != nil {
+			return "", err
+		}
 		if err := w.ensureSafeRef(w.main); err != nil {
 			return "", err
 		}
@@ -135,6 +166,9 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 		if err := w.ensureSafeRef(b); err != nil {
 			return "", fmt.Errorf("remote HEAD %s resolved invalid branch %q: %w", remoteHead, b, err)
 		}
+		if err := w.validateGitFlowPrimary(b); err != nil {
+			return "", err
+		}
 		w.main = b
 		return b, nil
 	}
@@ -144,6 +178,9 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 	}
 	for _, b := range []string{"main", "master"} {
 		if _, e := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/"+w.remote+"/"+b); e == nil {
+			if err := w.validateGitFlowPrimary(b); err != nil {
+				return "", err
+			}
 			w.main = b
 			return b, nil
 		}

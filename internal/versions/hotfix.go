@@ -20,6 +20,9 @@ func (w *Workflows) CurrentVersion(ctx context.Context) (string, error) {
 	return v, nil
 }
 func (w *Workflows) HotfixStart(ctx context.Context, version string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	// Fetch exactly once before choosing a support line. Version calculation must
 	// happen only after its chosen base is checked out and proven equal to origin.
 	if _, err := w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
@@ -92,6 +95,9 @@ func (w *Workflows) hotfixBranch(ctx context.Context, name string) (branch, vers
 	return b, n, nil
 }
 func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	b, _, e := w.hotfixBranch(ctx, name)
 	if e != nil {
 		return e
@@ -103,6 +109,9 @@ func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) HotfixFinish(ctx context.Context, name string, local bool) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	resumedBranch := ""
 	if local && name == "" {
 		if resumed, found, err := w.resumeLocalFinishName(ctx, "hotfix-finish", "hotfix"); err != nil {
@@ -259,6 +268,9 @@ func supportLine(branch string) (major, minor string, ok bool) {
 }
 
 func (w *Workflows) HotfixPurge(ctx context.Context, name string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	branch, _, e := w.hotfixBranch(ctx, name)
 	if e != nil {
 		return e

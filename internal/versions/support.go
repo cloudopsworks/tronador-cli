@@ -12,6 +12,9 @@ func (w *Workflows) requireGitFlow() error {
 	return nil
 }
 func (w *Workflows) SupportStart(ctx context.Context, tag string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	if e := w.requireGitFlow(); e != nil {
 		return e
 	}
@@ -52,6 +55,9 @@ func (w *Workflows) supportName(ctx context.Context, name string) (string, error
 	return n, nil
 }
 func (w *Workflows) SupportPublish(ctx context.Context, name string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	n, e := w.supportName(ctx, name)
 	if e != nil {
 		return e
@@ -64,6 +70,9 @@ func (w *Workflows) SupportPublish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) SupportPurge(ctx context.Context, name string) error {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
+		return err
+	}
 	n, e := w.supportName(ctx, name)
 	if e != nil {
 		return e
