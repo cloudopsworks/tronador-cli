@@ -23,8 +23,9 @@ func TestReleaseStartUsesWorkflowSpecificBase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				key("gitversion", "-showvariable", "MajorMinorPatch"):             "1.2.3\n",
-				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+				key("gitversion", "-showvariable", "MajorMinorPatch"):               "1.2.3\n",
+				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):   "refs/remotes/origin/main\n",
+				key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): "abc\trefs/heads/main\n",
 			}}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: f})
 			if err != nil {
@@ -1066,7 +1067,8 @@ func TestPurgeRejectsUnmergedBranchBeforeCheckoutOrDelete(t *testing.T) {
 
 func TestFeatureStartSynchronizesBaseBeforeCreatingBranch(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):   "refs/remotes/origin/main\n",
+		key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): "abc\trefs/heads/main\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
 	if err != nil {

@@ -72,7 +72,10 @@ func TestFakeRunnerSawPrefixKeepsExactSawSemantics(t *testing.T) {
 func TestFeatureStartUsesWOWBase(t *testing.T) {
 	for _, tc := range []struct{ wow, base string }{{"gitflow", "develop"}, {"githubflow", "main"}, {"trunk", "main"}} {
 		t.Run(tc.wow, func(t *testing.T) {
-			f := &fakeRunner{replies: map[string]string{key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n"}}
+			f := &fakeRunner{replies: map[string]string{
+				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):   "refs/remotes/origin/main\n",
+				key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): "abc\trefs/heads/main\n",
+			}}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: f})
 			if err != nil {
 				t.Fatal(err)

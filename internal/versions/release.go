@@ -8,7 +8,7 @@ import (
 )
 
 func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
-	if err := w.validateConfiguredGitFlowTopology(); err != nil {
+	if err := w.validateGitFlowTopology(ctx); err != nil {
 		return err
 	}
 	if w.hasDevelop() {

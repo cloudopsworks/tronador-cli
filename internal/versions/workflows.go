@@ -87,11 +87,19 @@ func (w *Workflows) validateGitFlowTopology(ctx context.Context) error {
 	if !w.hasDevelop() || w.mainConfigured {
 		return nil
 	}
-	if w.main != "" {
-		return w.validateGitFlowPrimary(w.main)
+	branch := w.main
+	if branch != "" {
+		if err := w.validateGitFlowPrimary(branch); err != nil {
+			return err
+		}
+	} else {
+		var err error
+		branch, err = w.Main(ctx)
+		if err != nil {
+			return err
+		}
 	}
-	_, err := w.Main(ctx)
-	return err
+	return w.validateDiscoveredMainLive(ctx, branch)
 }
 
 func (w *Workflows) validateGitFlowPrimary(branch string) error {
@@ -177,9 +185,9 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 		if err := w.validateGitFlowPrimary(b); err != nil {
 			return "", err
 		}
-		// origin/HEAD is only a symbolic local pointer. It can survive a
-		// remote branch deletion, so prove the exact remote-tracking ref still
-		// exists before allowing a primary-resolving operation to mutate.
+		// origin/HEAD is a local symbolic pointer. Reject a dangling target
+		// before caching it, but leave the authoritative live check to the
+		// GitFlow mutations that actually resolve a primary.
 		if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/"+w.remote+"/"+b); err != nil {
 			return "", fmt.Errorf("remote HEAD %s resolved unavailable branch %s/%s: %w", remoteHead, w.remote, b, err)
 		}
@@ -201,6 +209,29 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 	}
 	return "", errors.New("cannot determine main branch; pass --main-branch")
 }
+
+// validateDiscoveredMainLive treats origin/HEAD only as a branch selector.
+// Its local target can be stale until a fetch prunes it, so primary-resolving
+// operations must confirm the exact selected branch is currently advertised
+// by the remote before their first mutation.
+func (w *Workflows) validateDiscoveredMainLive(ctx context.Context, branch string) error {
+	remoteHead := "refs/remotes/" + w.remote + "/HEAD"
+	ref := "refs/heads/" + branch
+	out, err := w.git(ctx, "ls-remote", "--exit-code", w.remote, ref)
+	if err != nil {
+		return fmt.Errorf("remote HEAD %s resolved unavailable live branch %s/%s: %w", remoteHead, w.remote, branch, err)
+	}
+	lines := strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 {
+		return fmt.Errorf("remote HEAD %s resolved unavailable live branch %s/%s", remoteHead, w.remote, branch)
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) != 2 || fields[0] == "" || fields[1] != ref {
+		return fmt.Errorf("remote HEAD %s resolved unavailable live branch %s/%s", remoteHead, w.remote, branch)
+	}
+	return nil
+}
+
 func (w *Workflows) Current(ctx context.Context) (string, error) {
 	o, e := w.git(ctx, "branch", "--show-current")
 	if e != nil {

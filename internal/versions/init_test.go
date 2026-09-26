@@ -136,6 +136,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
+"show-ref --verify --quiet refs/remotes/origin/primary") exit 0;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "branch --show-current") echo primary;;
 "rev-parse HEAD"|"rev-parse refs/remotes/origin/primary") echo abc123;;
@@ -168,6 +169,7 @@ func TestInitGitFlowRejectsOriginHeadPrimaryOnWrongCurrentBranch(t *testing.T) {
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"show-ref --verify --quiet refs/remotes/origin/primary") exit 0;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "rev-parse refs/remotes/origin/primary") echo abc123;;
 "branch --show-current") echo main;;
@@ -188,6 +190,7 @@ func TestInitGitFlowRejectsDivergentOriginHeadPrimary(t *testing.T) {
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"show-ref --verify --quiet refs/remotes/origin/primary") exit 0;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "branch --show-current") echo primary;;
 "rev-parse HEAD") echo local;;
@@ -297,6 +300,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"show-ref --verify --quiet refs/remotes/origin/primary") exit 1;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "rev-parse refs/remotes/origin/primary") echo "missing primary" >&2; exit 1;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
@@ -305,7 +309,7 @@ case "$*" in
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_LOG", log)
-	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "resolve origin/HEAD branch origin/primary") {
+	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "origin/HEAD resolved unavailable branch origin/primary") {
 		t.Fatalf("unresolved origin/HEAD branch error = %v", err)
 	}
 	if got := mustReadFile(t, target); got != before {

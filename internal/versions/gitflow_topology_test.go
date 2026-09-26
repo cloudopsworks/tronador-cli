@@ -79,14 +79,14 @@ func TestGitFlowDanglingDiscoveredPrimaryRejectsFeatureAndReleaseStartBeforeMuta
 					key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
 				},
 				errs: map[string]error{
-					key("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"): errors.New("missing origin/main"),
+					key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): errors.New("missing origin/main"),
 				},
 			}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = operation.run(w); err == nil || !strings.Contains(err.Error(), "resolved unavailable branch") {
+			if err = operation.run(w); err == nil || !strings.Contains(err.Error(), "resolved unavailable live branch") {
 				t.Fatalf("operation error = %v, want dangling primary rejection", err)
 			}
 			for _, mutation := range [][]string{
@@ -223,5 +223,47 @@ case "$*" in
 	calls := mustReadFile(t, log)
 	if strings.Contains(calls, "checkout ") || strings.Contains(calls, "push ") {
 		t.Fatalf("Init continued into a branch mutation path: %s", calls)
+	}
+}
+
+func TestGitFlowDiscoveredPrimaryRejectsStaleTrackingRefBeforeFeatureOrReleaseMutation(t *testing.T) {
+	ctx := context.Background()
+	operations := []struct {
+		name   string
+		branch string
+		run    func(*Workflows) error
+	}{
+		{"feature", "feature/stale-primary", func(w *Workflows) error { return w.FeatureStart(ctx, "stale-primary") }},
+		{"release", "release/v0.1.1", func(w *Workflows) error { return w.ReleaseStart(ctx, "patch") }},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			root, repo := setupWorkflowRemote(t, true)
+			gitTest(t, root, "--git-dir="+root+"/remote.git", "symbolic-ref", "HEAD", "refs/heads/main")
+			gitTest(t, repo, "remote", "set-head", "origin", "-a")
+			primarySHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "refs/remotes/origin/main"))
+			gitTest(t, repo, "checkout", "--no-guess", "develop")
+			gitTest(t, root, "--git-dir="+root+"/remote.git", "update-ref", "-d", "refs/heads/main")
+			if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "refs/remotes/origin/main")); got != primarySHA {
+				t.Fatalf("stale local primary = %s, want %s", got, primarySHA)
+			}
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = operation.run(w); err == nil || !strings.Contains(err.Error(), "resolved unavailable live branch") {
+				t.Fatalf("operation error = %v, want stale discovered-primary rejection", err)
+			}
+			if current := strings.TrimSpace(gitTest(t, repo, "branch", "--show-current")); current != "develop" {
+				t.Fatalf("operation changed current branch to %q", current)
+			}
+			if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD")); got != primarySHA {
+				t.Fatalf("operation changed HEAD to %s, want %s", got, primarySHA)
+			}
+			if got := strings.TrimSpace(gitTest(t, repo, "branch", "--list", operation.branch)); got != "" {
+				t.Fatalf("operation created branch %s", got)
+			}
+		})
 	}
 }
