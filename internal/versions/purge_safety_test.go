@@ -8,9 +8,10 @@ import (
 )
 
 type checkoutRefreshRewriteRunner struct {
-	calls   []call
-	branch  string
-	fetches int
+	calls         []call
+	branch        string
+	rewrittenBase string
+	fetches       int
 }
 
 func (r *checkoutRefreshRewriteRunner) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -30,7 +31,7 @@ func (r *checkoutRefreshRewriteRunner) Run(_ context.Context, name string, args 
 		return "refs/remotes/origin/main\n", nil
 	}
 	if len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor" && args[2] == "refs/heads/"+r.branch {
-		if r.fetches >= 2 {
+		if r.fetches >= 2 && args[3] == "refs/remotes/origin/"+r.rewrittenBase {
 			return "", purgeExitStatusOne()
 		}
 		return "", nil
@@ -58,6 +59,27 @@ func (r *checkoutRefreshRewriteRunner) sawPrefix(parts ...string) bool {
 	return false
 }
 
+func (r *checkoutRefreshRewriteRunner) count(parts ...string) int {
+	count := 0
+	for _, c := range r.calls {
+		all := append([]string{c.name}, c.args...)
+		if len(all) != len(parts) {
+			continue
+		}
+		matched := true
+		for i, part := range parts {
+			if all[i] != part {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			count++
+		}
+	}
+	return count
+}
+
 func purgeExitStatusOne() error {
 	return exec.Command("sh", "-c", "exit 1").Run()
 }
@@ -65,16 +87,16 @@ func purgeExitStatusOne() error {
 func TestPurgeRevalidatesTargetsAfterCheckoutRefresh(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name, wow, branch string
-		purge             func(*Workflows) error
+		name, wow, branch, rewrittenBase string
+		purge                            func(*Workflows) error
 	}{
-		{name: "feature", wow: "githubflow", branch: "feature/a", purge: func(w *Workflows) error { return w.FeaturePurge(ctx, "a") }},
-		{name: "hotfix", wow: "githubflow", branch: "hotfix/v1.2.3", purge: func(w *Workflows) error { return w.HotfixPurge(ctx, "1.2.3") }},
-		{name: "support", wow: "gitflow", branch: "support/v1.2.3", purge: func(w *Workflows) error { return w.SupportPurge(ctx, "1.2.3") }},
-		{name: "release", wow: "gitflow", branch: "release/v1.2.3", purge: func(w *Workflows) error { return w.ReleasePurge(ctx, "1.2.3") }},
+		{name: "feature", wow: "githubflow", branch: "feature/a", rewrittenBase: "main", purge: func(w *Workflows) error { return w.FeaturePurge(ctx, "a") }},
+		{name: "hotfix", wow: "githubflow", branch: "hotfix/v1.2.3", rewrittenBase: "main", purge: func(w *Workflows) error { return w.HotfixPurge(ctx, "1.2.3") }},
+		{name: "support", wow: "gitflow", branch: "support/v1.2.3", rewrittenBase: "main", purge: func(w *Workflows) error { return w.SupportPurge(ctx, "1.2.3") }},
+		{name: "release", wow: "gitflow", branch: "release/v1.2.3", rewrittenBase: "develop", purge: func(w *Workflows) error { return w.ReleasePurge(ctx, "1.2.3") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &checkoutRefreshRewriteRunner{branch: tc.branch}
+			r := &checkoutRefreshRewriteRunner{branch: tc.branch, rewrittenBase: tc.rewrittenBase}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: r})
 			if err != nil {
 				t.Fatal(err)
@@ -84,6 +106,13 @@ func TestPurgeRevalidatesTargetsAfterCheckoutRefresh(t *testing.T) {
 			}
 			if r.fetches < 2 {
 				t.Fatalf("purge did not refresh while moving off source: %#v", r.calls)
+			}
+			if tc.name == "release" {
+				mainProbe := []string{"git", "merge-base", "--is-ancestor", "refs/heads/" + tc.branch, "refs/remotes/origin/main"}
+				developProbe := []string{"git", "merge-base", "--is-ancestor", "refs/heads/" + tc.branch, "refs/remotes/origin/develop"}
+				if r.count(mainProbe...) != 2 || r.count(developProbe...) != 2 {
+					t.Fatalf("release did not revalidate refreshed main before rejecting develop: %#v", r.calls)
+				}
 			}
 			if r.sawPrefix("git", "push", "--force-with-lease") || r.sawPrefix("git", "branch", "-d") {
 				t.Fatalf("purge deleted after target rewrite: %#v", r.calls)
