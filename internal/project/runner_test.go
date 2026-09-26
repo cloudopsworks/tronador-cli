@@ -1716,3 +1716,67 @@ func TestWriteProjectFileAtomicallyCleansTemporaryOnReplacementFailure(t *testin
 		t.Fatalf("temporary files = %v, %v", temporary, err)
 	}
 }
+
+func TestVersionGenerateFailsClosedWhenCatalogLayoutIsSwapped(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		layout string
+	}{
+		{name: "cloudopsworks", layout: ".cloudopsworks"},
+		{name: "github", layout: ".github"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, ".golang")
+			if tc.layout == ".github" {
+				if err := os.RemoveAll(filepath.Join(workdir, ".cloudopsworks")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			layout := filepath.Join(workdir, tc.layout)
+			if err := os.MkdirAll(layout, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(layout, ".golang"), []byte("managed\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(layout, "_VERSION"), []byte("v5.10.2\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			external := t.TempDir()
+			if err := os.WriteFile(filepath.Join(external, "_VERSION"), []byte("outside\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pinned := filepath.Join(workdir, "pinned-"+strings.TrimPrefix(tc.layout, "."))
+			oldHook := beforeProjectMarkerAtomicTempCreate
+			beforeProjectMarkerAtomicTempCreate = func() {
+				if err := os.Rename(layout, pinned); err != nil {
+					t.Fatalf("pin layout: %v", err)
+				}
+				if err := os.Symlink(external, layout); err != nil {
+					t.Fatalf("swap layout for symlink: %v", err)
+				}
+			}
+			t.Cleanup(func() { beforeProjectMarkerAtomicTempCreate = oldHook })
+
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+				ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")},
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"MajorMinorPatch":"5.10.3"}`}, nil
+				},
+			})
+			if _, err := runner.Run(context.Background(), "version", nil); codeOf(err) != "project_operation_failed" {
+				t.Fatalf("Run(version --generate) error = %v, code = %q", err, codeOf(err))
+			}
+			if got := string(mustRead(t, filepath.Join(external, "_VERSION"))); got != "outside\n" {
+				t.Fatalf("external marker was overwritten: %q", got)
+			}
+			if got := string(mustRead(t, filepath.Join(pinned, "_VERSION"))); got != "v5.10.2\n" {
+				t.Fatalf("pinned marker changed despite failed closed generation: %q", got)
+			}
+			if temporary, err := filepath.Glob(filepath.Join(pinned, ".tronador-marker-*")); err != nil || len(temporary) != 0 {
+				t.Fatalf("temporary marker files = %v, %v", temporary, err)
+			}
+		})
+	}
+}

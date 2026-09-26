@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -368,6 +369,7 @@ func (r *Runner) planCatalogVersionGenerate(args []string) (Detection, Operation
 	if err != nil {
 		return Detection{}, OperationPlan{}, err
 	}
+	defer target.Close()
 	if r.Opts.Snapshot || r.Opts.Plain {
 		return target.detection, OperationPlan{}, withDetection(projectError("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"), target.detection)
 	}
@@ -911,12 +913,15 @@ func executeNative(plan OperationPlan) ([]string, error) {
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result, tag exactTag) (Result, error) {
 	markerPath := ""
+	var markerTarget catalogMarkerTarget
 	if r.Opts.Generate {
 		var targetErr error
-		markerPath, targetErr = legacyBlueprintMarkerPath(r.Opts.WorkDir)
+		markerTarget, targetErr = legacyBlueprintMarkerTarget(r.Opts.WorkDir)
 		if targetErr != nil {
 			return Result{}, withDetection(targetErr, detection)
 		}
+		defer markerTarget.Close()
+		markerPath = markerTarget.path
 	}
 	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag, detection.ProfileID)
 	if err != nil {
@@ -931,7 +936,7 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 			return Result{}, withDetection(projectError("project_operation_failed", "GitVersion did not return a MajorMinorPatch version for --generate"), detection)
 		}
 		markerVersion := "v" + strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V")
-		change, warning, buildErr := buildLegacyBlueprintMarkerChange(r.Opts.WorkDir, markerPath, markerVersion)
+		change, warning, buildErr := buildLegacyBlueprintMarkerChangeInTarget(markerTarget, markerVersion)
 		if buildErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build legacy blueprint marker change", buildErr), detection)
 		}
@@ -975,6 +980,12 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		return result, nil
 	}
 	for _, change := range changes {
+		if r.Opts.Generate {
+			if writeErr := writeLegacyBlueprintMarkerAtomically(markerTarget, change.after); writeErr != nil {
+				return Result{}, withDetection(wrapProjectError("project_operation_failed", "write legacy blueprint marker", writeErr), detection)
+			}
+			continue
+		}
 		path, pathErr := safeProjectPath(r.Opts.WorkDir, filepath.FromSlash(change.Path))
 		if pathErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "resolve version output", pathErr), detection)
@@ -1003,7 +1014,16 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 // arbitrary repositories.
 type catalogMarkerTarget struct {
 	path      string
+	marker    string
+	mode      os.FileMode
 	detection Detection
+	layout    projectMarkerLayout
+}
+
+func (target catalogMarkerTarget) Close() {
+	if target.layout.root != nil {
+		_ = target.layout.root.Close()
+	}
 }
 
 func legacyBlueprintMarkerPath(workdir string) (string, error) {
@@ -1011,7 +1031,50 @@ func legacyBlueprintMarkerPath(workdir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer target.Close()
 	return target.path, nil
+}
+
+type projectMarkerLayout struct {
+	path string
+	info os.FileInfo
+	root *os.Root
+}
+
+func (layout projectMarkerLayout) ensure() error {
+	rootInfo, err := layout.root.Stat(".")
+	if err != nil || !os.SameFile(layout.info, rootInfo) {
+		return errors.New("template layout changed during marker generation")
+	}
+	info, err := os.Lstat(layout.path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !os.SameFile(layout.info, info) {
+		return errors.New("template layout changed during marker generation")
+	}
+	return nil
+}
+
+func openProjectMarkerLayout(workdir, name string) (projectMarkerLayout, error) {
+	path, err := safeProjectPath(workdir, name)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return projectMarkerLayout{}, errors.New("must be a non-symlink directory")
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	layout := projectMarkerLayout{path: path, info: info, root: root}
+	if err := layout.ensure(); err != nil {
+		_ = root.Close()
+		return projectMarkerLayout{}, err
+	}
+	return layout, nil
 }
 
 func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
@@ -1027,75 +1090,93 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 		path     string
 		layout   string
 		template repospkg.Template
+		root     projectMarkerLayout
+		mode     os.FileMode
 	}
 	var candidates []markerCandidate
-	for _, layout := range []struct {
+	for _, candidateLayout := range []struct {
 		root        string
 		versionFile string
 	}{
 		{root: ".cloudopsworks", versionFile: ".cloudopsworks/_VERSION"},
 		{root: ".github", versionFile: ".github/_VERSION"},
 	} {
-		rootPath, rootErr := safeProjectPath(workdir, layout.root)
-		if rootErr != nil {
+		layout, layoutErr := openProjectMarkerLayout(workdir, candidateLayout.root)
+		if errors.Is(layoutErr, os.ErrNotExist) {
 			continue
 		}
-		rootInfo, statErr := os.Lstat(rootPath)
-		if errors.Is(statErr, os.ErrNotExist) {
-			continue
+		if layoutErr != nil {
+			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template layout", layoutErr)
 		}
-		if statErr != nil {
-			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template layout", statErr)
-		}
-		if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-			return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "template layout must be a non-symlink directory")
-		}
-
-		var active []repospkg.Template
-		for _, template := range catalog.Templates {
-			markerPath, markerErr := safeProjectPath(workdir, filepath.ToSlash(filepath.Join(layout.root, template.Marker)))
-			if markerErr != nil {
-				return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "resolve template marker", markerErr)
+		keepLayout := false
+		func() {
+			defer func() {
+				if !keepLayout {
+					_ = layout.root.Close()
+				}
+			}()
+			var active []repospkg.Template
+			for _, template := range catalog.Templates {
+				markerInfo, markerStatErr := layout.root.Lstat(template.Marker)
+				if errors.Is(markerStatErr, os.ErrNotExist) {
+					continue
+				}
+				if markerStatErr != nil {
+					err = wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
+					return
+				}
+				if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
+					err = projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
+					return
+				}
+				active = append(active, template)
 			}
-			markerInfo, markerStatErr := os.Lstat(markerPath)
-			if errors.Is(markerStatErr, os.ErrNotExist) {
-				continue
+			if len(active) == 0 {
+				return
 			}
-			if markerStatErr != nil {
-				return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
+			if len(active) != 1 || !active[0].Versioned {
+				err = projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+				return
 			}
-			if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
-				return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
+			markerInfo, markerStatErr := layout.root.Lstat("_VERSION")
+			mode := os.FileMode(0o644)
+			if markerStatErr == nil {
+				if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
+					err = projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
+					return
+				}
+				mode = markerInfo.Mode().Perm()
+			} else if !errors.Is(markerStatErr, os.ErrNotExist) {
+				err = wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", markerStatErr)
+				return
 			}
-			active = append(active, template)
+			if ensureErr := layout.ensure(); ensureErr != nil {
+				err = wrapProjectError("project_version_marker_invalid", "inspect template layout", ensureErr)
+				return
+			}
+			candidates = append(candidates, markerCandidate{path: candidateLayout.versionFile, layout: candidateLayout.root, template: active[0], root: layout, mode: mode})
+			keepLayout = true
+		}()
+		if err != nil {
+			for _, candidate := range candidates {
+				_ = candidate.root.root.Close()
+			}
+			return catalogMarkerTarget{}, err
 		}
-		if len(active) == 0 {
-			continue
-		}
-		if len(active) != 1 || !active[0].Versioned {
-			return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
-		}
-		path, pathErr := safeProjectPath(workdir, layout.versionFile)
-		if pathErr != nil {
-			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "resolve legacy blueprint marker", pathErr)
-		}
-		if info, statErr := os.Lstat(path); statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
-			return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
-		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", statErr)
-		}
-		candidates = append(candidates, markerCandidate{path: layout.versionFile, layout: layout.root, template: active[0]})
 	}
 	if len(candidates) == 1 {
 		candidate := candidates[0]
 		return catalogMarkerTarget{
-			path: candidate.path,
+			path: candidate.path, marker: "_VERSION", mode: candidate.mode, layout: candidate.root,
 			detection: Detection{
 				WorkDir: abs, ProfileID: candidate.template.Name, DisplayName: candidate.template.Description,
 				Marker:  filepath.ToSlash(filepath.Join(candidate.layout, candidate.template.Marker)),
 				Markers: []string{candidate.template.Marker}, RegistryVersion: catalog.SchemaVersion,
 			},
 		}, nil
+	}
+	for _, candidate := range candidates {
+		_ = candidate.root.root.Close()
 	}
 	if len(candidates) > 1 {
 		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
@@ -1135,6 +1216,103 @@ func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) erro
 		return err
 	}
 	return replaceProjectAtomicFile(temporary, path)
+}
+
+func readProjectMarkerFile(root *os.Root, name string) ([]byte, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	linkInfo, err := root.Lstat(name)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !os.SameFile(info, linkInfo) {
+		return nil, errors.New("marker must be a regular non-symlink file")
+	}
+	return io.ReadAll(file)
+}
+
+func buildLegacyBlueprintMarkerChangeInTarget(target catalogMarkerTarget, version string) (*versionChange, string, error) {
+	if err := target.layout.ensure(); err != nil {
+		return nil, "", err
+	}
+	before, err := readProjectMarkerFile(target.layout.root, target.marker)
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return nil, "", err
+	}
+	if err := target.layout.ensure(); err != nil {
+		return nil, "", err
+	}
+	after := []byte(version + "\n")
+	if bytes.Equal(before, after) {
+		return nil, "", nil
+	}
+	warning := ""
+	if !missing && strings.TrimSpace(string(before)) != version {
+		warning = fmt.Sprintf("WARNING: --generate replaces blueprint marker %s from %q to %q; this marker controls repository-template upgrades.", target.path, strings.TrimSpace(string(before)), version)
+	}
+	op := "modify"
+	if missing {
+		op = "add"
+	}
+	return &versionChange{FileChange: FileChange{Path: filepath.ToSlash(target.path), Operation: op, Patch: unifiedPatch(filepath.ToSlash(target.path), before, after, missing)}, after: after}, warning, nil
+}
+
+var beforeProjectMarkerAtomicTempCreate = func() {}
+var replaceProjectMarkerAtomicFileInRoot = replacement.ReplaceInRoot
+
+func writeLegacyBlueprintMarkerAtomically(target catalogMarkerTarget, data []byte) error {
+	if err := target.layout.ensure(); err != nil {
+		return err
+	}
+	beforeProjectMarkerAtomicTempCreate()
+	name, file, err := newProjectRootAtomicTempFile(target.layout.root)
+	if err != nil {
+		return fmt.Errorf("create temporary marker: %w", err)
+	}
+	defer target.layout.root.Remove(name)
+	if err := target.layout.ensure(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Chmod(target.mode); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("prepare temporary marker: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write temporary marker: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close temporary marker: %w", err)
+	}
+	if err := target.layout.ensure(); err != nil {
+		return err
+	}
+	if err := replaceProjectMarkerAtomicFileInRoot(target.layout.root, name, target.marker); err != nil {
+		return fmt.Errorf("replace marker atomically: %w", err)
+	}
+	return nil
+}
+
+func newProjectRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
+	var random [12]byte
+	for range 100 {
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", nil, err
+		}
+		name := fmt.Sprintf(".tronador-marker-%x", random)
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return name, file, err
+	}
+	return "", nil, errors.New("create unique temporary marker")
 }
 
 func buildLegacyBlueprintMarkerChange(workdir, relative, version string) (*versionChange, string, error) {
