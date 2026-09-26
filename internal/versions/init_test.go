@@ -99,7 +99,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") exit 1;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") exit 1;;
 "branch --show-current") echo main;;
 "rev-parse HEAD"|"rev-parse refs/remotes/origin/main"|"rev-parse refs/heads/develop") echo abc123;;
 "checkout -b develop refs/heads/main"|"push --set-upstream origin refs/heads/develop:refs/heads/develop") exit 0;;
@@ -134,7 +134,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "branch --show-current") echo primary;;
 "rev-parse HEAD"|"rev-parse refs/remotes/origin/primary") echo abc123;;
 "checkout -b develop refs/heads/primary"|"push --set-upstream origin refs/heads/develop:refs/heads/develop") exit 0;;
@@ -152,7 +152,7 @@ case "$*" in
 		t.Fatalf("develop was not created: %+v", result)
 	}
 	calls := mustReadFile(t, log)
-	for _, want := range []string{"symbolic-ref --quiet --short refs/remotes/origin/HEAD", "checkout -b develop refs/heads/primary", "push --set-upstream origin refs/heads/develop:refs/heads/develop"} {
+	for _, want := range []string{"symbolic-ref --quiet refs/remotes/origin/HEAD", "checkout -b develop refs/heads/primary", "push --set-upstream origin refs/heads/develop:refs/heads/develop"} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("calls missing %q:\n%s", want, calls)
 		}
@@ -166,7 +166,7 @@ func TestInitGitFlowRejectsOriginHeadPrimaryOnWrongCurrentBranch(t *testing.T) {
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "rev-parse refs/remotes/origin/primary") echo abc123;;
 "branch --show-current") echo main;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
@@ -186,7 +186,7 @@ func TestInitGitFlowRejectsDivergentOriginHeadPrimary(t *testing.T) {
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "branch --show-current") echo primary;;
 "rev-parse HEAD") echo local;;
 "rev-parse refs/remotes/origin/primary") echo remote;;
@@ -200,10 +200,9 @@ func TestInitGitFlowRejectsDivergentOriginHeadPrimary(t *testing.T) {
 	}
 }
 
-func TestInitGitFlowFallsBackToMainWhenOriginHeadIsMissingOrInvalid(t *testing.T) {
+func TestInitGitFlowFallsBackToMainWhenOriginHeadIsAbsent(t *testing.T) {
 	for name, originHead := range map[string]string{
 		"missing": `exit 1;;`,
-		"invalid": `echo "not an origin ref";;`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := workflowFixture(t)
@@ -212,7 +211,7 @@ func TestInitGitFlowFallsBackToMainWhenOriginHeadIsMissingOrInvalid(t *testing.T
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") `+originHead+`
+"symbolic-ref --quiet refs/remotes/origin/HEAD") `+originHead+`
 "branch --show-current") echo main;;
 "rev-parse HEAD"|"rev-parse refs/remotes/origin/main") echo abc123;;
 "checkout -b develop refs/heads/main"|"push --set-upstream origin refs/heads/develop:refs/heads/develop") exit 0;;
@@ -232,6 +231,29 @@ func TestInitGitFlowFallsBackToMainWhenOriginHeadIsMissingOrInvalid(t *testing.T
 	}
 }
 
+func TestInitGitFlowRejectsOutsideOriginHeadTargetWithoutMutation(t *testing.T) {
+	dir := workflowFixture(t)
+	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
+	before := mustReadFile(t, target)
+	git := fakeGit(t, `case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/heads/production;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "invalid origin/HEAD target") {
+		t.Fatalf("outside origin/HEAD error = %v", err)
+	}
+	if got := mustReadFile(t, target); got != before {
+		t.Fatalf("config changed after outside origin/HEAD target:\n%s", got)
+	}
+}
+
 func TestInitGitFlowRejectsOperationalOriginHeadErrorWithoutMutation(t *testing.T) {
 	dir := workflowFixture(t)
 	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
@@ -243,7 +265,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo "repository error" >&2; exit 2;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo "repository error" >&2; exit 2;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	if err != nil {
@@ -273,7 +295,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/primary;;
 "rev-parse refs/remotes/origin/primary") echo "missing primary" >&2; exit 1;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -290,6 +312,55 @@ case "$*" in
 	calls := mustReadFile(t, log)
 	if strings.Contains(calls, "checkout ") || strings.Contains(calls, "push ") {
 		t.Fatalf("mutating git call after unresolved origin/HEAD branch:\n%s", calls)
+	}
+}
+
+func TestInitGitFlowUsesOriginHeadBranchDespiteSameNamedTag(t *testing.T) {
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	gitTest(t, root, "init", "--bare", remote)
+	repo := filepath.Join(root, "repo")
+	gitTest(t, root, "clone", remote, repo)
+	gitTest(t, repo, "config", "user.email", "test@example.test")
+	gitTest(t, repo, "config", "user.name", "Test")
+	gitTest(t, repo, "checkout", "-b", "main")
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "main")
+	gitTest(t, repo, "push", "-u", "origin", "main")
+	gitTest(t, repo, "tag", "-a", "origin/production", "-m", "shadow production remote name")
+	gitTest(t, repo, "push", "origin", "refs/tags/origin/production")
+	gitTest(t, repo, "checkout", "-b", "production")
+
+	config := filepath.Join(repo, cloudOpsWorksDir)
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
+		writeFile(t, filepath.Join(config, wow.selectorFileName()), "# Agents: WayOfWork="+string(wow)+"\nmode: test\n")
+	}
+	writeFile(t, filepath.Join(config, "gitversion.yaml"), "# Agents: WayOfWork=gitflow\nmode: old\n")
+	gitTest(t, repo, "add", cloudOpsWorksDir)
+	gitTest(t, repo, "commit", "-m", "production config")
+	production := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+	gitTest(t, repo, "push", "-u", "origin", "production")
+	gitTest(t, root, "--git-dir="+remote, "symbolic-ref", "HEAD", "refs/heads/production")
+	gitTest(t, repo, "remote", "set-head", "origin", "-a")
+
+	r, err := NewRunner(Options{WorkDir: repo, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.DevelopCreated {
+		t.Fatalf("develop was not created: %+v", result)
+	}
+	if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "refs/heads/develop")); got != production {
+		t.Fatalf("develop commit = %s, want origin/HEAD production %s", got, production)
+	}
+	if tag := strings.TrimSpace(gitTest(t, repo, "rev-parse", "refs/tags/origin/production")); tag == production {
+		t.Fatal("same-named tag unexpectedly resolves to production branch commit")
 	}
 }
 
@@ -554,7 +625,7 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
-"symbolic-ref --quiet --short refs/remotes/origin/HEAD") exit 1;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") exit 1;;
 "branch --show-current") echo main;;
 "rev-parse HEAD"|"rev-parse refs/remotes/origin/main"|"rev-parse refs/heads/develop") echo abc123;;
 "show-ref --verify --quiet refs/heads/develop") exit 0;;
