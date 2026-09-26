@@ -349,3 +349,109 @@ func TestPublishFinishedAndDeleteRemoteRejectsCorruptGitFlowPlanAfterSourceDelet
 		})
 	}
 }
+
+// newGitFlowReleaseReplayFixture persists a schema-v4 release journal at the
+// publish cursor, then records the already-accepted atomic server transaction.
+// Calling ReleaseFinish afterwards therefore exercises the production replay
+// and cleanup path rather than the internal publication helper directly.
+func newGitFlowReleaseReplayFixture(t *testing.T) *atomicFinishFixture {
+	t.Helper()
+	ctx := context.Background()
+	f := newAtomicFinishFixture(t, true)
+	steps := f.w.localFinishSteps("release-finish")
+	j, path, err := f.w.startJournal(ctx, "release-finish", f.source, "main", f.j.SourceSHA, steps)
+	if err != nil {
+		t.Fatalf("start schema-v4 journal: %v", err)
+	}
+	cursor, err := journalStepBoundary(steps, "publish-and-delete-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Done = cursor
+	j.TagTargetSHA = f.j.TagTargetSHA
+	j.TagObjectSHA = f.j.TagObjectSHA
+	j.RemoteTargets = append([]finishRemoteTarget(nil), f.j.RemoteTargets...)
+	if err = writeAtomic(path, j); err != nil {
+		t.Fatalf("persist release publication plan: %v", err)
+	}
+	if err = f.w.publishFinishedAndDeleteRemote(ctx, path, j, f.targets, f.tag); err != nil {
+		t.Fatalf("simulate accepted atomic transaction: %v", err)
+	}
+	// The persisted cursor was not advanced because the client never received
+	// the push response. The normal finish loop had already left HEAD on
+	// develop after its local merge step.
+	gitTest(t, f.repo, "checkout", "--no-guess", "develop")
+	f.j, f.path = j, path
+	return f
+}
+
+func TestReleaseFinishReplaysAcceptedAtomicGitFlowTransactionAndCleansUp(t *testing.T) {
+	ctx := context.Background()
+	f := newGitFlowReleaseReplayFixture(t)
+	if got := f.remoteRef(t, "refs/heads/"+f.source); got != "" {
+		t.Fatalf("fixture did not delete remote source atomically: %q", got)
+	}
+	if err := f.w.ReleaseFinish(ctx, "", true); err != nil {
+		t.Fatalf("public release finish replay: %v", err)
+	}
+	if _, err := os.Stat(f.path); !os.IsNotExist(err) {
+		t.Fatalf("journal remains after successful replay: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); !os.IsNotExist(err) {
+		t.Fatalf("local release source remains after replay: %v", err)
+	}
+	for _, target := range f.targets {
+		planned := f.j.RemoteTargets[indexOfTarget(t, f.j.RemoteTargets, target)].DesiredSHA
+		if got := f.remoteRef(t, "refs/heads/"+target); !strings.HasPrefix(got, planned+"\t") {
+			t.Fatalf("remote %s = %q, want planned %s", target, got, planned)
+		}
+	}
+	object, peeled, err := f.w.remoteAnnotatedTag(ctx, f.tag)
+	if err != nil || object != f.j.TagObjectSHA || peeled != f.j.TagTargetSHA {
+		t.Fatalf("remote tag object=%q peeled=%q err=%v; want %q %q", object, peeled, err, f.j.TagObjectSHA, f.j.TagTargetSHA)
+	}
+}
+
+func TestReleaseFinishRejectsCorruptPersistedGitFlowReplayPlanWithoutCleanup(t *testing.T) {
+	ctx := context.Background()
+	for _, corrupt := range []string{"missing-develop", "invalid-develop-desired"} {
+		t.Run(corrupt, func(t *testing.T) {
+			f := newGitFlowReleaseReplayFixture(t)
+			bad := *f.j
+			bad.RemoteTargets = append([]finishRemoteTarget(nil), f.j.RemoteTargets...)
+			switch corrupt {
+			case "missing-develop":
+				bad.RemoteTargets = bad.RemoteTargets[:1]
+			case "invalid-develop-desired":
+				bad.RemoteTargets[1].DesiredSHA = "not-a-commit"
+			}
+			if err := writeAtomic(f.path, &bad); err != nil {
+				t.Fatal(err)
+			}
+			journalBefore, err := os.ReadFile(f.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refsBefore := map[string]string{
+				"refs/heads/main":    f.remoteRef(t, "refs/heads/main"),
+				"refs/heads/develop": f.remoteRef(t, "refs/heads/develop"),
+				"refs/tags/" + f.tag: f.remoteRef(t, "refs/tags/"+f.tag),
+			}
+			if err = f.w.ReleaseFinish(ctx, "", true); err == nil {
+				t.Fatalf("public release replay accepted %s persisted plan", corrupt)
+			}
+			journalAfter, readErr := os.ReadFile(f.path)
+			if readErr != nil || string(journalAfter) != string(journalBefore) {
+				t.Fatalf("journal changed after corrupt replay: read=%v before=%s after=%s", readErr, journalBefore, journalAfter)
+			}
+			if _, statErr := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); statErr != nil {
+				t.Fatalf("local release source removed after corrupt replay: %v", statErr)
+			}
+			for ref, want := range refsBefore {
+				if got := f.remoteRef(t, ref); got != want {
+					t.Fatalf("remote %s changed after corrupt replay: got %q want %q", ref, got, want)
+				}
+			}
+		})
+	}
+}
