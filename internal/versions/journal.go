@@ -15,23 +15,31 @@ import (
 
 // Journal makes local finishing restartable after a merge conflict. It is kept
 // under git-path, which scopes it to the repository/worktree instead of /tmp.
-const journalSchemaVersion = 3
+const journalSchemaVersion = 4
 
 var replaceJournalFile = replacement.Replace
 
 type journal struct {
-	Version      int       `json:"version"`
-	WayOfWork    string    `json:"wayOfWork"`
-	Repository   string    `json:"repository"`
-	Worktree     string    `json:"worktree"`
-	Operation    string    `json:"operation"`
-	Source       string    `json:"source"`
-	SourceSHA    string    `json:"sourceSHA"`
-	Target       string    `json:"target"`
-	TagTargetSHA string    `json:"tagTargetSHA,omitempty"`
-	Steps        []string  `json:"steps"`
-	Done         int       `json:"done"`
-	Created      time.Time `json:"created"`
+	Version       int                  `json:"version"`
+	WayOfWork     string               `json:"wayOfWork"`
+	Repository    string               `json:"repository"`
+	Worktree      string               `json:"worktree"`
+	Operation     string               `json:"operation"`
+	Source        string               `json:"source"`
+	SourceSHA     string               `json:"sourceSHA"`
+	Target        string               `json:"target"`
+	TagTargetSHA  string               `json:"tagTargetSHA,omitempty"`
+	RemoteTargets []finishRemoteTarget `json:"remoteTargets,omitempty"`
+	TagObjectSHA  string               `json:"tagObjectSHA,omitempty"`
+	Steps         []string             `json:"steps"`
+	Done          int                  `json:"done"`
+	Created       time.Time            `json:"created"`
+}
+
+type finishRemoteTarget struct {
+	Name       string `json:"name"`
+	BeforeSHA  string `json:"beforeSHA"`
+	DesiredSHA string `json:"desiredSHA"`
 }
 
 func (w *Workflows) journalPath(ctx context.Context) (string, error) {
@@ -89,13 +97,13 @@ func (w *Workflows) resumeLocalFinishName(ctx context.Context, operation, prefix
 func (w *Workflows) localFinishSteps(operation string) []string {
 	switch operation {
 	case "hotfix-finish":
-		return []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-remote", "delete-local"}
+		return []string{"checkout-target", "merge", "tag", "publish-and-delete-remote", "delete-local"}
 	case "release-finish":
-		steps := []string{"checkout-main", "merge-main", "tag", "push-main", "push-tag"}
+		steps := []string{"checkout-main", "merge-main", "tag"}
 		if w.hasDevelop() {
-			steps = append(steps, "checkout-develop", "merge-develop", "push-develop")
+			steps = append(steps, "checkout-develop", "merge-develop")
 		}
-		return append(steps, "delete-remote", "delete-local")
+		return append(steps, "publish-and-delete-remote", "delete-local")
 	default:
 		return nil
 	}
@@ -163,7 +171,7 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 // or be proven absent: a crash after the server accepts deletion but before the
 // journal advances must remain restartable, and no target mutation remains.
 func (w *Workflows) revalidateJournalSource(ctx context.Context, j *journal) error {
-	deleteStep, err := journalStepBoundary(j.Steps, "delete-remote")
+	deleteStep, err := journalStepBoundary(j.Steps, "publish-and-delete-remote")
 	if err != nil {
 		return err
 	}

@@ -167,11 +167,6 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	}
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
-		if s == "delete-remote" {
-			if err := w.verifyReleaseFinished(ctx, target, j.SourceSHA, version); err != nil {
-				return err
-			}
-		}
 		switch s {
 		case "checkout-main":
 			e = w.checkoutFetchedBase(ctx, target)
@@ -199,23 +194,14 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 			if e == nil {
 				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), j.TagTargetSHA)
 			}
-		case "push-main":
-			e = w.checkoutFinishBranch(ctx, target)
-			if e == nil {
-				_, e = w.git(ctx, "push", w.remote, "refs/heads/"+target+":refs/heads/"+target)
-			}
-		case "push-tag":
-			tagRef := "refs/tags/" + version
-			_, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef)
 		case "checkout-develop":
 			e = w.checkoutFetchedBase(ctx, "develop")
-		case "push-develop":
-			e = w.checkoutFinishBranch(ctx, "develop")
-			if e == nil {
-				_, e = w.git(ctx, "push", w.remote, "refs/heads/develop:refs/heads/develop")
+		case "publish-and-delete-remote":
+			targets := []string{target}
+			if w.hasDevelop() {
+				targets = append(targets, "develop")
 			}
-		case "delete-remote":
-			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
+			e = w.publishFinishedAndDeleteRemote(ctx, p, j, targets, version)
 		case "delete-local":
 			e = w.deleteLocalBranch(ctx, branch)
 		}

@@ -161,11 +161,6 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	}
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
-		if s == "delete-remote" {
-			if err := w.verifyFinished(ctx, target, j.SourceSHA, version); err != nil {
-				return err
-			}
-		}
 		switch s {
 		case "checkout-target":
 			e = w.checkoutFetchedBase(ctx, target)
@@ -182,13 +177,8 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 			if e == nil {
 				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), j.TagTargetSHA)
 			}
-		case "push-target":
-			_, e = w.git(ctx, "push", w.remote, "refs/heads/"+target+":refs/heads/"+target)
-		case "push-tag":
-			tagRef := "refs/tags/" + version
-			_, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef)
-		case "delete-remote":
-			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
+		case "publish-and-delete-remote":
+			e = w.publishFinishedAndDeleteRemote(ctx, p, j, []string{target}, version)
 		case "delete-local":
 			e = w.deleteLocalBranch(ctx, branch)
 		}

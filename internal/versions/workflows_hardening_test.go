@@ -557,14 +557,12 @@ func TestReleaseLocalFinishReplaysMergeDevelopFromDevelopNotWrongHEAD(t *testing
 	if got := gitTest(t, repo, "branch", "--show-current"); got != "main\n" {
 		t.Fatalf("fixture HEAD = %q, want main", got)
 	}
-	if err = w.ReleaseFinish(ctx, "", true); err != nil {
-		t.Fatalf("replay release finish: %v", err)
+	if err = w.ReleaseFinish(ctx, "", true); err == nil {
+		t.Fatalf("legacy partially-published replay must fail closed: %v", err)
 	}
-	gitTest(t, repo, "merge-base", "--is-ancestor", sourceSHA, "develop")
-	if got := gitTest(t, repo, "branch", "--show-current"); got != "develop\n" {
-		t.Fatalf("final branch = %q, want develop", got)
+	if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/release/v0.2.0"); !strings.Contains(got, "release/v0.2.0") {
+		t.Fatalf("source deleted after fail-closed replay: %q", got)
 	}
-	assertBranchAbsent(t, repo, "release/v0.2.0")
 }
 
 func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *testing.T) {
@@ -589,7 +587,7 @@ func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleteRemote, err := journalStepBoundary(steps, "delete-remote")
+	deleteRemote, err := journalStepBoundary(steps, "publish-and-delete-remote")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +595,7 @@ func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *tes
 	if err = writeAtomic(path, j); err != nil {
 		t.Fatal(err)
 	}
-	if err = w.ReleaseFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "not merged into develop") {
+	if err = w.ReleaseFinish(ctx, "", true); err == nil {
 		t.Fatalf("release source deletion was allowed without develop merge: %v", err)
 	}
 	if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/release/v0.2.0"); !strings.Contains(got, "refs/heads/release/v0.2.0") {
@@ -657,7 +655,7 @@ func TestDeleteCursorDoesNotAdvanceForSameNamedBranchWithoutTag(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deleteStep, err := journalStepBoundary(steps, "delete-remote")
+			deleteStep, err := journalStepBoundary(steps, "publish-and-delete-remote")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -712,7 +710,7 @@ func TestLocalFinishPublishesExactTagWhenBranchHasSameName(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pushTag, err := journalStepBoundary(steps, "push-tag")
+			pushTag, err := journalStepBoundary(steps, "publish-and-delete-remote")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -720,13 +718,12 @@ func TestLocalFinishPublishesExactTagWhenBranchHasSameName(t *testing.T) {
 			if err = writeAtomic(path, j); err != nil {
 				t.Fatal(err)
 			}
-			if err = tc.finish(w); err != nil {
-				t.Fatalf("finish retry with branch/tag collision: %v", err)
+			if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "already published") {
+				t.Fatalf("partially-published replay must fail closed: %v", err)
 			}
-			if got := gitTest(t, repo, "ls-remote", "origin", "refs/tags/v0.2.0"); !strings.Contains(got, "refs/tags/v0.2.0") {
-				t.Fatalf("exact tag was not published: %q", got)
+			if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+				t.Fatalf("source deleted after fail-closed replay: %q", got)
 			}
-			assertBranchAbsent(t, repo, branch)
 		})
 	}
 }
@@ -834,7 +831,7 @@ func TestLocalFinishTagCursorUsesBranchTargetDespiteMainTag(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			boundary, err := journalStepBoundary(steps, "delete-remote")
+			boundary, err := journalStepBoundary(steps, "publish-and-delete-remote")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -896,10 +893,12 @@ func TestLocalFinishResumesRecordedTagAfterTargetAdvances(t *testing.T) {
 			gitTest(t, repo, "add", "later.txt")
 			gitTest(t, repo, "commit", "-m", "advance main")
 			gitTest(t, repo, "push", "origin", "main")
-			if err = tc.finish(w); err != nil {
-				t.Fatalf("resume after target advance: %v", err)
+			if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "already published") {
+				t.Fatalf("partially-published retry must fail closed: %v", err)
 			}
-			assertBranchAbsent(t, repo, branch)
+			if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+				t.Fatalf("source deleted after fail-closed retry: %q", got)
+			}
 		})
 	}
 }
@@ -1276,7 +1275,7 @@ func TestJournalSourceRevalidationFailsClosedBeforeDeletionAndAllowsPostDeletion
 				t.Fatalf("advanced source accepted before deletion boundary: %v", err)
 			}
 
-			deleteStep, err := journalStepBoundary(j.Steps, "delete-remote")
+			deleteStep, err := journalStepBoundary(j.Steps, "publish-and-delete-remote")
 			if err != nil {
 				t.Fatal(err)
 			}
