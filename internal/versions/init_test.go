@@ -316,6 +316,52 @@ func TestGitFlowConfigRejectsNestedOrSimilarKeys(t *testing.T) {
 	}
 }
 
+func TestGitFlowConfigIgnoresNestedMappingBeforeRootConfig(t *testing.T) {
+	dir := workflowFixture(t)
+	path := filepath.Join(dir, cloudOpsWorksDir, "cloudopsworks-ci.yaml")
+	ci := "other:\n  config:\n    gitFlow:\n      enabled: true # nested must stay\n\nconfig: # root configuration\n  gitFlow:\n    enabled: false # root must change\n"
+	writeFile(t, path, ci)
+	r := newInitRunner(t, dir, SelectWayOfWork)
+	enabled, supported, err := r.gitFlowConfig()
+	if err != nil || !supported || enabled {
+		t.Fatalf("gitFlowConfig = enabled %v, supported %v, err %v", enabled, supported, err)
+	}
+	changed, err := r.setGitFlowEnabled(true)
+	if err != nil || !changed {
+		t.Fatalf("setGitFlowEnabled = changed %v, err %v", changed, err)
+	}
+	want := strings.Replace(ci, "    enabled: false # root must change", "    enabled: true # root must change", 1)
+	if got := mustReadFile(t, path); got != want {
+		t.Fatalf("nested mapping was read or changed:\nwant %q\n got %q", want, got)
+	}
+}
+
+func TestGitFlowConfigNestedOnlyDoesNotDriveSelectionOrMutation(t *testing.T) {
+	dir := workflowFixture(t)
+	path := filepath.Join(dir, cloudOpsWorksDir, "cloudopsworks-ci.yaml")
+	ci := "other:\n  config:\n    gitFlow:\n      enabled: false # nested only\n"
+	writeFile(t, path, ci)
+	selected := false
+	r := newInitRunner(t, dir, func(io.Reader, io.Writer) (WayOfWork, error) {
+		selected = true
+		return WayOfWorkGitHubFlow, nil
+	})
+	if enabled, supported, err := r.gitFlowConfig(); err != nil || supported || enabled {
+		t.Fatalf("gitFlowConfig = enabled %v, supported %v, err %v", enabled, supported, err)
+	}
+	wow, err := r.chooseWayOfWork("")
+	if err != nil || wow != WayOfWorkGitFlow || selected {
+		t.Fatalf("nested-only selection = %q, selected %v, err %v", wow, selected, err)
+	}
+	changed, err := r.setGitFlowEnabled(true)
+	if err != nil || changed {
+		t.Fatalf("setGitFlowEnabled = changed %v, err %v", changed, err)
+	}
+	if got := mustReadFile(t, path); got != ci {
+		t.Fatalf("nested-only config mutated: %q", got)
+	}
+}
+
 func TestInitIdenticalSelectionIsNoOp(t *testing.T) {
 	dir := workflowFixture(t)
 	selector := mustReadFile(t, filepath.Join(dir, cloudOpsWorksDir, "gitversion_githubflow.yaml"))

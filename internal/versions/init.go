@@ -210,7 +210,10 @@ type yamlMappingLine struct {
 func findGitFlowEnabled(data []byte) (gitFlowEnabledMatch, bool) {
 	lines := yamlMappingLines(data)
 	for configIndex, config := range lines {
-		if config.key != "config" || config.value != "" {
+		// Only an unindented mapping is the document's root config. A nested
+		// other.config mapping may happen to contain the same keys, but must
+		// never select or rewrite the repository workflow setting.
+		if config.indent != 0 || config.key != "config" || config.value != "" {
 			continue
 		}
 		configChildIndent := childIndent(lines, configIndex, config.indent)
