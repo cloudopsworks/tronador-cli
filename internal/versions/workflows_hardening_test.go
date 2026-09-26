@@ -69,18 +69,17 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 	}
 }
 
-func TestEnsureAnnotatedTagReusesMatchingAnnotatedTag(t *testing.T) {
+func TestRequireAnnotatedFinishTagAcceptsAnnotatedTag(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "main^{commit}"):   "abc\n",
 		key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
 		key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
-	if err := w.ensureAnnotatedTag(context.Background(), "v1.2.3", "release", "main"); err != nil {
+	if err := w.requireAnnotatedFinishTag(context.Background(), "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	if f.saw("git", "tag", "-a", "v1.2.3", "main", "-m", "release") {
-		t.Fatalf("matching annotated tag was recreated: %#v", f.calls)
+	if !f.saw("git", "rev-parse", "--verify", "v1.2.3^{tag}") {
+		t.Fatalf("annotation probe was not consumed: %#v", f.calls)
 	}
 }
 
