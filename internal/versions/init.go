@@ -426,6 +426,14 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	if _, err := r.git(ctx, "fetch", "origin", "--prune"); err != nil {
 		return false, err
 	}
+	// A configured primary is an explicit safety contract, even if origin/develop
+	// already exists and initialization would otherwise be a no-op. Do not let a
+	// stale, divergent, or wrong checkout silently pass that contract.
+	if r.mainBranch != "" {
+		if _, err := r.validateConfiguredPrimary(ctx); err != nil {
+			return false, err
+		}
+	}
 	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/origin/develop"); err == nil {
 		// A remote develop branch normally means initialization is already done.
 		// If this clone also has a local develop branch, do not silently leave a
@@ -500,6 +508,32 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Runner) validateConfiguredPrimary(ctx context.Context) (string, error) {
+	primary := r.mainBranch
+	if !safeRef(primary) {
+		return "", fmt.Errorf("invalid configured main branch %q", primary)
+	}
+	branch, err := r.git(ctx, "branch", "--show-current")
+	if err != nil {
+		return "", err
+	}
+	if branch != primary {
+		return "", fmt.Errorf("refusing to initialize GitFlow from %q; check out configured main branch %q first", branch, primary)
+	}
+	local, err := r.git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	remote, err := r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
+	if err != nil {
+		return "", fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
+	}
+	if local != remote {
+		return "", fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+	}
+	return primary, nil
 }
 
 func isExitStatus(err error, code int) bool {
