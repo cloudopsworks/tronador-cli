@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	repospkg "tronador-cli/internal/repos"
 	toolspkg "tronador-cli/internal/tools"
 )
 
@@ -33,6 +34,7 @@ type Options struct {
 	JSON           bool
 	Snapshot       bool
 	Plain          bool
+	Generate       bool
 	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
@@ -255,6 +257,12 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 	if binding.PlainVersion {
 		flags = append(flags, FlagDefinition{Name: "plain", Type: "bool", Description: "generate the Node or Python project version as x.y.z", Default: "false"})
 	}
+	if binding.Operation == "generate-version" {
+		flags = append(flags,
+			FlagDefinition{Name: "generate", Type: "bool", Description: "generate the guarded legacy blueprint _VERSION marker for a catalog-managed template-derived repository", Default: "false"},
+			FlagDefinition{Name: "yes", Type: "bool", Description: "confirm legacy blueprint marker generation outside a dry-run", Default: "false"},
+		)
+	}
 	if binding.Executor == ExecutorNative && binding.ConfirmationPolicy == "yes_for_noninteractive" {
 		flags = append(flags, FlagDefinition{Name: "yes", Type: "bool", Description: "confirm destructive operations", Default: "false"})
 	}
@@ -315,6 +323,12 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	if r.Opts.Plain && !binding.PlainVersion {
 		return detection, OperationPlan{}, withDetection(plainUnsupportedError(binding.Capability), detection)
 	}
+	if r.Opts.Generate && binding.Capability != "version" {
+		return detection, OperationPlan{}, withDetection(generateUnsupportedError(binding.Capability), detection)
+	}
+	if r.Opts.Generate && (r.Opts.Snapshot || r.Opts.Plain) {
+		return detection, OperationPlan{}, withDetection(projectError("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"), detection)
+	}
 	plan := OperationPlan{
 		Implementation: detection.ProfileID, Marker: detection.Marker, Capability: binding.Capability,
 		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
@@ -325,7 +339,7 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	var steps []OperationStep
 	if binding.Executor != ExecutorNative {
 		var stepErr error
-		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot, r.Opts.Plain)
+		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot, r.Opts.Plain, r.Opts.Generate)
 		if stepErr != nil {
 			return detection, OperationPlan{}, withDetection(stepErr, detection)
 		}
@@ -383,7 +397,7 @@ func countRequired(schema []ArgumentDefinition) int {
 	return count
 }
 
-func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot, plain bool) ([]OperationStep, error) {
+func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot, plain, generate bool) ([]OperationStep, error) {
 	call := func(tool string, args ...string) ToolCall {
 		return ToolCall{ToolName: tool, Arguments: append([]string(nil), args...), WorkingDirectory: workdir}
 	}
@@ -403,9 +417,11 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 	case "generate-version":
 		variable := "FullSemVer"
 		description := "calculate project version"
-		if snapshot || plain {
+		if snapshot || plain || generate {
 			variable = "MajorMinorPatch"
-			if snapshot {
+			if generate {
+				description = "calculate legacy blueprint marker version"
+			} else if snapshot {
 				description = "calculate project snapshot version"
 			} else {
 				description = "calculate plain project version"
@@ -526,7 +542,7 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	if err != nil {
 		return Result{}, err
 	}
-	if plan.ConfirmationPolicy == "yes_for_noninteractive" && !r.Opts.Yes && !r.Opts.DryRun {
+	if (plan.ConfirmationPolicy == "yes_for_noninteractive" || r.Opts.Generate) && !r.Opts.Yes && !r.Opts.DryRun {
 		return Result{}, withDetection(&Error{Code: "project_confirmation_required", Command: "project", Capability: plan.Capability, Hint: "rerun with --yes", ExitStatus: 1, Cause: errors.New("destructive operation requires --yes")}, detection)
 	}
 	if r.Opts.DryRun && r.Opts.Engine != "auto" {
@@ -548,7 +564,10 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	// Version has an exact-tag fast path. It deliberately runs before any
 	// resolver work, including for evaluated dry-runs.
 	if plan.Capability == "version" {
-		tag := exactHeadTag(ctx, r.Opts.WorkDir)
+		tag := exactTag{}
+		if !r.Opts.Generate {
+			tag = exactHeadTag(ctx, r.Opts.WorkDir)
+		}
 		if r.Opts.Snapshot && tag.Found {
 			return Result{}, withDetection(snapshotTaggedHeadError(), detection)
 		}
@@ -848,6 +867,14 @@ func executeNative(plan OperationPlan) ([]string, error) {
 }
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result, tag exactTag) (Result, error) {
+	markerPath := ""
+	if r.Opts.Generate {
+		var targetErr error
+		markerPath, targetErr = legacyBlueprintMarkerPath(r.Opts.WorkDir)
+		if targetErr != nil {
+			return Result{}, withDetection(targetErr, detection)
+		}
+	}
 	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag, detection.ProfileID)
 	if err != nil {
 		if fromGitVersion {
@@ -855,11 +882,33 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		}
 		return Result{}, withDetection(err, detection)
 	}
-	changes, buildErr := buildVersionChanges(r.Opts.WorkDir, detection.ProfileID, version)
-	if buildErr != nil {
-		return Result{}, withDetection(wrapProjectError("project_operation_failed", "build version file changes", buildErr), detection)
+	changes := []versionChange{}
+	if r.Opts.Generate {
+		if !majorMinorPatchPattern.MatchString(version) {
+			return Result{}, withDetection(projectError("project_operation_failed", "GitVersion did not return a MajorMinorPatch version for --generate"), detection)
+		}
+		markerVersion := "v" + strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V")
+		change, warning, buildErr := buildLegacyBlueprintMarkerChange(r.Opts.WorkDir, markerPath, markerVersion)
+		if buildErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build legacy blueprint marker change", buildErr), detection)
+		}
+		if warning != "" {
+			_, _ = fmt.Fprintln(r.Opts.Stderr, warning)
+		}
+		if change != nil {
+			changes = append(changes, *change)
+		}
+		result.GeneratedArtifacts = []string{markerPath}
+		result.Version = markerVersion
+	} else {
+		var buildErr error
+		changes, buildErr = buildVersionChanges(r.Opts.WorkDir, detection.ProfileID, version)
+		if buildErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build version file changes", buildErr), detection)
+		}
+		result.Version = version
 	}
-	result.Version, result.TagCreated = version, false
+	result.TagCreated = false
 	if r.Opts.DryRun {
 		preview := make([]FileChange, 0, len(changes))
 		for _, change := range changes {
@@ -887,16 +936,145 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		if pathErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "resolve version output", pathErr), detection)
 		}
-		if writeErr := os.WriteFile(path, change.after, fileMode(path)); writeErr != nil {
+		if writeErr := writeProjectFileAtomically(path, change.after, fileMode(path)); writeErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "write version output", writeErr), detection)
 		}
 	}
 	result.Stdout, result.Stderr = execution.Stdout, execution.Stderr
-	result.GeneratedArtifacts = append([]string(nil), plan.GeneratedArtifacts...)
+	if !r.Opts.Generate {
+		result.GeneratedArtifacts = append([]string(nil), plan.GeneratedArtifacts...)
+	}
 	if !r.Opts.JSON {
-		_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
+		if r.Opts.Generate {
+			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated legacy blueprint marker %s in %s (tag_created=false)\n", result.Version, markerPath)
+		} else {
+			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
+		}
 	}
 	return result, nil
+}
+
+// legacyBlueprintMarkerPath accepts only repositories identified by the
+// repository-template catalog. A project implementation marker alone is not
+// sufficient: _VERSION controls blueprint upgrades and must not be created in
+// arbitrary repositories.
+func legacyBlueprintMarkerPath(workdir string) (string, error) {
+	catalog, err := repospkg.LoadConfig("")
+	if err != nil {
+		return "", wrapProjectError("project_version_marker_unsupported", "load repository template catalog", err)
+	}
+	type markerCandidate struct {
+		path string
+	}
+	var candidates []markerCandidate
+	for _, layout := range []struct {
+		root        string
+		versionFile string
+	}{
+		{root: ".cloudopsworks", versionFile: ".cloudopsworks/_VERSION"},
+		{root: ".github", versionFile: ".github/_VERSION"},
+	} {
+		rootPath, rootErr := safeProjectPath(workdir, layout.root)
+		if rootErr != nil {
+			continue
+		}
+		rootInfo, statErr := os.Lstat(rootPath)
+		if errors.Is(statErr, os.ErrNotExist) {
+			continue
+		}
+		if statErr != nil {
+			return "", wrapProjectError("project_version_marker_invalid", "inspect template layout", statErr)
+		}
+		if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+			return "", projectError("project_version_marker_invalid", "template layout must be a non-symlink directory")
+		}
+
+		var active []repospkg.Template
+		for _, template := range catalog.Templates {
+			markerPath, markerErr := safeProjectPath(workdir, filepath.ToSlash(filepath.Join(layout.root, template.Marker)))
+			if markerErr != nil {
+				return "", wrapProjectError("project_version_marker_invalid", "resolve template marker", markerErr)
+			}
+			markerInfo, markerStatErr := os.Lstat(markerPath)
+			if errors.Is(markerStatErr, os.ErrNotExist) {
+				continue
+			}
+			if markerStatErr != nil {
+				return "", wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
+			}
+			if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
+				return "", projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
+			}
+			active = append(active, template)
+		}
+		if len(active) == 0 {
+			continue
+		}
+		if len(active) != 1 || !active[0].Versioned {
+			return "", projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+		}
+		path, pathErr := safeProjectPath(workdir, layout.versionFile)
+		if pathErr != nil {
+			return "", wrapProjectError("project_version_marker_invalid", "resolve legacy blueprint marker", pathErr)
+		}
+		if info, statErr := os.Lstat(path); statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+			return "", projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
+		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return "", wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", statErr)
+		}
+		candidates = append(candidates, markerCandidate{path: layout.versionFile})
+	}
+	if len(candidates) == 1 {
+		return candidates[0].path, nil
+	}
+	if len(candidates) > 1 {
+		return "", projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
+	}
+	return "", projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+}
+
+func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".tronador-version-*")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if err := file.Chmod(mode); err == nil {
+		_, err = file.Write(data)
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}
+
+func buildLegacyBlueprintMarkerChange(workdir, relative, version string) (*versionChange, string, error) {
+	path, err := safeProjectPath(workdir, filepath.FromSlash(relative))
+	if err != nil {
+		return nil, "", err
+	}
+	before, err := os.ReadFile(path)
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return nil, "", err
+	}
+	after := []byte(version + "\n")
+	if bytes.Equal(before, after) {
+		return nil, "", nil
+	}
+	warning := ""
+	if !missing && strings.TrimSpace(string(before)) != version {
+		warning = fmt.Sprintf("WARNING: --generate replaces blueprint marker %s from %q to %q; this marker controls repository-template upgrades.", relative, strings.TrimSpace(string(before)), version)
+	}
+	op := "modify"
+	if missing {
+		op = "add"
+	}
+	return &versionChange{FileChange: FileChange{Path: filepath.ToSlash(relative), Operation: op, Patch: unifiedPatch(filepath.ToSlash(relative), before, after, missing)}, after: after}, warning, nil
 }
 
 type exactTag struct {
@@ -923,6 +1101,17 @@ func plainUnsupportedError(capability string) *Error {
 		Hint:       "use --plain only with `tronador project version` in a Node or Python repository",
 		ExitStatus: 1,
 		Cause:      errors.New("--plain is supported only for Node and Python project version"),
+	}
+}
+
+func generateUnsupportedError(capability string) *Error {
+	return &Error{
+		Code:       "project_generate_unsupported",
+		Command:    "project",
+		Capability: capability,
+		Hint:       "use --generate only with `tronador project version` in a catalog-managed template-derived repository",
+		ExitStatus: 1,
+		Cause:      errors.New("--generate is supported only for project version"),
 	}
 }
 
@@ -1149,14 +1338,18 @@ func parseGitVersionFullOutput(output string) string {
 		return ""
 	}
 	var value struct {
-		FullSemVer string `json:"FullSemVer"`
-		SemVer     string `json:"SemVer"`
+		FullSemVer      string `json:"FullSemVer"`
+		SemVer          string `json:"SemVer"`
+		MajorMinorPatch string `json:"MajorMinorPatch"`
 	}
 	if json.Unmarshal([]byte(trimmed), &value) == nil {
 		if value.FullSemVer != "" {
 			return value.FullSemVer
 		}
-		return value.SemVer
+		if value.SemVer != "" {
+			return value.SemVer
+		}
+		return value.MajorMinorPatch
 	}
 	return strings.TrimSpace(strings.Split(trimmed, "\n")[0])
 }

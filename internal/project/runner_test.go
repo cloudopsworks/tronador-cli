@@ -600,7 +600,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 				{Operation: "generate-version"},
 				{Operation: "application-init"},
 			} {
-				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir, false, false)
+				steps, err := buildOperationSteps(binding, Detection{ProfileID: "docker"}, nil, workdir, false, false, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -619,7 +619,7 @@ func TestGitVersionCallsUseSuppressionAndOptionalConfig(t *testing.T) {
 					}
 				}
 			}
-			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir, false, false)
+			fullSteps, err := buildOperationSteps(CapabilityBinding{Operation: "application-init"}, Detection{ProfileID: "flutter"}, nil, workdir, false, false, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1393,5 +1393,190 @@ func TestVersionDryRunPreviewsChangesWithoutMutation(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"file_changes"`) || strings.Contains(string(encoded), `"generated_artifacts"`) {
 		t.Fatalf("preview JSON = %s", encoded)
+	}
+}
+
+func TestVersionGenerateWritesGuardedLegacyBlueprintMarker(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	marker := filepath.Join(workdir, ".cloudopsworks", "_VERSION")
+	if err := os.WriteFile(marker, []byte("v5.10.2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	var calls []ToolCall
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, Stderr: &stderr,
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			calls = append(calls, call)
+			return ToolExecution{Stdout: `{"MajorMinorPatch":"2.4.6"}`}, nil
+		},
+	})
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "v2.4.6" || result.TagCreated || len(result.GeneratedArtifacts) != 1 || result.GeneratedArtifacts[0] != ".cloudopsworks/_VERSION" {
+		t.Fatalf("generate result = %+v", result)
+	}
+	if got := string(mustRead(t, marker)); got != "v2.4.6\n" {
+		t.Fatalf("legacy marker = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(workdir, "VERSION")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("--generate wrote ordinary VERSION: %v", err)
+	}
+	if len(calls) != 1 || !contains(calls[0].Arguments, "MajorMinorPatch") || contains(calls[0].Arguments, "tag") || contains(calls[0].Arguments, "push") {
+		t.Fatalf("generate GitVersion call = %+v", calls)
+	}
+	if !strings.Contains(stderr.String(), "WARNING: --generate replaces blueprint marker") {
+		t.Fatalf("expected clash warning, got %q", stderr.String())
+	}
+}
+
+func TestVersionGenerateDryRunDoesNotMutateOrRequireConfirmation(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	marker := filepath.Join(workdir, ".cloudopsworks", "_VERSION")
+	if err := os.WriteFile(marker, []byte("v5.10.2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, Generate: true, DryRun: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, Stdout: &stdout, Stderr: &stderr,
+		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+			return ToolExecution{Stdout: `{"MajorMinorPatch":"2.4.6"}`}, nil
+		},
+	})
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "v2.4.6" || result.FileChanges == nil || len(*result.FileChanges) != 1 || (*result.FileChanges)[0].Path != ".cloudopsworks/_VERSION" {
+		t.Fatalf("generate preview = %+v", result)
+	}
+	if got := string(mustRead(t, marker)); got != "v5.10.2\n" {
+		t.Fatalf("dry-run mutated legacy marker: %q", got)
+	}
+	if !strings.Contains(stdout.String(), "+++ b/.cloudopsworks/_VERSION") || !strings.Contains(stderr.String(), "WARNING:") {
+		t.Fatalf("dry-run output = stdout %q stderr %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestVersionGenerateRequiresCatalogManagedTemplateAndConfirmation(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	if err := os.WriteFile(filepath.Join(workdir, ".cloudopsworks", "_VERSION"), []byte("v5.10.2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := mustRunner(t, Options{WorkDir: workdir, Generate: true})
+	if _, err := runner.Run(context.Background(), "version", nil); codeOf(err) != "project_confirmation_required" {
+		t.Fatalf("generate without --yes error = %v, code = %q", err, codeOf(err))
+	}
+
+	ordinary := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ordinary, ".cloudopsworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(ordinary); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("ordinary repository marker path error = %v, code = %q", err, codeOf(err))
+	}
+	ambiguous := t.TempDir()
+	for _, relative := range []string{".cloudopsworks/.golang", ".cloudopsworks/.java", ".cloudopsworks/_VERSION"} {
+		path := filepath.Join(ambiguous, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("v5.10.2\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := legacyBlueprintMarkerPath(ambiguous); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("ambiguous repository marker path error = %v, code = %q", err, codeOf(err))
+	}
+}
+
+func TestVersionGenerateCreatesMissingModernMarkerForCatalogTemplate(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	marker := filepath.Join(workdir, ".cloudopsworks", "_VERSION")
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fixture marker existence = %v", err)
+	}
+	runner := mustRunner(t, Options{
+		WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")},
+		ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+			return ToolExecution{Stdout: `{"MajorMinorPatch":"5.10.3"}`}, nil
+		},
+	})
+	result, err := runner.Run(context.Background(), "version", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "v5.10.3" || len(result.GeneratedArtifacts) != 1 || result.GeneratedArtifacts[0] != ".cloudopsworks/_VERSION" {
+		t.Fatalf("generate result = %+v", result)
+	}
+	if got := string(mustRead(t, marker)); got != "v5.10.3\n" {
+		t.Fatalf("generated marker = %q", got)
+	}
+}
+
+func TestLegacyBlueprintMarkerPathRequiresCatalogLayoutMarker(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	if err := os.RemoveAll(filepath.Join(workdir, ".cloudopsworks")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workdir, ".cloudopsworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(workdir); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("project marker alone was accepted: %v, code = %q", err, codeOf(err))
+	}
+}
+
+func TestLegacyBlueprintMarkerPathSupportsLegacyLayoutAndRejectsUnsafeOrAmbiguousLayouts(t *testing.T) {
+	legacy := fixture(t, ".golang")
+	if err := os.RemoveAll(filepath.Join(legacy, ".cloudopsworks")); err != nil {
+		t.Fatal(err)
+	}
+	legacyRoot := filepath.Join(legacy, ".github")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, ".golang"), []byte("managed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := legacyBlueprintMarkerPath(legacy); err != nil || got != ".github/_VERSION" {
+		t.Fatalf("legacy marker path = %q, %v", got, err)
+	}
+
+	unsafe := fixture(t, ".golang")
+	marker := filepath.Join(unsafe, ".cloudopsworks", ".golang")
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(unsafe, ".golang"), marker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(unsafe); codeOf(err) != "project_version_marker_invalid" {
+		t.Fatalf("symlink template marker error = %v, code = %q", err, codeOf(err))
+	}
+	unsafeVersion := fixture(t, ".golang")
+	versionPath := filepath.Join(unsafeVersion, ".cloudopsworks", "_VERSION")
+	if err := os.Symlink(filepath.Join(unsafeVersion, "outside-version"), versionPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(unsafeVersion); codeOf(err) != "project_version_marker_invalid" {
+		t.Fatalf("symlink marker target error = %v, code = %q", err, codeOf(err))
+	}
+
+	ambiguous := fixture(t, ".golang")
+	legacyRoot = filepath.Join(ambiguous, ".github")
+	if err := os.MkdirAll(legacyRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, ".golang"), []byte("managed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(ambiguous); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("multiple layouts error = %v, code = %q", err, codeOf(err))
 	}
 }
