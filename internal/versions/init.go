@@ -57,6 +57,9 @@ func (r *Runner) Init(ctx context.Context, options InitOptions) (InitResult, err
 	if err := ctx.Err(); err != nil {
 		return InitResult{}, err
 	}
+	if err := r.validateCloudOpsWorksDir(); err != nil {
+		return InitResult{}, err
+	}
 	selectorPaths, err := r.validateSelectorFiles()
 	if err != nil {
 		return InitResult{}, err
@@ -104,6 +107,20 @@ func (r *Runner) Init(ctx context.Context, options InitOptions) (InitResult, err
 		result.Changed = true
 	}
 	return result, nil
+}
+
+// validateCloudOpsWorksDir rejects a symlinked configuration layout before any
+// configuration read or Git mutation can follow it outside the selected workdir.
+func (r *Runner) validateCloudOpsWorksDir() error {
+	path := filepath.Join(r.workDir, cloudOpsWorksDir)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("required workflow config directory %s: %w", cloudOpsWorksDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("required workflow config directory %s must be a non-symlink directory", cloudOpsWorksDir)
+	}
+	return nil
 }
 
 func (r *Runner) validateSelectorFiles() (map[WayOfWork]string, error) {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -426,6 +427,41 @@ func TestInitGitFlowRejectsWrongCurrentConfiguredPrimary(t *testing.T) {
 	}
 	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), `check out configured main branch "primary"`) {
 		t.Fatalf("wrong-current error = %v", err)
+	}
+}
+
+func TestInitRejectsSymlinkedCloudOpsWorksDirectoryBeforeReadOrGitMutation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	dir := workflowFixture(t)
+	external := t.TempDir()
+	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
+		writeFile(t, filepath.Join(external, wow.selectorFileName()), "# Agents: WayOfWork="+string(wow)+"\nexternal: true\n")
+	}
+	gitVersion := filepath.Join(external, "gitversion.yaml")
+	writeFile(t, gitVersion, "# Agents: WayOfWork=gitflow\nexternal: unchanged\n")
+	if err := os.RemoveAll(filepath.Join(dir, cloudOpsWorksDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(dir, cloudOpsWorksDir)); err != nil {
+		t.Fatal(err)
+	}
+	gitCalled := filepath.Join(t.TempDir(), "git-called")
+	git := fakeGit(t, `touch "`+gitCalled+`"
+exit 0`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "non-symlink directory") {
+		t.Fatalf("Init error = %v", err)
+	}
+	if got := mustReadFile(t, gitVersion); got != "# Agents: WayOfWork=gitflow\nexternal: unchanged\n" {
+		t.Fatalf("external gitversion.yaml mutated:\n%s", got)
+	}
+	if _, err := os.Stat(gitCalled); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Git mutation began before layout validation: %v", err)
 	}
 }
 
