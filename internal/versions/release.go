@@ -214,7 +214,7 @@ func (w *Workflows) verifyReleaseFinished(ctx context.Context, target, sourceSHA
 		return err
 	}
 	if w.hasDevelop() {
-		if _, err := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, "develop"); err != nil {
+		if _, err := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, "refs/heads/develop"); err != nil {
 			return fmt.Errorf("finish postcondition: %s is not merged into develop: %w", sourceSHA, err)
 		}
 	}
@@ -228,7 +228,7 @@ func (w *Workflows) ReleasePurge(ctx context.Context, name string) error {
 	return w.purge(ctx, "release/"+n)
 }
 func (w *Workflows) verifyFinished(ctx context.Context, target, sourceSHA, tag string) error {
-	if _, e := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, target); e != nil {
+	if _, e := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, "refs/heads/"+target); e != nil {
 		return fmt.Errorf("finish postcondition: %s is not merged into %s: %w", sourceSHA, target, e)
 	}
 	if _, e := w.git(ctx, "rev-parse", "--verify", "refs/tags/"+tag+"^{tag}"); e != nil {

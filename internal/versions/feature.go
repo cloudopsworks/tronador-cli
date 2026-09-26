@@ -125,7 +125,7 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	}
 	// Test against the freshly fetched remote base, rather than a possibly stale
 	// local tracking branch. This rejects unmerged source work.
-	if _, err = w.git(ctx, "merge-base", "--is-ancestor", branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
+	if _, err = w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
 		return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
 	}
 	current, err := w.Current(ctx)

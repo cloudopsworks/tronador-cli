@@ -256,7 +256,7 @@ func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journ
 	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.SourceSHA, commit); err != nil {
 		return fmt.Errorf("existing annotated tag %s does not contain journaled source: %w", tag, err)
 	}
-	if _, err := w.git(ctx, "merge-base", "--is-ancestor", commit, j.Target); err != nil {
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", commit, "refs/heads/"+j.Target); err != nil {
 		return fmt.Errorf("existing annotated tag %s is incompatible with finished target %s: %w", tag, j.Target, err)
 	}
 	return nil
@@ -269,7 +269,7 @@ func (w *Workflows) recordFinishTagTarget(ctx context.Context, path string, j *j
 	if j.TagTargetSHA != "" {
 		return w.validateJournalTagTarget(ctx, j)
 	}
-	sha, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
+	sha, err := w.git(ctx, "rev-parse", "--verify", "refs/heads/"+j.Target+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("resolve finish tag target %s: %w", j.Target, err)
 	}
@@ -294,7 +294,7 @@ func (w *Workflows) validateJournalTagTarget(ctx context.Context, j *journal) er
 	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.SourceSHA, j.TagTargetSHA); err != nil {
 		return fmt.Errorf("journaled tag target does not contain source %s: %w", j.Source, err)
 	}
-	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.TagTargetSHA, j.Target); err != nil {
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.TagTargetSHA, "refs/heads/"+j.Target); err != nil {
 		return fmt.Errorf("journaled tag target %s is not an ancestor of %s: %w", j.TagTargetSHA, j.Target, err)
 	}
 	return nil

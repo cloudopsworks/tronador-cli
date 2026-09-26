@@ -761,6 +761,96 @@ func TestLocalBranchParityIgnoresSameNamedTag(t *testing.T) {
 	}
 }
 
+func TestPurgeDoesNotTreatSameNamedTagAsMergedBranch(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, prefix, wow string
+		purge             func(*Workflows) error
+	}{
+		{name: "feature", prefix: "feature", wow: "githubflow", purge: func(w *Workflows) error { return w.FeaturePurge(ctx, "collision") }},
+		{name: "hotfix", prefix: "hotfix", wow: "githubflow", purge: func(w *Workflows) error { return w.HotfixPurge(ctx, "0.2.0") }},
+		{name: "release", prefix: "release", wow: "githubflow", purge: func(w *Workflows) error { return w.ReleasePurge(ctx, "0.2.0") }},
+		{name: "support", prefix: "support", wow: "gitflow", purge: func(w *Workflows) error { return w.SupportPurge(ctx, "0.2.0") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, tc.wow == "gitflow")
+			gitTest(t, repo, "config", "core.warnAmbiguousRefs", "false")
+			name := "collision"
+			if tc.prefix != "feature" {
+				name = "v0.2.0"
+			}
+			branch := tc.prefix + "/" + name
+			gitTest(t, repo, "checkout", "-b", branch)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", "unmerged "+tc.name)
+			gitTest(t, repo, "push", "-u", "origin", branch)
+			gitTest(t, repo, "checkout", "main")
+			gitTest(t, repo, "tag", "-a", branch, "-m", "shadow branch")
+			gitTest(t, repo, "push", "origin", "refs/tags/"+branch+":refs/tags/"+branch)
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: tc.wow, MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.purge(w); err == nil || !strings.Contains(err.Error(), "not merged") {
+				t.Fatalf("same-named tag allowed purge: %v", err)
+			}
+			if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+				t.Fatalf("remote branch deleted via tag collision: %q", got)
+			}
+			gitTest(t, repo, "show-ref", "--verify", "refs/heads/"+branch)
+		})
+	}
+}
+
+func TestLocalFinishTagCursorUsesBranchTargetDespiteMainTag(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, prefix string
+		finish                  func(*Workflows) error
+	}{
+		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
+		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, false)
+			gitTest(t, repo, "config", "core.warnAmbiguousRefs", "false")
+			base := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+			branch := tc.prefix + "/v0.2.0"
+			gitTest(t, repo, "checkout", "-b", branch)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
+			gitTest(t, repo, "push", "-u", "origin", branch)
+			sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+			gitTest(t, repo, "checkout", "main")
+			gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
+			targetSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+			gitTest(t, repo, "tag", "-a", "main", base, "-m", "shadow main")
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := w.localFinishSteps(tc.operation)
+			j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			boundary, err := journalStepBoundary(steps, "delete-remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitTest(t, repo, "tag", "-a", "v0.2.0", targetSHA, "-m", "finished "+tc.name)
+			j.Done, j.TagTargetSHA = boundary, targetSHA
+			if err = writeAtomic(path, j); err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.finish(w); err != nil {
+				t.Fatalf("tag cursor retry was stranded by main tag: %v", err)
+			}
+			assertBranchAbsent(t, repo, branch)
+		})
+	}
+}
+
 func TestLocalFinishResumesRecordedTagAfterTargetAdvances(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -962,7 +1052,7 @@ func TestPurgeRejectsUnmergedBranchBeforeCheckoutOrDelete(t *testing.T) {
 		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"):         "sha\n",
 		key("git", "branch", "--show-current"):                                       "main\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
-	}, errs: map[string]error{key("git", "merge-base", "--is-ancestor", "feature/a", "refs/remotes/origin/main"): fmt.Errorf("not merged")}}
+	}, errs: map[string]error{key("git", "merge-base", "--is-ancestor", "refs/heads/feature/a", "refs/remotes/origin/main"): fmt.Errorf("not merged")}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
 	if err := w.FeaturePurge(context.Background(), "a"); err == nil || !strings.Contains(err.Error(), "not merged") {
 		t.Fatalf("purge error = %v", err)
