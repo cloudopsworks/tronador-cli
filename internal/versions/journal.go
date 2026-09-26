@@ -151,36 +151,57 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 }
 
 func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journal) error {
-	if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/tags/"+tag); err != nil {
-		if isExitStatus(err, 1) {
-			if j != nil && j.Done > 2 {
+	commit, exists, err := w.probeAnnotatedFinishTag(ctx, tag)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if j != nil {
+			boundary, boundaryErr := finishTagBoundary(j.Steps)
+			if boundaryErr != nil {
+				return boundaryErr
+			}
+			if j.Done > boundary {
 				return fmt.Errorf("finish journal requires annotated tag %s, but it is absent", tag)
 			}
-			return nil
 		}
-		return fmt.Errorf("verify fetched finish tag %s: %w", tag, err)
-	}
-	if err := w.requireAnnotatedFinishTag(ctx, tag); err != nil {
-		return err
+		return nil
 	}
 	if j == nil {
 		return fmt.Errorf("existing annotated tag %s blocks a new local finish", tag)
 	}
-	if j.Done <= 2 {
-		return fmt.Errorf("existing annotated tag %s is incompatible with unfinished local finish state", tag)
-	}
-	tagCommit, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}")
+	boundary, err := finishTagBoundary(j.Steps)
 	if err != nil {
-		return fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
+		return err
+	}
+	if j.Done <= boundary {
+		return fmt.Errorf("existing annotated tag %s is incompatible with unfinished local finish state", tag)
 	}
 	targetCommit, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("resolve finished target %s: %w", j.Target, err)
 	}
-	if strings.TrimSpace(tagCommit) != strings.TrimSpace(targetCommit) {
+	if commit != strings.TrimSpace(targetCommit) {
 		return fmt.Errorf("existing annotated tag %s is incompatible with finished target %s", tag, j.Target)
 	}
 	return nil
+}
+
+func finishTagBoundary(steps []string) (int, error) {
+	index := -1
+	for i, step := range steps {
+		if step != "tag" {
+			continue
+		}
+		if index >= 0 {
+			return 0, fmt.Errorf("finish journal plan has multiple tag steps")
+		}
+		index = i
+	}
+	if index < 0 {
+		return 0, fmt.Errorf("finish journal plan has no tag step")
+	}
+	return index, nil
 }
 
 func (w *Workflows) journalWorktree(ctx context.Context) (string, error) {

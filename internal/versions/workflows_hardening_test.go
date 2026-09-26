@@ -106,12 +106,23 @@ func TestLocalFinishRejectsFinishTagProbeOperationalErrorBeforeMutation(t *testi
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{MainBranch: "main", Runner: f})
 	err := w.HotfixFinish(context.Background(), "1.2.3", true)
-	if err == nil || !strings.Contains(err.Error(), "verify fetched finish tag") || !strings.Contains(err.Error(), "repository unavailable") {
+	if err == nil || !strings.Contains(err.Error(), "verify existing finish tag") || !strings.Contains(err.Error(), "repository unavailable") {
 		t.Fatalf("operational probe error = %v", err)
 	}
 	for _, c := range f.calls {
 		if c.name == "git" && len(c.args) > 0 && (c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push") {
 			t.Fatalf("local finish mutated after operational tag probe failure: %#v", f.calls)
+		}
+	}
+}
+
+func TestFinishTagBoundaryDerivesAndRejectsMalformedPlans(t *testing.T) {
+	if got, err := finishTagBoundary([]string{"checkout", "merge", "tag", "push"}); err != nil || got != 2 {
+		t.Fatalf("tag boundary = %d, %v", got, err)
+	}
+	for _, steps := range [][]string{{"checkout", "merge"}, {"tag", "merge", "tag"}} {
+		if _, err := finishTagBoundary(steps); err == nil {
+			t.Fatalf("malformed plan accepted: %#v", steps)
 		}
 	}
 }

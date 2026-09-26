@@ -293,25 +293,34 @@ func (w *Workflows) ensureAnnotatedTag(ctx context.Context, tag, message, expect
 // cannot satisfy the finish's annotated-tag postcondition. Public `versions
 // tag` deliberately continues to accept a matching lightweight tag.
 func (w *Workflows) requireAnnotatedFinishTag(ctx context.Context, tag string) error {
+	_, _, err := w.probeAnnotatedFinishTag(ctx, tag)
+	return err
+}
+
+// probeAnnotatedFinishTag is the strict local-finish-only tag probe. It
+// distinguishes a proven absent ref from operational failures and lightweight
+// tags without changing the public `versions tag` compatibility path.
+func (w *Workflows) probeAnnotatedFinishTag(ctx context.Context, tag string) (string, bool, error) {
 	if err := w.ensureSafeRef(tag); err != nil {
-		return err
+		return "", false, err
 	}
 	// `rev-parse <tag>^{commit}` reports both an absent tag and operational
 	// failures. Probe the exact tag ref first, where exit status 1 proves
 	// absence; all other errors must fail closed before finish mutations.
 	if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/tags/"+tag); err != nil {
 		if isExitStatus(err, 1) {
-			return nil
+			return "", false, nil
 		}
-		return fmt.Errorf("verify existing finish tag %s: %w", tag, err)
+		return "", false, fmt.Errorf("verify existing finish tag %s: %w", tag, err)
 	}
-	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}"); err != nil {
-		return fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
+	commit, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}")
+	if err != nil {
+		return "", false, fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
 	}
 	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); err != nil {
-		return fmt.Errorf("existing lightweight tag %s blocks local finish; replace it with an annotated tag or remove it before retrying", tag)
+		return "", false, fmt.Errorf("existing lightweight tag %s blocks local finish; replace it with an annotated tag or remove it before retrying", tag)
 	}
-	return nil
+	return strings.TrimSpace(commit), true, nil
 }
 
 func (w *Workflows) mergeContinue(ctx context.Context) error {
