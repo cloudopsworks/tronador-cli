@@ -104,7 +104,7 @@ func TestInitGitFlowRejectsConfiguredDevelopPrimaryBeforeConfigOrGitMutation(t *
 	}
 }
 
-func TestInitGitFlowRejectsDiscoveredDevelopPrimaryBeforeBranchMutation(t *testing.T) {
+func TestInitGitFlowRejectsDiscoveredDevelopPrimaryBeforeExistingDevelopConfigMutation(t *testing.T) {
 	dir := workflowFixture(t)
 	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
 	before := mustReadFile(t, target)
@@ -115,7 +115,8 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/develop;;
-"show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
+"show-ref --verify --quiet refs/heads/develop") exit 1;;
 "checkout "*|"push "*) echo "unexpected mutation path $*" >&2; exit 2;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	t.Setenv("GIT_LOG", log)

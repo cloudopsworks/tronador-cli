@@ -642,6 +642,13 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		} else if !isExitStatus(localErr, 1) {
 			return false, localErr
 		}
+		// Existing origin/develop is only a no-op after proving it does not
+		// collapse GitFlow's primary and integration branches. Init writes the
+		// selected config after ensureDevelop returns, so this check must remain
+		// ahead of this idempotent return.
+		if err := r.validateGitFlowPrimaryDistinct(ctx); err != nil {
+			return false, err
+		}
 		return false, nil
 	} else if !isExitStatus(err, 1) {
 		return false, err
