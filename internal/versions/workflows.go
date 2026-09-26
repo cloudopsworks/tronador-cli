@@ -293,8 +293,20 @@ func (w *Workflows) ensureAnnotatedTag(ctx context.Context, tag, message, expect
 // cannot satisfy the finish's annotated-tag postcondition. Public `versions
 // tag` deliberately continues to accept a matching lightweight tag.
 func (w *Workflows) requireAnnotatedFinishTag(ctx context.Context, tag string) error {
+	if err := w.ensureSafeRef(tag); err != nil {
+		return err
+	}
+	// `rev-parse <tag>^{commit}` reports both an absent tag and operational
+	// failures. Probe the exact tag ref first, where exit status 1 proves
+	// absence; all other errors must fail closed before finish mutations.
+	if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/tags/"+tag); err != nil {
+		if isExitStatus(err, 1) {
+			return nil
+		}
+		return fmt.Errorf("verify existing finish tag %s: %w", tag, err)
+	}
 	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}"); err != nil {
-		return nil // no existing tag; the finish will create its annotated tag
+		return fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
 	}
 	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); err != nil {
 		return fmt.Errorf("existing lightweight tag %s blocks local finish; replace it with an annotated tag or remove it before retrying", tag)

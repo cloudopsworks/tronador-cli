@@ -83,6 +83,39 @@ func TestRequireAnnotatedFinishTagAcceptsAnnotatedTag(t *testing.T) {
 	}
 }
 
+func TestRequireAnnotatedFinishTagAcceptsProvenAbsentTag(t *testing.T) {
+	absent := exec.Command("sh", "-c", "exit 1").Run()
+	if absent == nil {
+		t.Fatal("expected exit status 1")
+	}
+	f := &fakeRunner{errs: map[string]error{
+		key("git", "show-ref", "--verify", "--quiet", "refs/tags/v1.2.3"): absent,
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+	if err := w.requireAnnotatedFinishTag(context.Background(), "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	if f.saw("git", "rev-parse", "--verify", "v1.2.3^{commit}") {
+		t.Fatalf("absent tag incorrectly resolved: %#v", f.calls)
+	}
+}
+
+func TestLocalFinishRejectsFinishTagProbeOperationalErrorBeforeMutation(t *testing.T) {
+	f := &fakeRunner{errs: map[string]error{
+		key("git", "show-ref", "--verify", "--quiet", "refs/tags/v1.2.3"): fmt.Errorf("repository unavailable"),
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+	err := w.HotfixFinish(context.Background(), "1.2.3", true)
+	if err == nil || !strings.Contains(err.Error(), "verify existing finish tag") || !strings.Contains(err.Error(), "repository unavailable") {
+		t.Fatalf("operational probe error = %v", err)
+	}
+	for _, c := range f.calls {
+		if c.name == "git" && len(c.args) > 0 && (c.args[0] == "fetch" || c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push") {
+			t.Fatalf("local finish mutated after operational tag probe failure: %#v", f.calls)
+		}
+	}
+}
+
 func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
