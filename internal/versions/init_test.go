@@ -3,6 +3,7 @@ package versions
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -374,6 +375,62 @@ func TestInitRejectsDivergentLocalAndRemoteDevelop(t *testing.T) {
 	_, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow})
 	if err == nil || !strings.Contains(err.Error(), "local develop differs from origin/develop") {
 		t.Fatalf("Init divergent develop error = %v", err)
+	}
+}
+
+type failingAtomicTempFile struct {
+	*os.File
+	chmodErr error
+	writeErr error
+}
+
+func (f failingAtomicTempFile) Chmod(mode os.FileMode) error {
+	if f.chmodErr != nil {
+		return f.chmodErr
+	}
+	return f.File.Chmod(mode)
+}
+
+func (f failingAtomicTempFile) Write(data []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return f.File.Write(data)
+}
+
+func TestWriteAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		chmodErr error
+		writeErr error
+	}{
+		{name: "chmod", chmodErr: errors.New("chmod failed")},
+		{name: "write", writeErr: errors.New("write failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "gitversion.yaml")
+			writeFile(t, target, "original\n")
+			oldFactory := createAtomicTempFile
+			createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
+				file, err := os.CreateTemp(dir, pattern)
+				if err != nil {
+					return nil, err
+				}
+				return failingAtomicTempFile{File: file, chmodErr: test.chmodErr, writeErr: test.writeErr}, nil
+			}
+			t.Cleanup(func() { createAtomicTempFile = oldFactory })
+
+			if err := writeAtomically(target, []byte("replacement\n"), 0o644); err == nil {
+				t.Fatal("writeAtomically unexpectedly succeeded")
+			}
+			if got := mustReadFile(t, target); got != "original\n" {
+				t.Fatalf("destination replaced after temporary failure: %q", got)
+			}
+			if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-*")); err != nil || len(temporary) != 0 {
+				t.Fatalf("temporary files = %v, %v", temporary, err)
+			}
+		})
 	}
 }
 

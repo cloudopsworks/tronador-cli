@@ -374,22 +374,36 @@ func fileMode(path string) os.FileMode {
 	}
 	return 0o644
 }
+
+type atomicTempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
 func writeAtomically(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	file, err := os.CreateTemp(dir, ".tronador-*")
+	file, err := createAtomicTempFile(dir, ".tronador-*")
 	if err != nil {
 		return fmt.Errorf("create temporary config: %w", err)
 	}
 	temporary := file.Name()
 	defer os.Remove(temporary)
-	if err := file.Chmod(mode); err == nil {
-		_, err = file.Write(data)
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("prepare temporary config: %w", err)
 	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
 		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
 	}
 	if err := os.Rename(temporary, path); err != nil {
 		return fmt.Errorf("replace config atomically: %w", err)
