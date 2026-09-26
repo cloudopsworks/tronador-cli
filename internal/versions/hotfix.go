@@ -156,7 +156,10 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		case "checkout-target":
 			e = w.checkoutFetchedBase(ctx, target)
 		case "merge":
-			e = w.mergeContinue(ctx)
+			e = w.checkoutHotfixTarget(ctx, target)
+			if e == nil {
+				e = w.mergeContinue(ctx)
+			}
 			if e == nil {
 				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
 			}
@@ -182,6 +185,27 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		}
 	}
 	return clearJournal(p)
+}
+
+func (w *Workflows) checkoutHotfixTarget(ctx context.Context, target string) error {
+	current, err := w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current == target {
+		return nil
+	}
+	if _, err = w.git(ctx, "checkout", target); err != nil {
+		return err
+	}
+	current, err = w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current != target {
+		return fmt.Errorf("expected current branch %s, got %s", target, current)
+	}
+	return nil
 }
 
 // hotfixTarget preserves the legacy support-branch behavior: if a support

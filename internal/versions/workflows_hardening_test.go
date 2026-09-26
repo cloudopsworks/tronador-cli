@@ -346,6 +346,67 @@ func TestHotfixLocalFinishResumesAfterConflictAndRejectsOtherWorkflowJournal(t *
 	}
 }
 
+func TestHotfixLocalFinishRetryAfterAbortReassertsTargetBranch(t *testing.T) {
+	t.Setenv("GIT_EDITOR", "true")
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	writeFile(t, filepath.Join(repo, "conflict.txt"), "base\n")
+	gitTest(t, repo, "add", "conflict.txt")
+	gitTest(t, repo, "commit", "-m", "base")
+	gitTest(t, repo, "push", "origin", "main")
+
+	gitTest(t, repo, "checkout", "-b", "feature/unrelated")
+	writeFile(t, filepath.Join(repo, "unrelated.txt"), "unchanged\n")
+	gitTest(t, repo, "add", "unrelated.txt")
+	gitTest(t, repo, "commit", "-m", "unrelated")
+	gitTest(t, repo, "push", "-u", "origin", "feature/unrelated")
+	unrelatedSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "feature/unrelated"))
+
+	gitTest(t, repo, "checkout", "main")
+	gitTest(t, repo, "checkout", "-b", "hotfix/v0.1.1")
+	writeFile(t, filepath.Join(repo, "conflict.txt"), "hotfix\n")
+	gitTest(t, repo, "add", "conflict.txt")
+	gitTest(t, repo, "commit", "-m", "hotfix")
+	gitTest(t, repo, "push", "-u", "origin", "hotfix/v0.1.1")
+	gitTest(t, repo, "checkout", "main")
+	writeFile(t, filepath.Join(repo, "conflict.txt"), "main\n")
+	gitTest(t, repo, "add", "conflict.txt")
+	gitTest(t, repo, "commit", "-m", "main")
+	gitTest(t, repo, "push", "origin", "main")
+	gitTest(t, repo, "checkout", "hotfix/v0.1.1")
+
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.HotfixFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "merge") {
+		t.Fatalf("first finish error = %v, want merge conflict", err)
+	}
+	gitTest(t, repo, "merge", "--abort")
+	gitTest(t, repo, "checkout", "feature/unrelated")
+	if err = w.HotfixFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "merge") {
+		t.Fatalf("retry error = %v, want target merge conflict", err)
+	}
+	if got := gitTest(t, repo, "branch", "--show-current"); got != "main\n" {
+		t.Fatalf("retry branch = %q, want main", got)
+	}
+	if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "feature/unrelated")); got != unrelatedSHA {
+		t.Fatalf("unrelated branch changed: got %s, want %s", got, unrelatedSHA)
+	}
+
+	writeFile(t, filepath.Join(repo, "conflict.txt"), "resolved\n")
+	gitTest(t, repo, "add", "conflict.txt")
+	if err = w.HotfixFinish(ctx, "", true); err != nil {
+		t.Fatalf("target resume after resolving conflict: %v", err)
+	}
+	if got := gitTest(t, repo, "show", "main:conflict.txt"); got != "resolved\n" {
+		t.Fatalf("target merge resolution = %q", got)
+	}
+	if got := strings.TrimSpace(gitTest(t, repo, "rev-parse", "feature/unrelated")); got != unrelatedSHA {
+		t.Fatalf("unrelated branch changed after completion: got %s, want %s", got, unrelatedSHA)
+	}
+}
+
 func TestReleaseLocalFinishResumesAfterConflict(t *testing.T) {
 	t.Setenv("GIT_EDITOR", "true")
 	ctx := context.Background()
