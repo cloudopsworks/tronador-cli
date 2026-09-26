@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -1020,10 +1021,16 @@ type catalogMarkerTarget struct {
 	layout    projectMarkerLayout
 }
 
+var closeProjectMarkerRoot = func(root *os.Root) error { return root.Close() }
+
 func (target catalogMarkerTarget) Close() {
 	if target.layout.root != nil {
-		_ = target.layout.root.Close()
+		_ = closeProjectMarkerRoot(target.layout.root)
 	}
+}
+
+func secureProjectMarkerRootSupported(goos string) bool {
+	return goos != "js" && goos != "plan9"
 }
 
 func legacyBlueprintMarkerPath(workdir string) (string, error) {
@@ -1071,13 +1078,16 @@ func openProjectMarkerLayout(workdir, name string) (projectMarkerLayout, error) 
 	}
 	layout := projectMarkerLayout{path: path, info: info, root: root}
 	if err := layout.ensure(); err != nil {
-		_ = root.Close()
+		_ = closeProjectMarkerRoot(root)
 		return projectMarkerLayout{}, err
 	}
 	return layout, nil
 }
 
 func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
+	if !secureProjectMarkerRootSupported(runtime.GOOS) {
+		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate requires descriptor-rooted filesystem support on "+runtime.GOOS)
+	}
 	catalog, err := repospkg.LoadConfig("")
 	if err != nil {
 		return catalogMarkerTarget{}, wrapProjectError("project_version_marker_unsupported", "load repository template catalog", err)
@@ -1094,6 +1104,11 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 		mode     os.FileMode
 	}
 	var candidates []markerCandidate
+	closeCandidates := func() {
+		for _, candidate := range candidates {
+			_ = closeProjectMarkerRoot(candidate.root.root)
+		}
+	}
 	for _, candidateLayout := range []struct {
 		root        string
 		versionFile string
@@ -1106,13 +1121,14 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 			continue
 		}
 		if layoutErr != nil {
+			closeCandidates()
 			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template layout", layoutErr)
 		}
 		keepLayout := false
 		func() {
 			defer func() {
 				if !keepLayout {
-					_ = layout.root.Close()
+					_ = closeProjectMarkerRoot(layout.root)
 				}
 			}()
 			var active []repospkg.Template
@@ -1158,9 +1174,7 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 			keepLayout = true
 		}()
 		if err != nil {
-			for _, candidate := range candidates {
-				_ = candidate.root.root.Close()
-			}
+			closeCandidates()
 			return catalogMarkerTarget{}, err
 		}
 	}
@@ -1175,9 +1189,7 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 			},
 		}, nil
 	}
-	for _, candidate := range candidates {
-		_ = candidate.root.root.Close()
-	}
+	closeCandidates()
 	if len(candidates) > 1 {
 		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
 	}
@@ -1313,31 +1325,6 @@ func newProjectRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
 		return name, file, err
 	}
 	return "", nil, errors.New("create unique temporary marker")
-}
-
-func buildLegacyBlueprintMarkerChange(workdir, relative, version string) (*versionChange, string, error) {
-	path, err := safeProjectPath(workdir, filepath.FromSlash(relative))
-	if err != nil {
-		return nil, "", err
-	}
-	before, err := os.ReadFile(path)
-	missing := errors.Is(err, os.ErrNotExist)
-	if err != nil && !missing {
-		return nil, "", err
-	}
-	after := []byte(version + "\n")
-	if bytes.Equal(before, after) {
-		return nil, "", nil
-	}
-	warning := ""
-	if !missing && strings.TrimSpace(string(before)) != version {
-		warning = fmt.Sprintf("WARNING: --generate replaces blueprint marker %s from %q to %q; this marker controls repository-template upgrades.", relative, strings.TrimSpace(string(before)), version)
-	}
-	op := "modify"
-	if missing {
-		op = "add"
-	}
-	return &versionChange{FileChange: FileChange{Path: filepath.ToSlash(relative), Operation: op, Patch: unifiedPatch(filepath.ToSlash(relative), before, after, missing)}, after: after}, warning, nil
 }
 
 type exactTag struct {

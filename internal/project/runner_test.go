@@ -1780,3 +1780,39 @@ func TestVersionGenerateFailsClosedWhenCatalogLayoutIsSwapped(t *testing.T) {
 		})
 	}
 }
+
+func TestSecureProjectMarkerRootSupport(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		want bool
+	}{
+		{goos: "darwin", want: true},
+		{goos: "windows", want: true},
+		{goos: "js", want: false},
+		{goos: "plan9", want: false},
+	} {
+		if got := secureProjectMarkerRootSupported(tc.goos); got != tc.want {
+			t.Errorf("secureProjectMarkerRootSupported(%q) = %v, want %v", tc.goos, got, tc.want)
+		}
+	}
+}
+
+func TestLegacyBlueprintMarkerTargetClosesRetainedLayoutOnLaterLayoutError(t *testing.T) {
+	workdir := fixture(t, ".golang")
+	if err := os.WriteFile(filepath.Join(workdir, ".github"), []byte("not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldClose := closeProjectMarkerRoot
+	var closed int
+	closeProjectMarkerRoot = func(root *os.Root) error {
+		closed++
+		return oldClose(root)
+	}
+	t.Cleanup(func() { closeProjectMarkerRoot = oldClose })
+	if _, err := legacyBlueprintMarkerTarget(workdir); codeOf(err) != "project_version_marker_invalid" {
+		t.Fatalf("legacyBlueprintMarkerTarget error = %v, code = %q", err, codeOf(err))
+	}
+	if closed != 1 {
+		t.Fatalf("retained candidate roots closed = %d, want 1", closed)
+	}
+}
