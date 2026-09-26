@@ -86,7 +86,7 @@ func TestFeatureStartUsesWOWBase(t *testing.T) {
 	}
 }
 func TestFeatureFinishRequiresExactRemoteParity(t *testing.T) {
-	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "def\trefs/heads/feature/a\n"}}
+	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "def\trefs/heads/feature/a\n"}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	e := w.FeatureFinish(context.Background(), "")
 	if e == nil || !strings.Contains(e.Error(), "exactly published") {
@@ -96,8 +96,54 @@ func TestFeatureFinishRequiresExactRemoteParity(t *testing.T) {
 		t.Fatal("PR created despite parity failure")
 	}
 }
+
+func TestFeatureAliasUsesExactCurrentBranch(t *testing.T) {
+	branch := "feat/coexist"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                                       branch + "\n",
+		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):        "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/"+branch):                      "abc\trefs/heads/" + branch + "\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
+	if err := w.FeaturePublish(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("git", "checkout", branch) || !f.saw("git", "push", "--set-upstream", "origin", branch) {
+		t.Fatalf("publish did not keep alias branch: %#v", f.calls)
+	}
+	if err := w.FeatureFinish(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !f.sawPrefix("gh", "pr", "create", "--head", branch) || f.sawPrefix("gh", "pr", "create", "--head", "feature/coexist") {
+		t.Fatalf("finish did not keep alias branch: %#v", f.calls)
+	}
+}
+
+func TestHotfixAliasUsesExactCurrentBranch(t *testing.T) {
+	branch := "fix/v1.2.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                                       branch + "\n",
+		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):        "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/"+branch):                      "abc\trefs/heads/" + branch + "\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
+	if err := w.HotfixPublish(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("git", "checkout", branch) || !f.saw("git", "push", "--set-upstream", "origin", branch) {
+		t.Fatalf("publish did not keep alias branch: %#v", f.calls)
+	}
+	if err := w.HotfixFinish(context.Background(), "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !f.sawPrefix("gh", "pr", "create", "--head", branch) || f.sawPrefix("gh", "pr", "create", "--head", "hotfix/v1.2.3") {
+		t.Fatalf("finish did not keep alias branch: %#v", f.calls)
+	}
+}
 func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
-	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
+	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	tag, e := w.Tag(context.Background(), "test", true)
 	if e != nil {
@@ -122,8 +168,8 @@ func TestSupportIsGitflowOnly(t *testing.T) {
 
 func TestRequireParityChecksNamedBranchInsteadOfHEAD(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "feature/named^{commit}"): "named-sha\n",
-		key("git", "ls-remote", "origin", "refs/heads/feature/named"): "named-sha\trefs/heads/feature/named\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/named^{commit}"): "named-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/feature/named"):            "named-sha\trefs/heads/feature/named\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{Runner: f})
 	if err != nil {

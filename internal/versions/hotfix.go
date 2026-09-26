@@ -69,30 +69,33 @@ func (w *Workflows) hotfixStartBase(ctx context.Context, version string) (string
 	}
 	return main, nil
 }
-func (w *Workflows) hotfixName(ctx context.Context, name string) (string, error) {
+
+// hotfixBranch resolves an explicit version to canonical hotfix/*, but keeps
+// the complete current branch for omitted names so fix/* cannot be redirected
+// to a distinct hotfix/* branch.
+func (w *Workflows) hotfixBranch(ctx context.Context, name string) (branch, version string, err error) {
 	if name != "" {
 		name = normalizeVersion(name)
 		if e := w.ensureSafeRef(name); e != nil {
-			return "", e
+			return "", "", e
 		}
-		return name, nil
+		return "hotfix/" + name, name, nil
 	}
 	b, e := w.Current(ctx)
 	if e != nil {
-		return "", e
+		return "", "", e
 	}
 	n, ok := branchValue(b, "hotfix")
 	if !ok {
-		return "", fmt.Errorf("hotfix version is required unless current branch is hotfix/*")
+		return "", "", fmt.Errorf("hotfix version is required unless current branch is hotfix/* or fix/*")
 	}
-	return n, nil
+	return b, n, nil
 }
 func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
-	n, e := w.hotfixName(ctx, name)
+	b, _, e := w.hotfixBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	b := "hotfix/" + n
 	if _, e = w.git(ctx, "checkout", b); e != nil {
 		return e
 	}
@@ -100,18 +103,29 @@ func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) HotfixFinish(ctx context.Context, name string, local bool) error {
+	resumedBranch := ""
 	if local && name == "" {
 		if resumed, found, err := w.resumeLocalFinishName(ctx, "hotfix-finish", "hotfix"); err != nil {
 			return err
 		} else if found {
 			name = resumed
+			journal, _, journalErr := w.readJournal(ctx)
+			if journalErr != nil {
+				return fmt.Errorf("read resumed hotfix finish journal: %w", journalErr)
+			}
+			if journal == nil {
+				return fmt.Errorf("resumed hotfix finish journal disappeared")
+			}
+			resumedBranch = journal.Source
 		}
 	}
-	n, e := w.hotfixName(ctx, name)
+	branch, n, e := w.hotfixBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	branch := "hotfix/" + n
+	if resumedBranch != "" {
+		branch = resumedBranch
+	}
 	if !local {
 		if e = w.RequireParity(ctx, branch); e != nil {
 			return e
@@ -249,9 +263,9 @@ func supportLine(branch string) (major, minor string, ok bool) {
 }
 
 func (w *Workflows) HotfixPurge(ctx context.Context, name string) error {
-	n, e := w.hotfixName(ctx, name)
+	branch, _, e := w.hotfixBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	return w.purge(ctx, "hotfix/"+n)
+	return w.purge(ctx, branch)
 }

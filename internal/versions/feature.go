@@ -28,29 +28,32 @@ func (w *Workflows) FeatureStart(ctx context.Context, name string) error {
 	}
 	return nil
 }
-func (w *Workflows) featureName(ctx context.Context, name string) (string, error) {
+
+// featureBranch resolves an explicit short name to the canonical feature/*
+// branch, but keeps the complete current branch for omitted names. This
+// matters because the documented feat/* alias can coexist with feature/*.
+func (w *Workflows) featureBranch(ctx context.Context, name string) (string, error) {
 	if name != "" {
 		if e := w.ensureSafeRef(name); e != nil {
 			return "", e
 		}
-		return name, nil
+		return "feature/" + name, nil
 	}
 	b, e := w.Current(ctx)
 	if e != nil {
 		return "", e
 	}
-	n, ok := branchValue(b, "feature")
+	_, ok := branchValue(b, "feature")
 	if !ok {
-		return "", fmt.Errorf("feature name is required unless current branch is feature/*")
+		return "", fmt.Errorf("feature name is required unless current branch is feature/* or feat/*")
 	}
-	return n, nil
+	return b, nil
 }
 func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
-	n, e := w.featureName(ctx, name)
+	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	branch := "feature/" + n
 	if _, e = w.git(ctx, "checkout", branch); e != nil {
 		return e
 	}
@@ -60,11 +63,10 @@ func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
 
 // FeatureFinish creates the same guarded PR the legacy make target created.
 func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
-	n, e := w.featureName(ctx, name)
+	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	branch := "feature/" + n
 	if e = w.RequireParity(ctx, branch); e != nil {
 		return e
 	}
@@ -81,11 +83,11 @@ func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) FeaturePurge(ctx context.Context, name string) error {
-	n, e := w.featureName(ctx, name)
+	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
 	}
-	return w.purge(ctx, "feature/"+n)
+	return w.purge(ctx, branch)
 }
 func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if err := w.ensureSafeRef(branch); err != nil {
@@ -147,7 +149,7 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 }
 
 func (w *Workflows) purgeBase(ctx context.Context, branch string) (string, error) {
-	if w.hasDevelop() && (strings.HasPrefix(branch, "feature/") || strings.HasPrefix(branch, "release/")) {
+	if w.hasDevelop() && (strings.HasPrefix(branch, "feature/") || strings.HasPrefix(branch, "feat/") || strings.HasPrefix(branch, "release/")) {
 		return "develop", nil
 	}
 	return w.Main(ctx)

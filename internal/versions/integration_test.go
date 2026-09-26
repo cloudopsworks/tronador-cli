@@ -17,7 +17,7 @@ func gitTest(t *testing.T, dir string, args ...string) string {
 	}
 	return string(b)
 }
-func TestFeaturePurgeChecksOutSafeBaseBeforeDelete(t *testing.T) {
+func TestFeatureAliasPurgeChecksOutSafeBaseWithoutDeletingCanonicalCoexistence(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
@@ -31,8 +31,12 @@ func TestFeaturePurgeChecksOutSafeBaseBeforeDelete(t *testing.T) {
 	gitTest(t, repo, "push", "-u", "origin", "main")
 	gitTest(t, repo, "checkout", "-b", "develop")
 	gitTest(t, repo, "push", "-u", "origin", "develop")
+	gitTest(t, repo, "checkout", "-b", "feat/remove-me")
+	gitTest(t, repo, "push", "-u", "origin", "feat/remove-me")
+	gitTest(t, repo, "checkout", "develop")
 	gitTest(t, repo, "checkout", "-b", "feature/remove-me")
 	gitTest(t, repo, "push", "-u", "origin", "feature/remove-me")
+	gitTest(t, repo, "checkout", "feat/remove-me")
 	w, e := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow"})
 	if e != nil {
 		t.Fatal(e)
@@ -43,14 +47,20 @@ func TestFeaturePurgeChecksOutSafeBaseBeforeDelete(t *testing.T) {
 	if got := gitTest(t, repo, "branch", "--show-current"); got != "develop\n" {
 		t.Fatalf("current branch %q", got)
 	}
-	c := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/feature/remove-me")
+	c := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/feat/remove-me")
 	c.Dir = repo
 	if e := c.Run(); e == nil {
 		t.Fatal("local branch remains")
 	}
-	out := gitTest(t, repo, "ls-remote", "origin", "refs/heads/feature/remove-me")
+	out := gitTest(t, repo, "ls-remote", "origin", "refs/heads/feat/remove-me")
 	if out != "" {
 		t.Fatalf("remote branch remains: %s", out)
+	}
+	if got := gitTest(t, repo, "show-ref", "--verify", "refs/heads/feature/remove-me"); got == "" {
+		t.Fatal("canonical coexisting feature branch was deleted")
+	}
+	if out := gitTest(t, repo, "ls-remote", "origin", "refs/heads/feature/remove-me"); out == "" {
+		t.Fatal("remote canonical coexisting feature branch was deleted")
 	}
 }
 
