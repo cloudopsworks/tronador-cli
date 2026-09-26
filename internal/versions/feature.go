@@ -120,12 +120,9 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 		return err
 	}
 	remoteFields := strings.Fields(remoteOut)
-	remoteSHA := ""
-	if len(remoteFields) > 0 {
-		remoteSHA = remoteFields[0]
-	}
+	remoteExists := len(remoteFields) > 0
 	localExists := w.branchExists(ctx, branch)
-	if len(remoteFields) > 0 {
+	if remoteExists {
 		if !localExists {
 			return fmt.Errorf("cannot safely purge %s: remote branch exists but local branch is unavailable for parity verification", branch)
 		}
@@ -133,7 +130,7 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 			return err
 		}
 	}
-	if !localExists && len(remoteFields) == 0 {
+	if !localExists && !remoteExists {
 		return nil // already purged
 	}
 	bases, err := w.purgeBases(ctx, branch)
@@ -160,7 +157,14 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if err = w.verifyPurgeBases(ctx, branch, bases); err != nil {
 		return err
 	}
-	if len(remoteFields) > 0 {
+	if remoteExists {
+		// Re-observe source publication after every destructive precondition.
+		// The SHA returned here is the compare-and-swap expectation for deletion:
+		// retaining the earlier observation could accept an A->B->A ABA change.
+		remoteSHA, err := w.remoteParitySHA(ctx, branch)
+		if err != nil {
+			return err
+		}
 		if err = w.deleteRemoteBranch(ctx, branch, remoteSHA); err != nil {
 			return err
 		}
