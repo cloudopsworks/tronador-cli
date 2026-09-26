@@ -130,7 +130,6 @@ type cloudOpsWorksLayout struct {
 }
 
 type selectorFile struct {
-	name string
 	data []byte
 	mode os.FileMode
 }
@@ -204,7 +203,7 @@ func (r *Runner) validateSelectorFiles(layout cloudOpsWorksLayout) (map[WayOfWor
 		if err != nil {
 			return nil, fmt.Errorf("required workflow config %s: %w", filepath.Join(cloudOpsWorksDir, wow.selectorFileName()), err)
 		}
-		paths[wow] = selectorFile{name: name, data: data, mode: mode}
+		paths[wow] = selectorFile{data: data, mode: mode}
 	}
 	if err := layout.ensure(); err != nil {
 		return nil, err
@@ -520,29 +519,14 @@ func copyAtomically(layout cloudOpsWorksLayout, source selectorFile, target stri
 	return true, nil
 }
 
-func fileMode(path string) os.FileMode {
-	if info, err := os.Stat(path); err == nil {
-		return info.Mode().Perm()
-	}
-	return 0o644
-}
-
 type atomicTempFile interface {
-	Name() string
 	Chmod(os.FileMode) error
 	Write([]byte) (int, error)
 	Close() error
 }
 
-var createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
-	return os.CreateTemp(dir, pattern)
-}
-
-var replaceAtomicFile = replacement.Replace
-
-func writeAtomically(path string, data []byte, mode os.FileMode) error {
-	return writeAtomicallyWithCheck(path, data, mode, nil)
-}
+var createRootAtomicTempFile = newRootAtomicTempFile
+var replaceAtomicFileInRoot = replacement.ReplaceInRoot
 
 func writeAtomicallyInLayout(layout cloudOpsWorksLayout, path string, data []byte, mode os.FileMode) error {
 	if err := layout.ensure(); err != nil {
@@ -571,7 +555,7 @@ func writeAtomicallyInLayout(layout cloudOpsWorksLayout, path string, data []byt
 	if err := layout.ensure(); err != nil {
 		return err
 	}
-	if err := layout.root.Rename(temporary, path); err != nil {
+	if err := replaceAtomicFileInRoot(layout.root, temporary, path); err != nil {
 		return fmt.Errorf("replace config atomically: %w", err)
 	}
 	return nil
@@ -579,7 +563,7 @@ func writeAtomicallyInLayout(layout cloudOpsWorksLayout, path string, data []byt
 
 var beforeRootAtomicTempCreate = func() {}
 
-func createRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
+func newRootAtomicTempFile(root *os.Root) (string, atomicTempFile, error) {
 	beforeRootAtomicTempCreate()
 	var random [12]byte
 	for range 100 {
@@ -594,47 +578,6 @@ func createRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
 		return name, file, err
 	}
 	return "", nil, errors.New("create unique temporary config")
-}
-
-func writeAtomicallyWithCheck(path string, data []byte, mode os.FileMode, check func() error) error {
-	if check != nil {
-		if err := check(); err != nil {
-			return err
-		}
-	}
-	dir := filepath.Dir(path)
-	file, err := createAtomicTempFile(dir, ".tronador-*")
-	if err != nil {
-		return fmt.Errorf("create temporary config: %w", err)
-	}
-	temporary := file.Name()
-	defer os.Remove(temporary)
-	if check != nil {
-		if err := check(); err != nil {
-			_ = file.Close()
-			return err
-		}
-	}
-	if err := file.Chmod(mode); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("prepare temporary config: %w", err)
-	}
-	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("write temporary config: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close temporary config: %w", err)
-	}
-	if check != nil {
-		if err := check(); err != nil {
-			return err
-		}
-	}
-	if err := replaceAtomicFile(temporary, path); err != nil {
-		return fmt.Errorf("replace config atomically: %w", err)
-	}
-	return nil
 }
 
 func (r *Runner) git(ctx context.Context, args ...string) (string, error) {

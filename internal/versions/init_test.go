@@ -786,7 +786,7 @@ func (f failingAtomicTempFile) Write(data []byte) (int, error) {
 	return f.File.Write(data)
 }
 
-func TestWriteAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
+func TestRootedAtomicWritePreservesDestinationOnTemporaryFailure(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		chmodErr error
@@ -796,47 +796,59 @@ func TestWriteAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
 		{name: "write", writeErr: errors.New("write failed")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			dir := t.TempDir()
-			target := filepath.Join(dir, "gitversion.yaml")
+			dir := workflowFixture(t)
+			target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
 			writeFile(t, target, "original\n")
-			oldFactory := createAtomicTempFile
-			createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
-				file, err := os.CreateTemp(dir, pattern)
-				if err != nil {
-					return nil, err
-				}
-				return failingAtomicTempFile{File: file, chmodErr: test.chmodErr, writeErr: test.writeErr}, nil
+			r := newInitRunner(t, dir, SelectWayOfWork)
+			layout, err := r.validateCloudOpsWorksDir()
+			if err != nil {
+				t.Fatal(err)
 			}
-			t.Cleanup(func() { createAtomicTempFile = oldFactory })
+			defer layout.root.Close()
+			oldFactory := createRootAtomicTempFile
+			createRootAtomicTempFile = func(root *os.Root) (string, atomicTempFile, error) {
+				name, file, err := newRootAtomicTempFile(root)
+				if err != nil {
+					return "", nil, err
+				}
+				return name, failingAtomicTempFile{File: file.(*os.File), chmodErr: test.chmodErr, writeErr: test.writeErr}, nil
+			}
+			t.Cleanup(func() { createRootAtomicTempFile = oldFactory })
 
-			if err := writeAtomically(target, []byte("replacement\n"), 0o644); err == nil {
-				t.Fatal("writeAtomically unexpectedly succeeded")
+			if err := writeAtomicallyInLayout(layout, "gitversion.yaml", []byte("replacement\n"), 0o644); err == nil {
+				t.Fatal("writeAtomicallyInLayout unexpectedly succeeded")
 			}
 			if got := mustReadFile(t, target); got != "original\n" {
 				t.Fatalf("destination replaced after temporary failure: %q", got)
 			}
-			if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-*")); err != nil || len(temporary) != 0 {
+			if temporary, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".tronador-*")); err != nil || len(temporary) != 0 {
 				t.Fatalf("temporary files = %v, %v", temporary, err)
 			}
 		})
 	}
 }
 
-func TestWriteAtomicallyCleansTemporaryOnReplacementFailure(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "gitversion.yaml")
+func TestRootedAtomicWriteCleansTemporaryOnReplacementFailure(t *testing.T) {
+	dir := workflowFixture(t)
+	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
 	writeFile(t, target, "original\n")
-	originalReplace := replaceAtomicFile
-	replaceAtomicFile = func(string, string) error { return errors.New("replace failed") }
-	t.Cleanup(func() { replaceAtomicFile = originalReplace })
+	r := newInitRunner(t, dir, SelectWayOfWork)
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer layout.root.Close()
+	originalReplace := replaceAtomicFileInRoot
+	replaceAtomicFileInRoot = func(*os.Root, string, string) error { return errors.New("replace failed") }
+	t.Cleanup(func() { replaceAtomicFileInRoot = originalReplace })
 
-	if err := writeAtomically(target, []byte("replacement\n"), 0o644); err == nil {
-		t.Fatal("writeAtomically unexpectedly succeeded")
+	if err := writeAtomicallyInLayout(layout, "gitversion.yaml", []byte("replacement\n"), 0o644); err == nil {
+		t.Fatal("writeAtomicallyInLayout unexpectedly succeeded")
 	}
 	if got := mustReadFile(t, target); got != "original\n" {
 		t.Fatalf("destination replaced after replacement failure: %q", got)
 	}
-	if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-*")); err != nil || len(temporary) != 0 {
+	if temporary, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".tronador-*")); err != nil || len(temporary) != 0 {
 		t.Fatalf("temporary files = %v, %v", temporary, err)
 	}
 }
