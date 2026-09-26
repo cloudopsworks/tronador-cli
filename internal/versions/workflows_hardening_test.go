@@ -605,6 +605,80 @@ func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *tes
 	}
 }
 
+func TestFinishDeletionRequiresExactAnnotatedTagRef(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	gitTest(t, repo, "checkout", "-b", "hotfix/v0.2.0")
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "hotfix")
+	sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "HEAD"))
+	gitTest(t, repo, "checkout", "main")
+	gitTest(t, repo, "merge", "--no-ff", "hotfix/v0.2.0", "-m", "merge hotfix")
+	gitTest(t, repo, "branch", "v0.2.0")
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.verifyFinished(ctx, "main", sourceSHA, "v0.2.0"); err == nil || !strings.Contains(err.Error(), "annotated tag") {
+		t.Fatalf("same-named branch satisfied finish tag postcondition: %v", err)
+	}
+	gitTest(t, repo, "tag", "-a", "v0.2.0", "-m", "release")
+	if err = w.verifyFinished(ctx, "main", sourceSHA, "v0.2.0"); err != nil {
+		t.Fatalf("exact annotated tag rejected: %v", err)
+	}
+}
+
+func TestDeleteCursorDoesNotAdvanceForSameNamedBranchWithoutTag(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, prefix string
+		finish                  func(*Workflows) error
+	}{
+		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
+		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, false)
+			branch := tc.prefix + "/v0.2.0"
+			gitTest(t, repo, "checkout", "-b", branch)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
+			gitTest(t, repo, "push", "-u", "origin", branch)
+			sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+			gitTest(t, repo, "checkout", "main")
+			gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
+			gitTest(t, repo, "push", "origin", "main")
+			gitTest(t, repo, "branch", "v0.2.0")
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := w.localFinishSteps(tc.operation)
+			j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deleteStep, err := journalStepBoundary(steps, "delete-remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Done = deleteStep
+			if err = writeAtomic(path, j); err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "requires annotated tag") {
+				t.Fatalf("same-named branch allowed delete cursor replay: %v", err)
+			}
+			current, _, err := w.readJournal(ctx)
+			if err != nil || current == nil || current.Done != deleteStep {
+				t.Fatalf("journal advanced after missing exact tag: journal=%#v err=%v", current, err)
+			}
+			if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
+				t.Fatalf("source deleted without exact tag: %q", got)
+			}
+		})
+	}
+}
+
 func TestLocalFinishResumesRecordedTagAfterTargetAdvances(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {

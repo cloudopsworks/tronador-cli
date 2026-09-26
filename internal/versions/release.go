@@ -230,7 +230,7 @@ func (w *Workflows) verifyFinished(ctx context.Context, target, sourceSHA, tag s
 	if _, e := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, target); e != nil {
 		return fmt.Errorf("finish postcondition: %s is not merged into %s: %w", sourceSHA, target, e)
 	}
-	if _, e := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); e != nil {
+	if _, e := w.git(ctx, "rev-parse", "--verify", "refs/tags/"+tag+"^{tag}"); e != nil {
 		return fmt.Errorf("finish postcondition: annotated tag %s missing: %w", tag, e)
 	}
 	return nil
