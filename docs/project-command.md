@@ -65,6 +65,7 @@ and build separators after `x.y.z` to hyphens: for example,
 | `tronador project version` | All application profiles | Default version policy described above. |
 | `tronador project version --plain` | Node and Python only | Uses GitVersion's `MajorMinorPatch` and writes exactly `x.y.z`, including when `HEAD` is tagged. |
 | `tronador project version --snapshot` | Untagged Java only | Uses GitVersion's `MajorMinorPatch` and writes `x.y.z-SNAPSHOT`. |
+| `tronador project version --generate --yes` | Catalog-managed, versioned template-derived repositories only | Writes the guarded blueprint upgrade marker as `vX.Y.Z`; it does not tag, commit, or push. |
 
 The profile-specific flags are rejected for every other capability or profile. Use
 `tronador project version --help` for the executable's version-specific usage and flags.
@@ -75,6 +76,25 @@ files. It prints deterministic unified file patches (or `No file changes for ver
 <version>.`) and JSON exposes only actual `file_changes`; unchanged and optional missing
 metadata files are omitted. GitVersion provisioning is allowed only to a tools directory
 outside the workdir, and successful preview suppresses provisioner/tool progress.
+
+### Legacy blueprint marker generation
+
+`tronador project version --generate` is intentionally separate from normal
+application versioning. It calculates GitVersion's `MajorMinorPatch` and writes
+the `vX.Y.Z` upgrade marker at `.cloudopsworks/_VERSION`, or the supported
+legacy `.github/_VERSION` location. The marker controls repository-template
+upgrades, so Tronador accepts this operation only for a catalog-managed,
+versioned template-derived repository
+with one unambiguous active template layout. A `.cloudopsworks` implementation
+marker by itself is not enough. The marker may be missing and is created
+atomically only after the selected layout and active regular template marker
+are verified. Symlinked or non-regular layouts/markers, and multiple active
+legacy layouts, are rejected.
+
+Outside a dry-run, `--generate` requires `--yes`; it warns before replacing a
+different marker value and never creates a Git tag, commit, or push. It cannot
+be combined with `--plain` or `--snapshot`. A dry-run shows the prospective
+marker patch and does not require confirmation.
 
 ## Initialization mappings
 

@@ -25,6 +25,7 @@ name remains `tronador-cli`; a plain `go build` from this checkout emits
 | `tronador iac` | Infrastructure-as-code helpers guarded by `.cloudopsworks/.iac`. | [IaC command](iac-command.md) |
 | `tronador project` | Detection-driven, implementation-neutral project capabilities. | [Project command](project-command.md) |
 | `tronador repos` / `repo` | Repository template lifecycle workflows ported from Tronador Make targets. | [Repos command](repos-command.md) |
+| `tronador versions` / `gitflow` / `gf` / `githubflow` / `flow` | Repository branching workflows, GitVersion configuration, and guarded tags. | [Versions command](versions-command.md) |
 | `tronador readme` | Generate, lint, initialize, and manage README generator assets. | [README/docs command](readme-docs-command.md) |
 | `tronador docs` | Generate Make target docs, Terraform docs, and copyright headers. | [README/docs command](readme-docs-command.md) |
 | `tronador version` | Print the release binary version. | This page |

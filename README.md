@@ -47,7 +47,7 @@ It's 100% Open Source and licensed under the [APACHE2](LICENSE).
 - **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
 - **README and docs generation**: Port Tronador `readme/*` and `docs/*` Makefile targets into the CLI with `tronador readme` and `tronador docs`, including GitHub-backed runtime template asset sync.
 - **Implicit project capabilities**: Detect implementation markers and run namespace-free `init`, `version`, `lint`, `format`, and cleanup capabilities through CLI-native typed pipelines with `tronador project`.
-- **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [project capabilities](docs/project-command.md), [repository lifecycle commands](docs/repos-command.md), and [README/docs commands](docs/readme-docs-command.md).
+- **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [project capabilities](docs/project-command.md), [repository lifecycle commands](docs/repos-command.md), [branching and GitVersion workflows](docs/versions-command.md), and [README/docs commands](docs/readme-docs-command.md).
 - **Config-driven upgrade paths**: Repository templates and migration plans are loaded from JSON, so future upgrade paths such as `5.11` and `5.12` can be added without rewriting command dispatch code.
 - **Release packages**: GoReleaser publishes archives plus native Linux packages (`.deb`, `.rpm`, `.apk`), Homebrew casks, Chocolatey packages, and shell/PowerShell installers from the same release pipeline; release package names remain `tronador-cli` while the executable is `tronador`.
 - **Cross-platform support**: Linux, macOS, Windows, and FreeBSD builds are produced from a static `CGO_ENABLED=0` binary.
@@ -64,6 +64,7 @@ Start with the command index in [docs/commands.md](docs/commands.md). Dedicated 
 - [IaC command](docs/iac-command.md) — `.cloudopsworks/.iac`-guarded module source version checks and updates.
 - [Project command](docs/project-command.md) — detection-driven, namespace-free capabilities and typed tool pipelines.
 - [Repos command](docs/repos-command.md) — repository template lifecycle workflows.
+- [Versions command](docs/versions-command.md) — branching workflows, GitVersion configuration, and guarded tags.
 - [README/docs command](docs/readme-docs-command.md) — generated README files, Make target docs, Terraform docs, copyright headers, and runtime template assets.
 
 ### Binary Names
@@ -151,10 +152,23 @@ For the full command mapping and architecture notes, see [docs/repos-command.md]
 
 `tronador project` detects a supported implementation from `.cloudopsworks/`
 and runs namespace-free capabilities such as `init`, `version`, `lint`, and
-`format` through CLI-native typed tool pipelines. See
+`format` through CLI-native typed tool pipelines. `project version --generate --yes` is reserved for catalog-managed, versioned template-derived repositories: it updates the legacy blueprint `_VERSION` marker, warns on replacement, and never tags, commits, or pushes. See
 [docs/project-command.md](docs/project-command.md) for detection, tool flags,
 and safety behavior.
 
+
+### Repository Branching and GitVersion Workflows
+
+`tronador versions` configures GitFlow, GitHub Flow, or trunk-based GitVersion behavior and runs guarded feature, hotfix, release, support, and tag workflows. `gitflow`, `gf`, `githubflow`, and `flow` are aliases for the same command tree.
+
+- `versions init --gitflow|--githubflow|--trunkbased` — install a checked-in GitVersion workflow; an unset workflow can be selected interactively when CI explicitly disables GitFlow. GitFlow alone creates and publishes `develop`.
+- `versions feature` — start, publish, finish, or purge feature branches; publish, finish, and purge infer a missing name from the current feature branch.
+- `versions hotfix` — start the next patch, publish or finish the current hotfix, or purge a named/current hotfix.
+- `versions release` — start a patch, minor, or major release; publish or purge a named/current release, or finish the current release.
+- `versions support` — manage persistent maintenance branches in GitFlow only.
+- `versions tag [qualifier] --publish` — create the legacy GitVersion tag and optionally push it.
+
+Finishes and tags require the named local branch to exactly match its `origin` branch. `--main-branch` must name a safe branch available at `origin`; `--dry-run` is mutation-free for all workflow actions. Purges prove the branch is merged before safe deletion. Local hotfix/release finishes first require source parity, then use a validated journal to resume after conflict resolution. See [docs/versions-command.md](docs/versions-command.md) for workflow-sensitive bases, all flags, and safety guards.
 
 ### README and Documentation Commands
 
