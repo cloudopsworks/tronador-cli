@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build darwin || freebsd || linux
 
 package versions
 
