@@ -114,3 +114,64 @@ func TestReleaseFinishRemoteFailsClosedWhenTargetProbeFails(t *testing.T) {
 		t.Fatalf("PR created after target probe failure: %#v", f.calls)
 	}
 }
+
+type fetchAdvancingReleaseRunner struct {
+	calls   []call
+	fetched bool
+}
+
+func (r *fetchAdvancingReleaseRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+	r.calls = append(r.calls, call{name: name, args: append([]string(nil), args...)})
+	if key(name, args...) == key("git", "fetch", "origin", "--prune") {
+		r.fetched = true
+		return "", nil
+	}
+	branch := "release/v1.2.3"
+	switch key(name, args...) {
+	case key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):
+		return "local-sha\n", nil
+	case key("git", "ls-remote", "origin", "refs/heads/"+branch):
+		if r.fetched {
+			return "remote-advanced\trefs/heads/" + branch + "\n", nil
+		}
+		return "local-sha\trefs/heads/" + branch + "\n", nil
+	}
+	return "", nil
+}
+
+func (r *fetchAdvancingReleaseRunner) sawPrefix(parts ...string) bool {
+	for _, c := range r.calls {
+		callParts := append([]string{c.name}, c.args...)
+		if len(callParts) < len(parts) {
+			continue
+		}
+		matches := true
+		for i, part := range parts {
+			if callParts[i] != part {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReleaseFinishRemoteRechecksSourceParityAfterFetch(t *testing.T) {
+	r := &fetchAdvancingReleaseRunner{}
+	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: r})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ReleaseFinish(context.Background(), "1.2.3", false); err == nil || !strings.Contains(err.Error(), "not exactly published") {
+		t.Fatalf("ReleaseFinish error = %v, want source parity rejection", err)
+	}
+	if !r.fetched {
+		t.Fatal("ReleaseFinish did not fetch before source parity validation")
+	}
+	if r.sawPrefix("git", "merge-base") || r.sawPrefix("gh", "pr") {
+		t.Fatalf("ReleaseFinish made ancestry or PR decisions after stale source parity: %#v", r.calls)
+	}
+}

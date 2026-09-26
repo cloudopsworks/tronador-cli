@@ -74,12 +74,13 @@ func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) 
 	}
 	branch := "release/" + n
 	if !local {
-		if e = w.RequireParity(ctx, branch); e != nil {
+		// Source parity and target ancestry must share one fetched view. Checking
+		// parity first could leave a source branch stale after fetch while gh
+		// resolves the newer remote head for PR creation.
+		if _, e = w.git(ctx, "fetch", w.remote, "--prune"); e != nil {
 			return e
 		}
-		// PR decisions must use current target refs. A stale tracking branch can
-		// otherwise create an empty PR for a release already merged remotely.
-		if _, e = w.git(ctx, "fetch", w.remote, "--prune"); e != nil {
+		if e = w.RequireParity(ctx, branch); e != nil {
 			return e
 		}
 		main, e := w.Main(ctx)
