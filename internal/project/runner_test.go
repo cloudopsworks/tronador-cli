@@ -1638,3 +1638,24 @@ func TestWriteProjectFileAtomicallyPreservesDestinationOnTemporaryFailure(t *tes
 		})
 	}
 }
+
+func TestWriteProjectFileAtomicallyCleansTemporaryOnReplacementFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "_VERSION")
+	if err := os.WriteFile(target, []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originalReplace := replaceProjectAtomicFile
+	replaceProjectAtomicFile = func(string, string) error { return errors.New("replace failed") }
+	t.Cleanup(func() { replaceProjectAtomicFile = originalReplace })
+
+	if err := writeProjectFileAtomically(target, []byte("replacement\n"), 0o644); err == nil {
+		t.Fatal("writeProjectFileAtomically unexpectedly succeeded")
+	}
+	if got := string(mustRead(t, target)); got != "original\n" {
+		t.Fatalf("destination replaced after replacement failure: %q", got)
+	}
+	if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-version-*")); err != nil || len(temporary) != 0 {
+		t.Fatalf("temporary files = %v, %v", temporary, err)
+	}
+}

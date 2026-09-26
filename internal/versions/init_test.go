@@ -480,6 +480,25 @@ func TestWriteAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
 	}
 }
 
+func TestWriteAtomicallyCleansTemporaryOnReplacementFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "gitversion.yaml")
+	writeFile(t, target, "original\n")
+	originalReplace := replaceAtomicFile
+	replaceAtomicFile = func(string, string) error { return errors.New("replace failed") }
+	t.Cleanup(func() { replaceAtomicFile = originalReplace })
+
+	if err := writeAtomically(target, []byte("replacement\n"), 0o644); err == nil {
+		t.Fatal("writeAtomically unexpectedly succeeded")
+	}
+	if got := mustReadFile(t, target); got != "original\n" {
+		t.Fatalf("destination replaced after replacement failure: %q", got)
+	}
+	if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-*")); err != nil || len(temporary) != 0 {
+		t.Fatalf("temporary files = %v, %v", temporary, err)
+	}
+}
+
 func TestInitExistingDevelopRejectsInvalidConfiguredPrimary(t *testing.T) {
 	dir := workflowFixture(t)
 	git := fakeGit(t, `case "$*" in

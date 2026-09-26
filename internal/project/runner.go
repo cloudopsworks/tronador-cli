@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"tronador-cli/internal/replacement"
 	repospkg "tronador-cli/internal/repos"
 	toolspkg "tronador-cli/internal/tools"
 )
@@ -1044,6 +1045,8 @@ var createProjectAtomicTempFile = func(dir, pattern string) (projectAtomicTempFi
 	return os.CreateTemp(dir, pattern)
 }
 
+var replaceProjectAtomicFile = replacement.Replace
+
 func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) error {
 	file, err := createProjectAtomicTempFile(filepath.Dir(path), ".tronador-version-*")
 	if err != nil {
@@ -1062,7 +1065,7 @@ func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) erro
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporary, path)
+	return replaceProjectAtomicFile(temporary, path)
 }
 
 func buildLegacyBlueprintMarkerChange(workdir, relative, version string) (*versionChange, string, error) {

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"tronador-cli/internal/replacement"
 )
 
 const cloudOpsWorksDir = ".cloudopsworks"
@@ -389,6 +391,8 @@ var createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
 	return os.CreateTemp(dir, pattern)
 }
 
+var replaceAtomicFile = replacement.Replace
+
 func writeAtomically(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	file, err := createAtomicTempFile(dir, ".tronador-*")
@@ -408,7 +412,7 @@ func writeAtomically(path string, data []byte, mode os.FileMode) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close temporary config: %w", err)
 	}
-	if err := os.Rename(temporary, path); err != nil {
+	if err := replaceAtomicFile(temporary, path); err != nil {
 		return fmt.Errorf("replace config atomically: %w", err)
 	}
 	return nil

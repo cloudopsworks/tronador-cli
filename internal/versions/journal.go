@@ -9,11 +9,15 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"tronador-cli/internal/replacement"
 )
 
 // Journal makes local finishing restartable after a merge conflict. It is kept
 // under git-path, which scopes it to the repository/worktree instead of /tmp.
 const journalSchemaVersion = 3
+
+var replaceJournalFile = replacement.Replace
 
 type journal struct {
 	Version      int       `json:"version"`
@@ -119,7 +123,7 @@ func writeAtomic(path string, v *journal) error {
 	if e != nil {
 		return e
 	}
-	return os.Rename(tmp, path)
+	return replaceJournalFile(tmp, path)
 }
 
 // startLocalFinishJournal verifies the fetched source and finish tag before
