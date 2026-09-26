@@ -101,6 +101,10 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 		return err
 	}
 	remoteFields := strings.Fields(remoteOut)
+	remoteSHA := ""
+	if len(remoteFields) > 0 {
+		remoteSHA = remoteFields[0]
+	}
 	localExists := w.branchExists(ctx, branch)
 	if len(remoteFields) > 0 {
 		if !localExists {
@@ -131,13 +135,13 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 			return err
 		}
 	}
-	if localExists {
-		if _, err = w.git(ctx, "branch", "-d", branch); err != nil {
+	if len(remoteFields) > 0 {
+		if err = w.deleteRemoteBranch(ctx, branch, remoteSHA); err != nil {
 			return err
 		}
 	}
-	if len(remoteFields) > 0 {
-		_, err = w.git(ctx, "push", w.remote, "--delete", branch)
+	if localExists {
+		_, err = w.git(ctx, "branch", "-d", branch)
 	}
 	return err
 }

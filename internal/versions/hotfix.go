@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -55,7 +56,7 @@ func (w *Workflows) hotfixStartBase(ctx context.Context, version string) (string
 		return main, err
 	}
 	if version != "" {
-		return w.hotfixTarget(ctx, normalizeVersion(version))
+		return w.hotfixTargetFromFetched(ctx, normalizeVersion(version))
 	}
 	// Without an explicit version, the only unambiguous support-line signal is
 	// the current support branch. Otherwise calculate the next patch from main.
@@ -130,13 +131,13 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	if e != nil {
 		return e
 	}
-	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-local", "delete-remote"})
+	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-remote", "delete-local"})
 	if e != nil {
 		return e
 	}
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
-		if s == "delete-local" {
+		if s == "delete-remote" {
 			if err := w.verifyFinished(ctx, target, branch, version); err != nil {
 				return err
 			}
@@ -155,10 +156,10 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 			_, e = w.git(ctx, "push", w.remote, target)
 		case "push-tag":
 			_, e = w.git(ctx, "push", w.remote, version)
+		case "delete-remote":
+			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
 		case "delete-local":
 			e = w.deleteLocalBranch(ctx, branch)
-		case "delete-remote":
-			e = w.deleteRemoteBranch(ctx, branch)
 		}
 		if e != nil {
 			return fmt.Errorf("%s: %w", s, e)
@@ -174,6 +175,15 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 // branch exists for the hotfix major/minor line, it receives the fix instead
 // of main. GitHub Flow and trunk-based repositories always use main.
 func (w *Workflows) hotfixTarget(ctx context.Context, version string) (string, error) {
+	if w.hasDevelop() {
+		if _, err := w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
+			return "", err
+		}
+	}
+	return w.hotfixTargetFromFetched(ctx, version)
+}
+
+func (w *Workflows) hotfixTargetFromFetched(ctx context.Context, version string) (string, error) {
 	main, err := w.Main(ctx)
 	if err != nil || !w.hasDevelop() {
 		return main, err
@@ -182,17 +192,26 @@ func (w *Workflows) hotfixTarget(ctx context.Context, version string) (string, e
 	if m == nil {
 		return "", fmt.Errorf("invalid hotfix version %q", version)
 	}
-	out, err := w.git(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads/support/")
-	if err != nil {
-		return "", err
-	}
-	var matches []string
-	for _, candidate := range strings.Fields(out) {
-		major, minor, ok := supportLine(candidate)
-		if ok && major == m[1] && minor == m[2] {
-			matches = append(matches, candidate)
+	refs := []string{"refs/heads/support/", "refs/remotes/" + w.remote + "/support/"}
+	matchesByName := map[string]struct{}{}
+	for _, ref := range refs {
+		out, listErr := w.git(ctx, "for-each-ref", "--format=%(refname:short)", ref)
+		if listErr != nil {
+			return "", listErr
+		}
+		for _, candidate := range strings.Fields(out) {
+			candidate = strings.TrimPrefix(candidate, w.remote+"/")
+			major, minor, ok := supportLine(candidate)
+			if ok && major == m[1] && minor == m[2] {
+				matchesByName[candidate] = struct{}{}
+			}
 		}
 	}
+	var matches []string
+	for candidate := range matchesByName {
+		matches = append(matches, candidate)
+	}
+	sort.Strings(matches)
 	if len(matches) == 0 {
 		return main, nil
 	}

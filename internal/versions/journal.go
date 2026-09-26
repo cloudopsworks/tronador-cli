@@ -13,7 +13,7 @@ import (
 
 // Journal makes local finishing restartable after a merge conflict. It is kept
 // under git-path, which scopes it to the repository/worktree instead of /tmp.
-const journalSchemaVersion = 2
+const journalSchemaVersion = 3
 
 type journal struct {
 	Version    int       `json:"version"`
@@ -22,6 +22,7 @@ type journal struct {
 	Worktree   string    `json:"worktree"`
 	Operation  string    `json:"operation"`
 	Source     string    `json:"source"`
+	SourceSHA  string    `json:"sourceSHA"`
 	Target     string    `json:"target"`
 	Steps      []string  `json:"steps"`
 	Done       int       `json:"done"`
@@ -88,11 +89,13 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 		if _, err = w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
 			return nil, "", err
 		}
-		if err = w.RequireParity(ctx, source); err != nil {
-			return nil, "", err
+		sha, parityErr := w.remoteParitySHA(ctx, source)
+		if parityErr != nil {
+			return nil, "", parityErr
 		}
+		return w.startJournal(ctx, op, source, target, sha, steps)
 	}
-	return w.startJournal(ctx, op, source, target, steps)
+	return w.startJournal(ctx, op, source, target, "", steps)
 }
 
 func (w *Workflows) journalWorktree(ctx context.Context) (string, error) {
@@ -160,7 +163,7 @@ func (w *Workflows) acquireJournalLock(ctx context.Context) (func(), error) {
 	return func() { _ = os.Remove(lock) }, nil
 }
 
-func (w *Workflows) startJournal(ctx context.Context, op, source, target string, steps []string) (*journal, string, error) {
+func (w *Workflows) startJournal(ctx context.Context, op, source, target, sourceSHA string, steps []string) (*journal, string, error) {
 	worktree, e := w.journalWorktree(ctx)
 	if e != nil {
 		return nil, "", e
@@ -177,12 +180,15 @@ func (w *Workflows) startJournal(ctx context.Context, op, source, target string,
 		if j.Operation != op || j.Source != source || j.Target != target {
 			return nil, "", fmt.Errorf("unfinished %s workflow for %s; resume or resolve it before starting %s", j.Operation, j.Source, op)
 		}
-		if j.Version != journalSchemaVersion || j.WayOfWork != w.wow || j.Repository != repository || j.Worktree != worktree || !reflect.DeepEqual(j.Steps, steps) || j.Done < 0 || j.Done > len(j.Steps) {
+		if j.Version != journalSchemaVersion || j.WayOfWork != w.wow || j.Repository != repository || j.Worktree != worktree || j.SourceSHA == "" || !reflect.DeepEqual(j.Steps, steps) || j.Done < 0 || j.Done > len(j.Steps) {
 			return nil, "", fmt.Errorf("unfinished workflow journal does not match this repository, workflow, or expected step plan; resolve it before continuing")
 		}
 		return j, p, nil
 	}
-	j = &journal{Version: journalSchemaVersion, WayOfWork: w.wow, Repository: repository, Worktree: worktree, Operation: op, Source: source, Target: target, Steps: append([]string(nil), steps...), Created: time.Now().UTC()}
+	if sourceSHA == "" {
+		return nil, "", fmt.Errorf("cannot create finish journal without exact published source SHA")
+	}
+	j = &journal{Version: journalSchemaVersion, WayOfWork: w.wow, Repository: repository, Worktree: worktree, Operation: op, Source: source, SourceSHA: sourceSHA, Target: target, Steps: append([]string(nil), steps...), Created: time.Now().UTC()}
 	if e = writeAtomic(p, j); e != nil {
 		return nil, "", e
 	}

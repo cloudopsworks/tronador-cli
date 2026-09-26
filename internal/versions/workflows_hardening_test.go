@@ -276,9 +276,11 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 
 func TestReleaseFinishGitflowCreatesPRsForMainAndDevelop(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):               "sha\n",
-		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):               "sha\trefs/heads/release/v1.2.3\n",
-		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                    "sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                    "sha\trefs/heads/release/v1.2.3\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                      "origin/main\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):    "0\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"): "0\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
@@ -295,6 +297,7 @@ func TestPurgeRejectsUnmergedBranchBeforeCheckoutOrDelete(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
 		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "branch", "--show-current"):                                       "main\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 	}, errs: map[string]error{key("git", "merge-base", "--is-ancestor", "feature/a", "refs/remotes/origin/main"): fmt.Errorf("not merged")}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
@@ -392,11 +395,11 @@ func TestJournalRejectsWrongRepositoryIdentity(t *testing.T) {
 	}
 	if err = writeAtomic(p, &journal{
 		Version: journalSchemaVersion, WayOfWork: "githubflow", Repository: "/another/repository", Worktree: worktree,
-		Operation: "hotfix-finish", Source: "hotfix/v0.1.1", Target: "main", Steps: []string{"checkout-target"},
+		Operation: "hotfix-finish", Source: "hotfix/v0.1.1", SourceSHA: "source", Target: "main", Steps: []string{"checkout-target"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = w.startJournal(ctx, "hotfix-finish", "hotfix/v0.1.1", "main", []string{"checkout-target"}); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, _, err = w.startJournal(ctx, "hotfix-finish", "hotfix/v0.1.1", "main", "source", []string{"checkout-target"}); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("journal identity error = %v", err)
 	}
 }
@@ -582,6 +585,116 @@ func TestHotfixTargetRejectsAmbiguousSupportLines(t *testing.T) {
 	}
 	if _, err = w.hotfixTarget(context.Background(), "v1.2.4"); err == nil || !strings.Contains(err.Error(), "ambiguous support branches") {
 		t.Fatalf("hotfixTarget error = %v, want ambiguity rejection", err)
+	}
+}
+
+func TestHotfixStartUsesRemoteOnlySupportTrackingBase(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/support/"): "origin/support/v1.2.0\n",
+		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"):      "support\n",
+		key("git", "rev-parse", "--verify", "support/v1.2.0^{commit}"):                          "support\n",
+	}}
+	f.errs = map[string]error{key("git", "show-ref", "--verify", "--quiet", "refs/heads/support/v1.2.0"): fmt.Errorf("missing local support")}
+	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.HotfixStart(context.Background(), "1.2.4"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("git", "checkout", "--track", "-b", "support/v1.2.0", "origin/support/v1.2.0") || !f.saw("git", "checkout", "-b", "hotfix/v1.2.4", "support/v1.2.0") {
+		t.Fatalf("remote support base was not tracked and used: %#v", f.calls)
+	}
+}
+
+func TestHotfixLocalFinishUsesRemoteOnlySupportLine(t *testing.T) {
+	ctx := context.Background()
+	root, seed := setupWorkflowRemote(t, true)
+	gitTest(t, seed, "checkout", "-b", "support/v1.2.0", "main")
+	gitTest(t, seed, "push", "-u", "origin", "support/v1.2.0")
+	gitTest(t, seed, "checkout", "-b", "hotfix/v1.2.4")
+	writeFile(t, filepath.Join(seed, "hotfix.txt"), "maintenance\n")
+	gitTest(t, seed, "add", "hotfix.txt")
+	gitTest(t, seed, "commit", "-m", "hotfix")
+	gitTest(t, seed, "push", "-u", "origin", "hotfix/v1.2.4")
+
+	fresh := filepath.Join(root, "fresh")
+	gitTest(t, root, "clone", filepath.Join(root, "remote.git"), fresh)
+	gitTest(t, fresh, "config", "user.email", "test@example.test")
+	gitTest(t, fresh, "config", "user.name", "Test")
+	gitTest(t, fresh, "checkout", "--track", "origin/hotfix/v1.2.4")
+	w, err := NewWorkflows(WorkflowOptions{Dir: fresh, WayOfWork: "gitflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.HotfixFinish(ctx, "1.2.4", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitTest(t, fresh, "show", "support/v1.2.0:hotfix.txt"); got != "maintenance\n" {
+		t.Fatalf("remote-only support did not receive hotfix: %q", got)
+	}
+}
+
+func TestReleaseFinishRetrySkipsExistingMainPRAndCreatesDevelopPR(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "rev-parse", "--verify", "release/v1.2.3^{commit}"):                                                                    "sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/release/v1.2.3"):                                                                    "sha\trefs/heads/release/v1.2.3\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"):                                                      "origin/main\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "main", "--state", "open", "--json", "number", "--jq", "length"):    "1\n",
+		key("gh", "pr", "list", "--head", "release/v1.2.3", "--base", "develop", "--state", "open", "--json", "number", "--jq", "length"): "0\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
+	if err := w.ReleaseFinish(context.Background(), "1.2.3", false); err != nil {
+		t.Fatal(err)
+	}
+	if f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "main", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") || !f.saw("gh", "pr", "create", "--head", "release/v1.2.3", "-B", "develop", "-b", "Release v1.2.3", "-t", "chore: Release v1.2.3 from release/v1.2.3") {
+		t.Fatalf("retry did not create only missing PR: %#v", f.calls)
+	}
+}
+
+func TestPurgeRemoteDeleteUsesLeaseBeforeDeletingLocal(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
+		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "branch", "--show-current"):                                       "main\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
+	if err := w.FeaturePurge(context.Background(), "a"); err != nil {
+		t.Fatal(err)
+	}
+	lease := "--force-with-lease=refs/heads/feature/a:sha"
+	if !f.saw("git", "push", lease, "origin", ":refs/heads/feature/a") {
+		t.Fatalf("remote deletion did not use lease: %#v", f.calls)
+	}
+	push, deleteLocal := -1, -1
+	for i, c := range f.calls {
+		if strings.Join(append([]string{c.name}, c.args...), " ") == "git push "+lease+" origin :refs/heads/feature/a" {
+			push = i
+		}
+		if strings.Join(append([]string{c.name}, c.args...), " ") == "git branch -d feature/a" {
+			deleteLocal = i
+		}
+	}
+	if push < 0 || deleteLocal < 0 || push > deleteLocal {
+		t.Fatalf("local branch deleted before leased remote delete: %#v", f.calls)
+	}
+}
+
+func TestPurgeRetainsLocalBranchWhenLeaseRejectsConcurrentAdvance(t *testing.T) {
+	lease := "--force-with-lease=refs/heads/feature/a:sha"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "sha\trefs/heads/feature/a\n",
+		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "sha\n",
+		key("git", "branch", "--show-current"):                                       "main\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+	}, errs: map[string]error{key("git", "push", lease, "origin", ":refs/heads/feature/a"): fmt.Errorf("stale info")}}
+	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
+	if err := w.FeaturePurge(context.Background(), "a"); err == nil || !strings.Contains(err.Error(), "stale info") {
+		t.Fatalf("lease failure = %v", err)
+	}
+	if f.saw("git", "branch", "-d", "feature/a") {
+		t.Fatalf("local source deleted after lease rejection: %#v", f.calls)
 	}
 }
 

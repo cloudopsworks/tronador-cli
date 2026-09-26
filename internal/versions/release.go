@@ -3,6 +3,8 @@ package versions
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 )
 
 func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
@@ -72,15 +74,33 @@ func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) 
 		if e != nil {
 			return e
 		}
-		if _, e = w.gh(ctx, "pr", "create", "--head", branch, "-B", main, "-b", fmt.Sprintf("Release %s", n), "-t", fmt.Sprintf("chore: Release %s from %s", n, branch)); e != nil {
+		if e = w.ensureReleasePR(ctx, branch, main, n); e != nil {
 			return e
 		}
 		if w.hasDevelop() && main != "develop" {
-			_, e = w.gh(ctx, "pr", "create", "--head", branch, "-B", "develop", "-b", fmt.Sprintf("Release %s", n), "-t", fmt.Sprintf("chore: Release %s from %s", n, branch))
+			e = w.ensureReleasePR(ctx, branch, "develop", n)
 		}
 		return e
 	}
 	return w.finishReleaseLocal(ctx, branch, n)
+}
+
+func (w *Workflows) ensureReleasePR(ctx context.Context, branch, base, version string) error {
+	out, err := w.gh(ctx, "pr", "list", "--head", branch, "--base", base, "--state", "open", "--json", "number", "--jq", "length")
+	if err != nil {
+		return fmt.Errorf("check existing release PR %s -> %s: %w", branch, base, err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || count < 0 {
+		return fmt.Errorf("check existing release PR %s -> %s: expected numeric count, got %q", branch, base, strings.TrimSpace(out))
+	}
+	if count > 0 {
+		return nil
+	}
+	if _, err = w.gh(ctx, "pr", "create", "--head", branch, "-B", base, "-b", fmt.Sprintf("Release %s", version), "-t", fmt.Sprintf("chore: Release %s from %s", version, branch)); err != nil {
+		return fmt.Errorf("create release PR %s -> %s: %w", branch, base, err)
+	}
+	return nil
 }
 func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version string) error {
 	if w.isDryRun() {
@@ -99,14 +119,14 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	if w.hasDevelop() {
 		steps = append(steps, "checkout-develop", "merge-develop", "push-develop")
 	}
-	steps = append(steps, "delete-local", "delete-remote")
+	steps = append(steps, "delete-remote", "delete-local")
 	j, p, e := w.startLocalFinishJournal(ctx, "release-finish", branch, target, steps)
 	if e != nil {
 		return e
 	}
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
-		if s == "delete-local" {
+		if s == "delete-remote" {
 			if err := w.verifyFinished(ctx, target, branch, version); err != nil {
 				return err
 			}
@@ -129,10 +149,10 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 			e = w.checkoutBase(ctx, "develop")
 		case "push-develop":
 			_, e = w.git(ctx, "push", w.remote, "develop")
+		case "delete-remote":
+			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
 		case "delete-local":
 			e = w.deleteLocalBranch(ctx, branch)
-		case "delete-remote":
-			e = w.deleteRemoteBranch(ctx, branch)
 		}
 		if e != nil {
 			return fmt.Errorf("%s: %w", s, e)

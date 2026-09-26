@@ -120,22 +120,30 @@ func (w *Workflows) Current(ctx context.Context) (string, error) {
 	return b, nil
 }
 func (w *Workflows) RequireParity(ctx context.Context, branch string) error {
+	_, err := w.remoteParitySHA(ctx, branch)
+	return err
+}
+
+// remoteParitySHA proves the named local branch is exactly the commit
+// published by the selected remote and returns that immutable expectation for
+// a subsequent compare-and-swap delete.
+func (w *Workflows) remoteParitySHA(ctx context.Context, branch string) (string, error) {
 	if err := w.ensureSafeRef(branch); err != nil {
-		return err
+		return "", err
 	}
 	local, e := w.git(ctx, "rev-parse", "--verify", branch+"^{commit}")
 	if e != nil {
-		return fmt.Errorf("local branch %s is required for parity verification: %w", branch, e)
+		return "", fmt.Errorf("local branch %s is required for parity verification: %w", branch, e)
 	}
 	remote, e := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
 	if e != nil {
-		return e
+		return "", e
 	}
 	fields := strings.Fields(remote)
 	if len(fields) == 0 || fields[0] != strings.TrimSpace(local) {
-		return fmt.Errorf("%s is not exactly published at HEAD; publish it before continuing", branch)
+		return "", fmt.Errorf("%s is not exactly published at HEAD; publish it before continuing", branch)
 	}
-	return nil
+	return fields[0], nil
 }
 func (w *Workflows) branchExists(ctx context.Context, b string) bool {
 	_, e := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/heads/"+b)
@@ -152,8 +160,19 @@ func (w *Workflows) checkoutBase(ctx context.Context, b string) error {
 // It is used where a base must be selected from freshly fetched remote refs before
 // checking it out, avoiding a second fetch between selection and synchronization.
 func (w *Workflows) checkoutFetchedBase(ctx context.Context, b string) error {
-	if _, e := w.git(ctx, "checkout", b); e != nil {
-		return e
+	if w.branchExists(ctx, b) {
+		if _, e := w.git(ctx, "checkout", b); e != nil {
+			return e
+		}
+	} else {
+		// A freshly cloned repository can see a support branch only as
+		// origin/support/*; establish the local tracking base before syncing it.
+		if _, e := w.git(ctx, "rev-parse", "--verify", "refs/remotes/"+w.remote+"/"+b+"^{commit}"); e != nil {
+			return fmt.Errorf("remote base %s/%s is unavailable: %w", w.remote, b, e)
+		}
+		if _, e := w.git(ctx, "checkout", "--track", "-b", b, w.remote+"/"+b); e != nil {
+			return e
+		}
 	}
 	if _, e := w.git(ctx, "pull", "--ff-only", w.remote, b); e != nil {
 		return e
@@ -342,7 +361,10 @@ func (w *Workflows) deleteLocalBranch(ctx context.Context, branch string) error 
 	return err
 }
 
-func (w *Workflows) deleteRemoteBranch(ctx context.Context, branch string) error {
+func (w *Workflows) deleteRemoteBranch(ctx context.Context, branch, expectedSHA string) error {
+	if err := w.ensureSafeRef(branch); err != nil {
+		return err
+	}
 	out, err := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
 	if err != nil {
 		return err
@@ -350,6 +372,9 @@ func (w *Workflows) deleteRemoteBranch(ctx context.Context, branch string) error
 	if len(strings.Fields(out)) == 0 {
 		return nil
 	}
-	_, err = w.git(ctx, "push", w.remote, "--delete", branch)
+	if expectedSHA == "" {
+		return fmt.Errorf("cannot safely delete remote branch %s without its expected SHA", branch)
+	}
+	_, err = w.git(ctx, "push", "--force-with-lease=refs/heads/"+branch+":"+expectedSHA, w.remote, ":refs/heads/"+branch)
 	return err
 }
