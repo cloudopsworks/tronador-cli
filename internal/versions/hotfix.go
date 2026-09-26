@@ -46,7 +46,7 @@ func (w *Workflows) HotfixStart(ctx context.Context, version string) error {
 	if err = w.ensureSafeRef(version); err != nil {
 		return err
 	}
-	_, err = w.git(ctx, "checkout", "-b", "hotfix/"+version, base)
+	_, err = w.git(ctx, "checkout", "-b", "hotfix/"+version, "refs/heads/"+base)
 	return err
 }
 
@@ -96,10 +96,10 @@ func (w *Workflows) HotfixPublish(ctx context.Context, name string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = w.git(ctx, "checkout", b); e != nil {
+	if _, e = w.git(ctx, "checkout", "--no-guess", b); e != nil {
 		return e
 	}
-	_, e = w.git(ctx, "push", "--set-upstream", w.remote, b)
+	_, e = w.git(ctx, "push", "--set-upstream", w.remote, "refs/heads/"+b+":refs/heads/"+b)
 	return e
 }
 func (w *Workflows) HotfixFinish(ctx context.Context, name string, local bool) error {
@@ -183,7 +183,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), j.TagTargetSHA)
 			}
 		case "push-target":
-			_, e = w.git(ctx, "push", w.remote, target)
+			_, e = w.git(ctx, "push", w.remote, "refs/heads/"+target+":refs/heads/"+target)
 		case "push-tag":
 			tagRef := "refs/tags/" + version
 			_, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef)

@@ -57,10 +57,10 @@ func (w *Workflows) SupportPublish(ctx context.Context, name string) error {
 		return e
 	}
 	b := "support/" + n
-	if _, e = w.git(ctx, "checkout", b); e != nil {
+	if _, e = w.git(ctx, "checkout", "--no-guess", b); e != nil {
 		return e
 	}
-	_, e = w.git(ctx, "push", "--set-upstream", w.remote, b)
+	_, e = w.git(ctx, "push", "--set-upstream", w.remote, "refs/heads/"+b+":refs/heads/"+b)
 	return e
 }
 func (w *Workflows) SupportPurge(ctx context.Context, name string) error {

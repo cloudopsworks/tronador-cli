@@ -27,7 +27,7 @@ func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
 	if e != nil {
 		return e
 	}
-	_, e = w.git(ctx, "checkout", "-b", "release/"+v, base)
+	_, e = w.git(ctx, "checkout", "-b", "release/"+v, "refs/heads/"+base)
 	return e
 }
 func (w *Workflows) releaseName(ctx context.Context, name string) (string, error) {
@@ -54,10 +54,10 @@ func (w *Workflows) ReleasePublish(ctx context.Context, name string) error {
 		return e
 	}
 	b := "release/" + n
-	if _, e = w.git(ctx, "checkout", b); e != nil {
+	if _, e = w.git(ctx, "checkout", "--no-guess", b); e != nil {
 		return e
 	}
-	_, e = w.git(ctx, "push", "--set-upstream", w.remote, b)
+	_, e = w.git(ctx, "push", "--set-upstream", w.remote, "refs/heads/"+b+":refs/heads/"+b)
 	return e
 }
 func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) error {
@@ -182,7 +182,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "push-main":
 			e = w.checkoutFinishBranch(ctx, target)
 			if e == nil {
-				_, e = w.git(ctx, "push", w.remote, target)
+				_, e = w.git(ctx, "push", w.remote, "refs/heads/"+target+":refs/heads/"+target)
 			}
 		case "push-tag":
 			tagRef := "refs/tags/" + version
@@ -192,7 +192,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "push-develop":
 			e = w.checkoutFinishBranch(ctx, "develop")
 			if e == nil {
-				_, e = w.git(ctx, "push", w.remote, "develop")
+				_, e = w.git(ctx, "push", w.remote, "refs/heads/develop:refs/heads/develop")
 			}
 		case "delete-remote":
 			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +83,41 @@ func TestRunnerWorkflowDryRunPerformsNoGitMutation(t *testing.T) {
 	c.Dir = repo
 	if err = c.Run(); err == nil {
 		t.Fatal("dry-run created a feature branch")
+	}
+}
+
+func TestBranchWorkflowRefsIgnoreSameNamedAnnotatedTags(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, true)
+	gitTest(t, repo, "config", "core.warnAmbiguousRefs", "false")
+	gitTest(t, repo, "tag", "-a", "main", "-m", "shadow main")
+	gitTest(t, repo, "checkout", "develop")
+	gitTest(t, repo, "tag", "-a", "develop", "-m", "shadow develop")
+
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.FeatureStart(ctx, "collision"); err != nil {
+		t.Fatalf("feature start with develop tag collision: %v", err)
+	}
+	gitTest(t, repo, "tag", "-a", "feature/collision", "-m", "shadow feature")
+	if err = w.FeaturePublish(ctx, "collision"); err != nil {
+		t.Fatalf("feature publish with branch/tag collision: %v", err)
+	}
+	if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/feature/collision"); !strings.Contains(got, "refs/heads/feature/collision") {
+		t.Fatalf("feature was not published through qualified refspec: %q", got)
+	}
+
+	gitTest(t, repo, "checkout", "develop")
+	gitTest(t, repo, "checkout", "-b", "release/v0.2.0")
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "release")
+	gitTest(t, repo, "push", "-u", "origin", "release/v0.2.0")
+	sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "refs/heads/release/v0.2.0"))
+	if err = w.ReleaseFinish(ctx, "0.2.0", true); err != nil {
+		t.Fatalf("release finish with main/develop tag collisions: %v", err)
+	}
+	for _, branch := range []string{"main", "develop"} {
+		gitTest(t, repo, "merge-base", "--is-ancestor", sourceSHA, "refs/remotes/origin/"+branch)
 	}
 }

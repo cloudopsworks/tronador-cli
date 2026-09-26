@@ -3,6 +3,7 @@ package versions
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -71,7 +72,7 @@ func TestFakeRunnerSawPrefixKeepsExactSawSemantics(t *testing.T) {
 func TestFeatureStartUsesWOWBase(t *testing.T) {
 	for _, tc := range []struct{ wow, base string }{{"gitflow", "develop"}, {"githubflow", "main"}, {"trunk", "main"}} {
 		t.Run(tc.wow, func(t *testing.T) {
-			f := &fakeRunner{replies: map[string]string{key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n"}}
+			f := &fakeRunner{replies: map[string]string{key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n"}}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: f})
 			if err != nil {
 				t.Fatal(err)
@@ -79,7 +80,7 @@ func TestFeatureStartUsesWOWBase(t *testing.T) {
 			if err = w.FeatureStart(context.Background(), "one"); err != nil {
 				t.Fatal(err)
 			}
-			if !f.saw("git", "checkout", "-b", "feature/one", tc.base) {
+			if !f.saw("git", "checkout", "-b", "feature/one", "refs/heads/"+tc.base) {
 				t.Fatalf("calls: %#v", f.calls)
 			}
 		})
@@ -100,16 +101,16 @@ func TestFeatureFinishRequiresExactRemoteParity(t *testing.T) {
 func TestFeatureAliasUsesExactCurrentBranch(t *testing.T) {
 	branch := "feat/coexist"
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "branch", "--show-current"):                                       branch + "\n",
-		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):        "abc\n",
-		key("git", "ls-remote", "origin", "refs/heads/"+branch):                      "abc\trefs/heads/" + branch + "\n",
-		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+		key("git", "branch", "--show-current"):                                branch + "\n",
+		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"): "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/"+branch):               "abc\trefs/heads/" + branch + "\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):     "refs/remotes/origin/main\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
 	if err := w.FeaturePublish(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if !f.saw("git", "checkout", branch) || !f.saw("git", "push", "--set-upstream", "origin", branch) {
+	if !f.saw("git", "checkout", "--no-guess", branch) || !f.saw("git", "push", "--set-upstream", "origin", "refs/heads/"+branch+":refs/heads/"+branch) {
 		t.Fatalf("publish did not keep alias branch: %#v", f.calls)
 	}
 	if err := w.FeatureFinish(context.Background(), ""); err != nil {
@@ -123,16 +124,16 @@ func TestFeatureAliasUsesExactCurrentBranch(t *testing.T) {
 func TestHotfixAliasUsesExactCurrentBranch(t *testing.T) {
 	branch := "fix/v1.2.3"
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "branch", "--show-current"):                                       branch + "\n",
-		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"):        "abc\n",
-		key("git", "ls-remote", "origin", "refs/heads/"+branch):                      "abc\trefs/heads/" + branch + "\n",
-		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+		key("git", "branch", "--show-current"):                                branch + "\n",
+		key("git", "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}"): "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/"+branch):               "abc\trefs/heads/" + branch + "\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):     "refs/remotes/origin/main\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
 	if err := w.HotfixPublish(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if !f.saw("git", "checkout", branch) || !f.saw("git", "push", "--set-upstream", "origin", branch) {
+	if !f.saw("git", "checkout", "--no-guess", branch) || !f.saw("git", "push", "--set-upstream", "origin", "refs/heads/"+branch+":refs/heads/"+branch) {
 		t.Fatalf("publish did not keep alias branch: %#v", f.calls)
 	}
 	if err := w.HotfixFinish(context.Background(), "", false); err != nil {
@@ -143,7 +144,7 @@ func TestHotfixAliasUsesExactCurrentBranch(t *testing.T) {
 	}
 }
 func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
-	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
+	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	tag, e := w.Tag(context.Background(), "test", true)
 	if e != nil {
@@ -206,5 +207,69 @@ func TestSupportStartFetchesTagsBeforeValidatingTag(t *testing.T) {
 	}
 	if fetch < 0 || verify < 0 || fetch > verify {
 		t.Fatalf("tag validation did not follow fetch: %#v", f.calls)
+	}
+}
+
+func TestMainFailsClosedForRemoteHeadErrorsAndMalformedRefs(t *testing.T) {
+	operational := exec.Command("sh", "-c", "exit 2").Run()
+	if operational == nil {
+		t.Fatal("expected exit status 2")
+	}
+	f := &fakeRunner{errs: map[string]error{
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): operational,
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.Main(context.Background()); err == nil {
+		t.Fatal("Main fell back after an operational remote HEAD error")
+	}
+	if f.sawPrefix("git", "show-ref") {
+		t.Fatalf("Main performed fallback discovery after operational error: %#v", f.calls)
+	}
+
+	for _, ref := range []string{"origin/main", "refs/remotes/other/main", "refs/remotes/origin/"} {
+		t.Run(ref, func(t *testing.T) {
+			f := &fakeRunner{replies: map[string]string{
+				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): ref + "\n",
+			}}
+			w, err := NewWorkflows(WorkflowOptions{Runner: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = w.Main(context.Background()); err == nil {
+				t.Fatalf("Main accepted malformed remote HEAD %q", ref)
+			}
+			if f.sawPrefix("git", "show-ref") {
+				t.Fatalf("Main fell back after malformed remote HEAD %q: %#v", ref, f.calls)
+			}
+		})
+	}
+}
+
+func TestPublishUsesQualifiedBranchRefspecs(t *testing.T) {
+	for _, tc := range []struct {
+		name, wow, branch string
+		publish           func(*Workflows) error
+	}{
+		{name: "feature", wow: "githubflow", branch: "feature/v1", publish: func(w *Workflows) error { return w.FeaturePublish(context.Background(), "v1") }},
+		{name: "hotfix", wow: "githubflow", branch: "hotfix/v1.2.3", publish: func(w *Workflows) error { return w.HotfixPublish(context.Background(), "1.2.3") }},
+		{name: "release", wow: "githubflow", branch: "release/v1.2.3", publish: func(w *Workflows) error { return w.ReleasePublish(context.Background(), "1.2.3") }},
+		{name: "support", wow: "gitflow", branch: "support/v1.2.3", publish: func(w *Workflows) error { return w.SupportPublish(context.Background(), "1.2.3") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunner{}
+			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.publish(w); err != nil {
+				t.Fatal(err)
+			}
+			if !f.saw("git", "checkout", "--no-guess", tc.branch) || !f.saw("git", "push", "--set-upstream", "origin", "refs/heads/"+tc.branch+":refs/heads/"+tc.branch) {
+				t.Fatalf("publish did not use qualified branch refspec: %#v", f.calls)
+			}
+		})
 	}
 }

@@ -93,12 +93,27 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 		}
 		return w.main, nil
 	}
-	out, err := w.git(ctx, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+w.remote+"/HEAD")
+	remoteHead := "refs/remotes/" + w.remote + "/HEAD"
+	out, err := w.git(ctx, "symbolic-ref", "--quiet", remoteHead)
 	if err == nil {
-		if b := strings.TrimPrefix(strings.TrimSpace(out), w.remote+"/"); b != "" {
-			w.main = b
-			return b, nil
+		ref := strings.TrimSpace(out)
+		prefix := "refs/remotes/" + w.remote + "/"
+		if !strings.HasPrefix(ref, prefix) {
+			return "", fmt.Errorf("remote HEAD %s resolved outside %s: %q", remoteHead, prefix, ref)
 		}
+		b := strings.TrimPrefix(ref, prefix)
+		if b == "" {
+			return "", fmt.Errorf("remote HEAD %s did not name a branch", remoteHead)
+		}
+		if err := w.ensureSafeRef(b); err != nil {
+			return "", fmt.Errorf("remote HEAD %s resolved invalid branch %q: %w", remoteHead, b, err)
+		}
+		w.main = b
+		return b, nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		return "", fmt.Errorf("resolve remote HEAD %s: %w", remoteHead, err)
 	}
 	for _, b := range []string{"main", "master"} {
 		if _, e := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/"+w.remote+"/"+b); e == nil {
@@ -161,7 +176,7 @@ func (w *Workflows) checkoutBase(ctx context.Context, b string) error {
 // checking it out, avoiding a second fetch between selection and synchronization.
 func (w *Workflows) checkoutFetchedBase(ctx context.Context, b string) error {
 	if w.branchExists(ctx, b) {
-		if _, e := w.git(ctx, "checkout", b); e != nil {
+		if _, e := w.git(ctx, "checkout", "--no-guess", b); e != nil {
 			return e
 		}
 	} else {
@@ -170,11 +185,11 @@ func (w *Workflows) checkoutFetchedBase(ctx context.Context, b string) error {
 		if _, e := w.git(ctx, "rev-parse", "--verify", "refs/remotes/"+w.remote+"/"+b+"^{commit}"); e != nil {
 			return fmt.Errorf("remote base %s/%s is unavailable: %w", w.remote, b, e)
 		}
-		if _, e := w.git(ctx, "checkout", "--track", "-b", b, w.remote+"/"+b); e != nil {
+		if _, e := w.git(ctx, "checkout", "--track", "-b", b, "refs/remotes/"+w.remote+"/"+b); e != nil {
 			return e
 		}
 	}
-	if _, e := w.git(ctx, "pull", "--ff-only", w.remote, b); e != nil {
+	if _, e := w.git(ctx, "pull", "--ff-only", w.remote, "refs/heads/"+b); e != nil {
 		return e
 	}
 	local, e := w.git(ctx, "rev-parse", "--verify", "refs/heads/"+b+"^{commit}")
@@ -202,7 +217,7 @@ func (w *Workflows) checkoutFinishBranch(ctx context.Context, branch string) err
 	if current == branch {
 		return nil
 	}
-	if _, err = w.git(ctx, "checkout", branch); err != nil {
+	if _, err = w.git(ctx, "checkout", "--no-guess", branch); err != nil {
 		return err
 	}
 	current, err = w.Current(ctx)

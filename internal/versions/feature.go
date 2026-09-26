@@ -23,7 +23,7 @@ func (w *Workflows) FeatureStart(ctx context.Context, name string) error {
 	if e = w.checkoutBase(ctx, base); e != nil {
 		return e
 	}
-	if _, e = w.git(ctx, "checkout", "-b", "feature/"+name, base); e != nil {
+	if _, e = w.git(ctx, "checkout", "-b", "feature/"+name, "refs/heads/"+base); e != nil {
 		return e
 	}
 	return nil
@@ -54,10 +54,10 @@ func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
 	if e != nil {
 		return e
 	}
-	if _, e = w.git(ctx, "checkout", branch); e != nil {
+	if _, e = w.git(ctx, "checkout", "--no-guess", branch); e != nil {
 		return e
 	}
-	_, e = w.git(ctx, "push", "--set-upstream", w.remote, branch)
+	_, e = w.git(ctx, "push", "--set-upstream", w.remote, "refs/heads/"+branch+":refs/heads/"+branch)
 	return e
 }
 
