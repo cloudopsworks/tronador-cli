@@ -124,6 +124,113 @@ case "$*" in
 	}
 }
 
+func TestInitGitFlowCreatesDevelopFromOriginHeadPrimary(t *testing.T) {
+	dir := workflowFixture(t)
+	log := filepath.Join(dir, "git.log")
+	git := fakeGit(t, `echo "$*" >> "$GIT_LOG"
+case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
+"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"branch --show-current") echo primary;;
+"rev-parse HEAD"|"rev-parse refs/remotes/origin/primary") echo abc123;;
+"checkout -b develop primary"|"push --set-upstream origin develop") exit 0;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_LOG", log)
+	result, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.DevelopCreated {
+		t.Fatalf("develop was not created: %+v", result)
+	}
+	calls := mustReadFile(t, log)
+	for _, want := range []string{"symbolic-ref --quiet --short refs/remotes/origin/HEAD", "checkout -b develop primary", "push --set-upstream origin develop"} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("calls missing %q:\n%s", want, calls)
+		}
+	}
+}
+
+func TestInitGitFlowRejectsOriginHeadPrimaryOnWrongCurrentBranch(t *testing.T) {
+	dir := workflowFixture(t)
+	git := fakeGit(t, `case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"rev-parse refs/remotes/origin/primary") echo abc123;;
+"branch --show-current") echo main;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), `check out origin/HEAD branch "primary"`) {
+		t.Fatalf("wrong-current error = %v", err)
+	}
+}
+
+func TestInitGitFlowRejectsDivergentOriginHeadPrimary(t *testing.T) {
+	dir := workflowFixture(t)
+	git := fakeGit(t, `case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"symbolic-ref --quiet --short refs/remotes/origin/HEAD") echo origin/primary;;
+"branch --show-current") echo primary;;
+"rev-parse HEAD") echo local;;
+"rev-parse refs/remotes/origin/primary") echo remote;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "primary is not equal to origin/primary") {
+		t.Fatalf("divergent origin/HEAD error = %v", err)
+	}
+}
+
+func TestInitGitFlowFallsBackToMainWhenOriginHeadIsMissingOrInvalid(t *testing.T) {
+	for name, originHead := range map[string]string{
+		"missing": `exit 1;;`,
+		"invalid": `echo "not an origin ref";;`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := workflowFixture(t)
+			git := fakeGit(t, `case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop"|"show-ref --verify --quiet refs/heads/develop") exit 1;;
+"symbolic-ref --quiet --short refs/remotes/origin/HEAD") `+originHead+`
+"branch --show-current") echo main;;
+"rev-parse HEAD"|"rev-parse refs/remotes/origin/main") echo abc123;;
+"checkout -b develop main"|"push --set-upstream origin develop") exit 0;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+			r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.DevelopCreated {
+				t.Fatalf("main fallback did not create develop: %+v", result)
+			}
+		})
+	}
+}
+
 func TestInitGitFlowCreatesDevelopFromConfiguredPrimary(t *testing.T) {
 	dir := workflowFixture(t)
 	log := filepath.Join(dir, "git.log")

@@ -482,24 +482,9 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if primary == "" {
-		branch, branchErr := r.git(ctx, "branch", "--show-current")
-		if branchErr != nil {
-			return false, branchErr
-		}
-		if branch != "main" && branch != "master" {
-			return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out main or master first", branch)
-		}
-		primary = branch
-		local, localErr := r.git(ctx, "rev-parse", "HEAD")
-		if localErr != nil {
-			return false, localErr
-		}
-		remote, err = r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
+		primary, remote, err = r.resolveDefaultPrimary(ctx)
 		if err != nil {
-			return false, fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
-		}
-		if local != remote {
-			return false, fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+			return false, err
 		}
 	}
 	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/heads/develop"); err == nil {
@@ -524,6 +509,60 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// resolveDefaultPrimary first uses origin/HEAD when it identifies a safe,
+// checked-out branch with a matching origin ref. If origin/HEAD is missing or
+// malformed, it retains the legacy main/master fallback. A usable origin/HEAD
+// never silently falls back when the checkout or commit parity is unsafe.
+func (r *Runner) resolveDefaultPrimary(ctx context.Context) (string, string, error) {
+	originHead, originHeadErr := r.git(ctx, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if originHeadErr == nil {
+		const originPrefix = "origin/"
+		if strings.HasPrefix(originHead, originPrefix) {
+			primary := strings.TrimPrefix(originHead, originPrefix)
+			if safeRef(primary) {
+				remote, remoteErr := r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
+				if remoteErr == nil {
+					branch, branchErr := r.git(ctx, "branch", "--show-current")
+					if branchErr != nil {
+						return "", "", branchErr
+					}
+					if branch != primary {
+						return "", "", fmt.Errorf("refusing to initialize GitFlow from %q; check out origin/HEAD branch %q first", branch, primary)
+					}
+					local, localErr := r.git(ctx, "rev-parse", "HEAD")
+					if localErr != nil {
+						return "", "", localErr
+					}
+					if local != remote {
+						return "", "", fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+					}
+					return primary, remote, nil
+				}
+			}
+		}
+	}
+
+	branch, branchErr := r.git(ctx, "branch", "--show-current")
+	if branchErr != nil {
+		return "", "", branchErr
+	}
+	if branch != "main" && branch != "master" {
+		return "", "", fmt.Errorf("refusing to initialize GitFlow from %q; check out main or master first", branch)
+	}
+	local, localErr := r.git(ctx, "rev-parse", "HEAD")
+	if localErr != nil {
+		return "", "", localErr
+	}
+	remote, remoteErr := r.git(ctx, "rev-parse", "refs/remotes/origin/"+branch)
+	if remoteErr != nil {
+		return "", "", fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", branch, remoteErr)
+	}
+	if local != remote {
+		return "", "", fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", branch, branch)
+	}
+	return branch, remote, nil
 }
 
 func (r *Runner) validateConfiguredPrimary(ctx context.Context) (string, string, error) {
