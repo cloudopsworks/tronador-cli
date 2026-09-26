@@ -1580,3 +1580,61 @@ func TestLegacyBlueprintMarkerPathSupportsLegacyLayoutAndRejectsUnsafeOrAmbiguou
 		t.Fatalf("multiple layouts error = %v, code = %q", err, codeOf(err))
 	}
 }
+
+type failingProjectAtomicTempFile struct {
+	*os.File
+	chmodErr error
+	writeErr error
+}
+
+func (f failingProjectAtomicTempFile) Chmod(mode os.FileMode) error {
+	if f.chmodErr != nil {
+		return f.chmodErr
+	}
+	return f.File.Chmod(mode)
+}
+
+func (f failingProjectAtomicTempFile) Write(data []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return f.File.Write(data)
+}
+
+func TestWriteProjectFileAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		chmodErr error
+		writeErr error
+	}{
+		{name: "chmod", chmodErr: errors.New("chmod failed")},
+		{name: "write", writeErr: errors.New("write failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "_VERSION")
+			if err := os.WriteFile(target, []byte("original\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			oldFactory := createProjectAtomicTempFile
+			createProjectAtomicTempFile = func(dir, pattern string) (projectAtomicTempFile, error) {
+				file, err := os.CreateTemp(dir, pattern)
+				if err != nil {
+					return nil, err
+				}
+				return failingProjectAtomicTempFile{File: file, chmodErr: test.chmodErr, writeErr: test.writeErr}, nil
+			}
+			t.Cleanup(func() { createProjectAtomicTempFile = oldFactory })
+
+			if err := writeProjectFileAtomically(target, []byte("replacement\n"), 0o644); err == nil {
+				t.Fatal("writeProjectFileAtomically unexpectedly succeeded")
+			}
+			if got := string(mustRead(t, target)); got != "original\n" {
+				t.Fatalf("destination replaced after temporary failure: %q", got)
+			}
+			if temporary, err := filepath.Glob(filepath.Join(dir, ".tronador-version-*")); err != nil || len(temporary) != 0 {
+				t.Fatalf("temporary files = %v, %v", temporary, err)
+			}
+		})
+	}
+}

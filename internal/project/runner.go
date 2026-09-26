@@ -1033,20 +1033,33 @@ func legacyBlueprintMarkerPath(workdir string) (string, error) {
 	return "", projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
 }
 
+type projectAtomicTempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var createProjectAtomicTempFile = func(dir, pattern string) (projectAtomicTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
 func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".tronador-version-*")
+	file, err := createProjectAtomicTempFile(filepath.Dir(path), ".tronador-version-*")
 	if err != nil {
 		return err
 	}
 	temporary := file.Name()
 	defer os.Remove(temporary)
-	if err := file.Chmod(mode); err == nil {
-		_, err = file.Write(data)
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
 	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
 	}
-	if err != nil {
+	if err := file.Close(); err != nil {
 		return err
 	}
 	return os.Rename(temporary, path)
