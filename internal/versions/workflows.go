@@ -177,6 +177,12 @@ func (w *Workflows) Main(ctx context.Context) (string, error) {
 		if err := w.validateGitFlowPrimary(b); err != nil {
 			return "", err
 		}
+		// origin/HEAD is only a symbolic local pointer. It can survive a
+		// remote branch deletion, so prove the exact remote-tracking ref still
+		// exists before allowing a primary-resolving operation to mutate.
+		if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/"+w.remote+"/"+b); err != nil {
+			return "", fmt.Errorf("remote HEAD %s resolved unavailable branch %s/%s: %w", remoteHead, w.remote, b, err)
+		}
 		w.main = b
 		return b, nil
 	}

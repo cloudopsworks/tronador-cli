@@ -716,6 +716,12 @@ func (r *Runner) validateGitFlowPrimaryDistinct(ctx context.Context) error {
 	if primary == "develop" {
 		return errors.New("gitflow primary branch must not be develop")
 	}
+	// origin/HEAD can remain symbolic after its target was pruned. Since this
+	// helper protects the existing-origin/develop idempotent return, prove the
+	// discovered target exists before that return can bypass primary resolution.
+	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/origin/"+primary); err != nil {
+		return fmt.Errorf("origin/HEAD resolved unavailable branch origin/%s: %w", primary, err)
+	}
 	return nil
 }
 

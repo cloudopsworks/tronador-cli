@@ -3,6 +3,7 @@ package versions
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,6 +61,44 @@ func TestGitFlowDiscoveredDevelopPrimaryRejectsBeforeFeatureMutation(t *testing.
 	}
 	if f.sawPrefix("git", "fetch") || f.sawPrefix("git", "checkout") {
 		t.Fatalf("FeatureStart mutated after discovered invalid topology: %#v", f.calls)
+	}
+}
+
+func TestGitFlowDanglingDiscoveredPrimaryRejectsFeatureAndReleaseStartBeforeMutation(t *testing.T) {
+	operations := []struct {
+		name string
+		run  func(*Workflows) error
+	}{
+		{"feature", func(w *Workflows) error { return w.FeatureStart(context.Background(), "blocked") }},
+		{"release", func(w *Workflows) error { return w.ReleaseStart(context.Background(), "patch") }},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			f := &fakeRunner{
+				replies: map[string]string{
+					key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+				},
+				errs: map[string]error{
+					key("git", "show-ref", "--verify", "--quiet", "refs/remotes/origin/main"): errors.New("missing origin/main"),
+				},
+			}
+			w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = operation.run(w); err == nil || !strings.Contains(err.Error(), "resolved unavailable branch") {
+				t.Fatalf("operation error = %v, want dangling primary rejection", err)
+			}
+			for _, mutation := range [][]string{
+				{"git", "fetch"},
+				{"git", "checkout"},
+				{"git", "push"},
+			} {
+				if f.sawPrefix(mutation...) {
+					t.Fatalf("operation mutated after dangling primary rejection: %#v", f.calls)
+				}
+			}
+		})
 	}
 }
 
@@ -151,5 +190,38 @@ func TestNonGitFlowAllowsDevelopAsPrimary(t *testing.T) {
 				t.Fatalf("FeatureStart did not retain develop primary: %#v", f.calls)
 			}
 		})
+	}
+}
+
+func TestInitGitFlowRejectsDanglingDiscoveredPrimaryBeforeExistingDevelopConfigMutation(t *testing.T) {
+	dir := workflowFixture(t)
+	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
+	before := mustReadFile(t, target)
+	log := filepath.Join(dir, "git.log")
+	git := fakeGit(t, `echo "$*" >> "$GIT_LOG"
+case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
+"show-ref --verify --quiet refs/heads/develop") exit 1;;
+"symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/main;;
+"show-ref --verify --quiet refs/remotes/origin/main") exit 1;;
+"checkout "*|"push "*) echo "unexpected mutation path $*" >&2; exit 2;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	t.Setenv("GIT_LOG", log)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "resolved unavailable branch") {
+		t.Fatalf("Init error = %v, want dangling primary rejection", err)
+	}
+	if got := mustReadFile(t, target); got != before {
+		t.Fatalf("gitversion config changed before dangling-primary rejection:\n%s", got)
+	}
+	calls := mustReadFile(t, log)
+	if strings.Contains(calls, "checkout ") || strings.Contains(calls, "push ") {
+		t.Fatalf("Init continued into a branch mutation path: %s", calls)
 	}
 }
