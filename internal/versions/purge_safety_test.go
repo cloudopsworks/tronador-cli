@@ -30,8 +30,8 @@ func (r *checkoutRefreshRewriteRunner) Run(_ context.Context, name string, args 
 	case key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):
 		return "refs/remotes/origin/main\n", nil
 	}
-	if len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor" && args[2] == "refs/heads/"+r.branch {
-		if r.fetches >= 2 && args[3] == "refs/remotes/origin/"+r.rewrittenBase {
+	if len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor" {
+		if r.fetches >= 2 && args[2] == "source-sha" && args[3] == "refs/remotes/origin/"+r.rewrittenBase {
 			return "", purgeExitStatusOne()
 		}
 		return "", nil
@@ -108,9 +108,9 @@ func TestPurgeRevalidatesTargetsAfterCheckoutRefresh(t *testing.T) {
 				t.Fatalf("purge did not refresh while moving off source: %#v", r.calls)
 			}
 			if tc.name == "release" {
-				mainProbe := []string{"git", "merge-base", "--is-ancestor", "refs/heads/" + tc.branch, "refs/remotes/origin/main"}
-				developProbe := []string{"git", "merge-base", "--is-ancestor", "refs/heads/" + tc.branch, "refs/remotes/origin/develop"}
-				if r.count(mainProbe...) != 2 || r.count(developProbe...) != 2 {
+				mainProbe := []string{"git", "merge-base", "--is-ancestor", "source-sha", "refs/remotes/origin/main"}
+				developProbe := []string{"git", "merge-base", "--is-ancestor", "source-sha", "refs/remotes/origin/develop"}
+				if r.count(mainProbe...) != 1 || r.count(developProbe...) != 1 {
 					t.Fatalf("release did not revalidate refreshed main before rejecting develop: %#v", r.calls)
 				}
 			}
@@ -123,10 +123,11 @@ func TestPurgeRevalidatesTargetsAfterCheckoutRefresh(t *testing.T) {
 }
 
 type purgeABARunner struct {
-	calls        []call
-	branch       string
-	remoteProbes int
-	localProbes  int
+	calls             []call
+	branch            string
+	remoteProbes      int
+	localProbes       int
+	rejectFinalSource bool
 }
 
 func (r *purgeABARunner) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -152,6 +153,15 @@ func (r *purgeABARunner) Run(_ context.Context, name string, args ...string) (st
 	if key(name, args...) == key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD") {
 		return "refs/remotes/origin/main\n", nil
 	}
+	if len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor" {
+		if args[2] == "refs/heads/"+r.branch || args[2] == "b" {
+			if args[2] == "b" && r.rejectFinalSource {
+				return "", purgeExitStatusOne()
+			}
+			return "", nil
+		}
+		return "", purgeExitStatusOne()
+	}
 	if len(args) == 4 && args[0] == "push" && args[2] == "origin" && args[3] == ":refs/heads/"+r.branch {
 		if args[1] == "--force-with-lease=refs/heads/"+r.branch+":b" {
 			// The final delete-side remote observation is A, so a lease for B
@@ -170,6 +180,16 @@ func (r *purgeABARunner) saw(parts ...string) bool {
 		}
 	}
 	return false
+}
+
+func (r *purgeABARunner) count(parts ...string) int {
+	count := 0
+	for _, c := range r.calls {
+		if strings.Join(append([]string{c.name}, c.args...), " ") == strings.Join(parts, " ") {
+			count++
+		}
+	}
+	return count
 }
 
 // TestPurgeUsesFinalParitySHAForLease covers the generic purge path used by
@@ -202,9 +222,53 @@ func TestPurgeUsesFinalParitySHAForLease(t *testing.T) {
 			if r.remoteProbes != 4 {
 				t.Fatalf("remote observations = %d, want A/A/B/A sequence: %#v", r.remoteProbes, r.calls)
 			}
+			for _, base := range purgeTestBases(tc.name) {
+				if r.count("git", "merge-base", "--is-ancestor", "b", "refs/remotes/origin/"+base) != 1 {
+					t.Fatalf("purge did not verify immutable source b against %s: %#v", base, r.calls)
+				}
+			}
 			if r.saw("git", "branch", "-d", tc.branch) {
 				t.Fatalf("purge deleted local branch after leased remote rejection: %#v", r.calls)
 			}
 		})
 	}
+}
+
+func TestPurgeRejectsUnmergedFinalSourceBeforeDelete(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, wow, branch string
+		purge             func(*Workflows) error
+	}{
+		{name: "feature", wow: "githubflow", branch: "feature/a", purge: func(w *Workflows) error { return w.FeaturePurge(ctx, "a") }},
+		{name: "hotfix", wow: "githubflow", branch: "hotfix/v1.2.3", purge: func(w *Workflows) error { return w.HotfixPurge(ctx, "1.2.3") }},
+		{name: "support", wow: "gitflow", branch: "support/v1.2.3", purge: func(w *Workflows) error { return w.SupportPurge(ctx, "1.2.3") }},
+		{name: "release", wow: "gitflow", branch: "release/v1.2.3", purge: func(w *Workflows) error { return w.ReleasePurge(ctx, "1.2.3") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &purgeABARunner{branch: tc.branch, rejectFinalSource: true}
+			w, err := NewWorkflows(WorkflowOptions{WayOfWork: tc.wow, Runner: r})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.purge(w); err == nil || !strings.Contains(err.Error(), "not merged") {
+				t.Fatalf("purge error = %v, want final-source merge rejection", err)
+			}
+			if r.count("git", "merge-base", "--is-ancestor", "b", "refs/remotes/origin/main") != 1 {
+				t.Fatalf("purge did not reject immutable final source b: %#v", r.calls)
+			}
+			for _, c := range r.calls {
+				if c.name == "git" && (c.args[0] == "push" || (c.args[0] == "branch" && len(c.args) > 1 && c.args[1] == "-d")) {
+					t.Fatalf("purge mutated after final-source rejection: %#v", r.calls)
+				}
+			}
+		})
+	}
+}
+
+func purgeTestBases(entrypoint string) []string {
+	if entrypoint == "release" {
+		return []string{"main", "develop"}
+	}
+	return []string{"main"}
 }

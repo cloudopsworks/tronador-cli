@@ -139,7 +139,7 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	}
 	// Prove merge safety before checking out of the source branch. This keeps an
 	// unmerged branch checked out instead of moving the user to a base branch.
-	if err = w.verifyPurgeBases(ctx, branch, bases); err != nil {
+	if err = w.verifyPurgeBases(ctx, branch, "refs/heads/"+branch, bases); err != nil {
 		return err
 	}
 	current, err := w.Current(ctx)
@@ -151,20 +151,29 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 			return err
 		}
 	}
-	// checkoutBase fetches and pulls. Re-prove every target after that network
-	// boundary and immediately before deletion, otherwise a rewritten target can
-	// invalidate the earlier ancestry proof while the source lease still passes.
-	if err = w.verifyPurgeBases(ctx, branch, bases); err != nil {
-		return err
-	}
+	// checkoutBase fetches and pulls. Snapshot the source after that network
+	// boundary, then prove every target contains that immutable commit. Using
+	// refs/heads/<branch> here would allow a concurrent local advance after the
+	// proof to be leased and deleted without itself being proven merged.
+	source := "refs/heads/" + branch
+	remoteSHA := ""
 	if remoteExists {
-		// Re-observe source publication after every destructive precondition.
-		// The SHA returned here is the compare-and-swap expectation for deletion:
-		// retaining the earlier observation could accept an A->B->A ABA change.
-		remoteSHA, err := w.remoteParitySHA(ctx, branch)
+		remoteSHA, err = w.remoteParitySHA(ctx, branch)
 		if err != nil {
 			return err
 		}
+		source = remoteSHA
+	} else {
+		source, err = w.git(ctx, "rev-parse", "--verify", source+"^{commit}")
+		if err != nil {
+			return fmt.Errorf("resolve local purge source %s: %w", branch, err)
+		}
+		source = strings.TrimSpace(source)
+	}
+	if err = w.verifyPurgeBases(ctx, branch, source, bases); err != nil {
+		return err
+	}
+	if remoteExists {
 		if err = w.deleteRemoteBranch(ctx, branch, remoteSHA); err != nil {
 			return err
 		}
@@ -175,11 +184,11 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	return err
 }
 
-func (w *Workflows) verifyPurgeBases(ctx context.Context, branch string, bases []string) error {
+func (w *Workflows) verifyPurgeBases(ctx context.Context, branch, source string, bases []string) error {
 	// Test every required freshly fetched remote base. GitFlow releases require
 	// both main and develop; the other workflows retain their single base.
 	for _, base := range bases {
-		if _, err := w.git(ctx, "merge-base", "--is-ancestor", "refs/heads/"+branch, "refs/remotes/"+w.remote+"/"+base); err != nil {
+		if _, err := w.git(ctx, "merge-base", "--is-ancestor", source, "refs/remotes/"+w.remote+"/"+base); err != nil {
 			return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
 		}
 	}
