@@ -81,6 +81,32 @@ func (w *Workflows) gh(ctx context.Context, args ...string) (string, error) {
 	return w.run.Run(ctx, "gh", args...)
 }
 func (w *Workflows) hasDevelop() bool { return w.wow == "gitflow" }
+
+// validateConfiguredMainLive proves that an explicitly supplied primary names
+// exactly one live branch at the selected remote. It deliberately avoids
+// remote-tracking refs because they can be stale before an operation fetches.
+func (w *Workflows) validateConfiguredMainLive(ctx context.Context) error {
+	if !w.mainConfigured {
+		return nil
+	}
+	if err := w.ensureSafeRef(w.main); err != nil {
+		return err
+	}
+	ref := "refs/heads/" + w.main
+	out, err := w.git(ctx, "ls-remote", w.remote, ref)
+	if err != nil {
+		return fmt.Errorf("verify configured main branch %q on %s: %w", w.main, w.remote, err)
+	}
+	lines := strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 {
+		return fmt.Errorf("configured main branch %q is not available as exactly one live branch on %s", w.main, w.remote)
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) != 2 || fields[0] == "" || fields[1] != ref {
+		return fmt.Errorf("configured main branch %q is not available as exactly one live branch on %s", w.main, w.remote)
+	}
+	return nil
+}
 func (w *Workflows) Main(ctx context.Context) (string, error) {
 	if w.main != "" {
 		if err := w.ensureSafeRef(w.main); err != nil {

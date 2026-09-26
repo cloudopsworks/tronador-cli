@@ -8,6 +8,11 @@ import (
 )
 
 func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
+	if w.hasDevelop() {
+		if err := w.validateConfiguredMainLive(ctx); err != nil {
+			return err
+		}
+	}
 	base, e := w.Main(ctx)
 	if e != nil {
 		return e
