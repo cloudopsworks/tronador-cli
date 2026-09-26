@@ -292,6 +292,14 @@ func hasEngineRequirement(requirements []ToolRequirement) bool {
 // Plan resolves detection, capability identity, and positional arguments. It
 // does not resolve tools, invoke child processes, or mutate the workspace.
 func (r *Runner) Plan(capability string, args []string) (Detection, OperationPlan, error) {
+	capability = strings.ToLower(strings.TrimSpace(capability))
+	// The guarded blueprint-marker generation is catalog-defined rather than a
+	// project-profile capability.  Resolve it before ordinary profile detection:
+	// versioned catalog entries such as ArgoCD have no project profile, and the
+	// catalog's Flutter marker intentionally differs from the application one.
+	if r.Opts.Generate && capability == "version" {
+		return r.planCatalogVersionGenerate(args)
+	}
 	detection, err := r.Detect()
 	if err != nil {
 		return Detection{}, OperationPlan{}, err
@@ -300,7 +308,6 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	if !ok {
 		return detection, OperationPlan{}, withDetection(projectError("project_registry_invalid", "detected profile is not registered"), detection)
 	}
-	capability = strings.ToLower(strings.TrimSpace(capability))
 	if capability == "" {
 		return detection, OperationPlan{}, withDetection(projectError("project_capability_unsupported", "a project capability is required"), detection)
 	}
@@ -354,6 +361,41 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 		}
 	}
 	return detection, plan, nil
+}
+
+func (r *Runner) planCatalogVersionGenerate(args []string) (Detection, OperationPlan, error) {
+	target, err := legacyBlueprintMarkerTarget(r.Opts.WorkDir)
+	if err != nil {
+		return Detection{}, OperationPlan{}, err
+	}
+	if r.Opts.Snapshot || r.Opts.Plain {
+		return target.detection, OperationPlan{}, withDetection(projectError("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"), target.detection)
+	}
+	binding := CapabilityBinding{
+		Capability: "version", Executor: ExecutorToolPipe, Operation: "generate-version",
+		Tools:         []ToolRequirement{{Name: "gitversion", Executable: "gitversion", InstallPolicy: "provision", RequiredFor: []string{"version"}}},
+		MutationClass: MutationGenerated, NetworkPolicy: NetworkForbidden, ConfirmationPolicy: "none", DryRun: "required",
+	}
+	definition := r.Registry.Definitions["version"]
+	arguments, argumentErr := validateArguments(binding, definition, args)
+	if argumentErr != nil {
+		argumentErr.Capability = binding.Capability
+		argumentErr.RequestedArguments = append([]string(nil), args...)
+		return target.detection, OperationPlan{}, withDetection(argumentErr, target.detection)
+	}
+	steps, stepErr := buildOperationSteps(binding, target.detection, arguments, r.Opts.WorkDir, false, false, true)
+	if stepErr != nil {
+		return target.detection, OperationPlan{}, withDetection(stepErr, target.detection)
+	}
+	plan := OperationPlan{
+		Implementation: target.detection.ProfileID, Marker: target.detection.Marker, Capability: binding.Capability,
+		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
+		ToolRequirements: cloneRequirements(binding.Tools), MutationClass: binding.MutationClass,
+		NetworkPolicy: binding.NetworkPolicy, ConfirmationPolicy: binding.ConfirmationPolicy, DryRun: binding.DryRun,
+		Steps: steps,
+	}
+	plan.ToolCalls = toolCallsFromSteps(steps)
+	return target.detection, plan, nil
 }
 
 func validateArguments(binding CapabilityBinding, definition CapabilityDefinition, args []string) (map[string]string, *Error) {
@@ -959,13 +1001,32 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 // repository-template catalog. A project implementation marker alone is not
 // sufficient: _VERSION controls blueprint upgrades and must not be created in
 // arbitrary repositories.
+type catalogMarkerTarget struct {
+	path      string
+	detection Detection
+}
+
 func legacyBlueprintMarkerPath(workdir string) (string, error) {
+	target, err := legacyBlueprintMarkerTarget(workdir)
+	if err != nil {
+		return "", err
+	}
+	return target.path, nil
+}
+
+func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 	catalog, err := repospkg.LoadConfig("")
 	if err != nil {
-		return "", wrapProjectError("project_version_marker_unsupported", "load repository template catalog", err)
+		return catalogMarkerTarget{}, wrapProjectError("project_version_marker_unsupported", "load repository template catalog", err)
+	}
+	abs, err := filepath.Abs(workdir)
+	if err != nil {
+		return catalogMarkerTarget{}, wrapProjectError("project_version_marker_unsupported", "resolve workdir", err)
 	}
 	type markerCandidate struct {
-		path string
+		path     string
+		layout   string
+		template repospkg.Template
 	}
 	var candidates []markerCandidate
 	for _, layout := range []struct {
@@ -984,27 +1045,27 @@ func legacyBlueprintMarkerPath(workdir string) (string, error) {
 			continue
 		}
 		if statErr != nil {
-			return "", wrapProjectError("project_version_marker_invalid", "inspect template layout", statErr)
+			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template layout", statErr)
 		}
 		if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-			return "", projectError("project_version_marker_invalid", "template layout must be a non-symlink directory")
+			return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "template layout must be a non-symlink directory")
 		}
 
 		var active []repospkg.Template
 		for _, template := range catalog.Templates {
 			markerPath, markerErr := safeProjectPath(workdir, filepath.ToSlash(filepath.Join(layout.root, template.Marker)))
 			if markerErr != nil {
-				return "", wrapProjectError("project_version_marker_invalid", "resolve template marker", markerErr)
+				return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "resolve template marker", markerErr)
 			}
 			markerInfo, markerStatErr := os.Lstat(markerPath)
 			if errors.Is(markerStatErr, os.ErrNotExist) {
 				continue
 			}
 			if markerStatErr != nil {
-				return "", wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
+				return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
 			}
 			if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
-				return "", projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
+				return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
 			}
 			active = append(active, template)
 		}
@@ -1012,26 +1073,34 @@ func legacyBlueprintMarkerPath(workdir string) (string, error) {
 			continue
 		}
 		if len(active) != 1 || !active[0].Versioned {
-			return "", projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+			return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
 		}
 		path, pathErr := safeProjectPath(workdir, layout.versionFile)
 		if pathErr != nil {
-			return "", wrapProjectError("project_version_marker_invalid", "resolve legacy blueprint marker", pathErr)
+			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "resolve legacy blueprint marker", pathErr)
 		}
 		if info, statErr := os.Lstat(path); statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
-			return "", projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
+			return catalogMarkerTarget{}, projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
 		} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return "", wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", statErr)
+			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", statErr)
 		}
-		candidates = append(candidates, markerCandidate{path: layout.versionFile})
+		candidates = append(candidates, markerCandidate{path: layout.versionFile, layout: layout.root, template: active[0]})
 	}
 	if len(candidates) == 1 {
-		return candidates[0].path, nil
+		candidate := candidates[0]
+		return catalogMarkerTarget{
+			path: candidate.path,
+			detection: Detection{
+				WorkDir: abs, ProfileID: candidate.template.Name, DisplayName: candidate.template.Description,
+				Marker:  filepath.ToSlash(filepath.Join(candidate.layout, candidate.template.Marker)),
+				Markers: []string{candidate.template.Marker}, RegistryVersion: catalog.SchemaVersion,
+			},
+		}, nil
 	}
 	if len(candidates) > 1 {
-		return "", projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
+		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
 	}
-	return "", projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+	return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
 }
 
 type projectAtomicTempFile interface {

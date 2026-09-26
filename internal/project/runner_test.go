@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	repospkg "tronador-cli/internal/repos"
 	toolspkg "tronador-cli/internal/tools"
 )
 
@@ -1516,6 +1517,62 @@ func TestVersionGenerateCreatesMissingModernMarkerForCatalogTemplate(t *testing.
 	}
 	if got := string(mustRead(t, marker)); got != "v5.10.3\n" {
 		t.Fatalf("generated marker = %q", got)
+	}
+}
+
+func TestVersionGenerateSupportsEveryVersionedCatalogMarker(t *testing.T) {
+	catalog, err := repospkg.LoadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range catalog.Templates {
+		if !template.Versioned {
+			continue
+		}
+		template := template
+		t.Run(template.Name, func(t *testing.T) {
+			workdir := t.TempDir()
+			marker := filepath.Join(workdir, ".cloudopsworks", template.Marker)
+			if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(marker, []byte("managed\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+				ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")},
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"MajorMinorPatch":"5.10.3"}`}, nil
+				},
+			})
+			detection, plan, err := runner.Plan("version", nil)
+			if err != nil {
+				t.Fatalf("Plan(version --generate) error = %v", err)
+			}
+			if detection.ProfileID != template.Name || detection.Marker != filepath.ToSlash(filepath.Join(".cloudopsworks", template.Marker)) || plan.Operation != "generate-version" {
+				t.Fatalf("generate plan = detection %+v plan %+v", detection, plan)
+			}
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatalf("Run(version --generate) error = %v", err)
+			}
+			if result.Version != "v5.10.3" || len(result.GeneratedArtifacts) != 1 || result.GeneratedArtifacts[0] != ".cloudopsworks/_VERSION" {
+				t.Fatalf("generate result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestVersionGenerateChecksCatalogEligibilityBeforeConfirmation(t *testing.T) {
+	ineligible := fixture(t, ".fluttermobile")
+	if _, err := mustRunner(t, Options{WorkDir: ineligible, Generate: true}).Run(context.Background(), "version", nil); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("ineligible recognized marker error = %v, code = %q", err, codeOf(err))
+	}
+
+	eligible := fixture(t, ".iac")
+	if _, err := mustRunner(t, Options{WorkDir: eligible, Generate: true}).Run(context.Background(), "version", nil); codeOf(err) != "project_confirmation_required" {
+		t.Fatalf("eligible catalog marker confirmation error = %v, code = %q", err, codeOf(err))
 	}
 }
 
