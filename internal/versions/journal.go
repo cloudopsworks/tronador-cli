@@ -208,6 +208,11 @@ func (w *Workflows) remoteBranchSHA(ctx context.Context, branch string) (string,
 }
 
 func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journal) error {
+	if j != nil && j.TagTargetSHA != "" {
+		if err := w.validateJournalTagTarget(ctx, j); err != nil {
+			return err
+		}
+	}
 	commit, exists, err := w.probeAnnotatedFinishTag(ctx, tag)
 	if err != nil {
 		return err
@@ -258,15 +263,28 @@ func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journ
 // mutable target branch advances before the retry.
 func (w *Workflows) recordFinishTagTarget(ctx context.Context, path string, j *journal) error {
 	if j.TagTargetSHA != "" {
-		return nil
+		return w.validateJournalTagTarget(ctx, j)
 	}
 	sha, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("resolve finish tag target %s: %w", j.Target, err)
 	}
 	j.TagTargetSHA = strings.TrimSpace(sha)
+	if err := w.validateJournalTagTarget(ctx, j); err != nil {
+		return err
+	}
 	if err := writeAtomic(path, j); err != nil {
 		return fmt.Errorf("record finish tag target: %w", err)
+	}
+	return nil
+}
+
+func (w *Workflows) validateJournalTagTarget(ctx context.Context, j *journal) error {
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.SourceSHA, j.TagTargetSHA); err != nil {
+		return fmt.Errorf("journaled tag target does not contain source %s: %w", j.Source, err)
+	}
+	if _, err := w.git(ctx, "merge-base", "--is-ancestor", j.TagTargetSHA, j.Target); err != nil {
+		return fmt.Errorf("journaled tag target %s is not an ancestor of %s: %w", j.TagTargetSHA, j.Target, err)
 	}
 	return nil
 }
