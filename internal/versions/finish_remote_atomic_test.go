@@ -457,6 +457,114 @@ func TestReleaseFinishRejectsCorruptPersistedGitFlowReplayPlanWithoutCleanup(t *
 	}
 }
 
+// TestLateCursorFinishReplayFailsClosed exercises the production finish
+// commands after the server accepted the atomic transaction.  A process can
+// crash after advancing past publication or after deleting the local branch
+// but before removing its journal, so both cursors must reprove every remote
+// postcondition instead of trusting their persisted position.
+func TestLateCursorFinishReplayFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	types := []struct {
+		name    string
+		fixture func(*testing.T) *atomicFinishFixture
+		finish  func(*Workflows) error
+		op      string
+	}{
+		{name: "hotfix", fixture: newHotfixReplayFixture, finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }, op: "hotfix-finish"},
+		{name: "gitflow-release", fixture: newGitFlowReleaseReplayFixture, finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }, op: "release-finish"},
+	}
+	for _, flow := range types {
+		for _, cursor := range []string{"delete-local", "terminal"} {
+			for _, mutation := range []string{"corrupt-plan", "reset-target", "removed-tag", "restored-source"} {
+				t.Run(flow.name+"/"+cursor+"/"+mutation, func(t *testing.T) {
+					f := flow.fixture(t)
+					setLateFinishCursor(t, f, flow.op, cursor)
+					mutateCompletedFinishReplay(t, f, mutation)
+					journalBefore, err := os.ReadFile(f.path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := flow.finish(f.w); err == nil {
+						t.Fatal("late-cursor replay accepted corrupted completed transaction")
+					}
+					journalAfter, err := os.ReadFile(f.path)
+					if err != nil || string(journalAfter) != string(journalBefore) {
+						t.Fatalf("journal changed after rejected late replay: err=%v before=%s after=%s", err, journalBefore, journalAfter)
+					}
+					if _, err := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); err != nil {
+						t.Fatalf("local source removed after rejected late replay: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func newHotfixReplayFixture(t *testing.T) *atomicFinishFixture {
+	t.Helper()
+	ctx := context.Background()
+	f := newAtomicFinishFixture(t, false)
+	steps := f.w.localFinishSteps("hotfix-finish")
+	j, path, err := f.w.startJournal(ctx, "hotfix-finish", f.source, "main", f.j.SourceSHA, steps)
+	if err != nil {
+		t.Fatalf("start hotfix journal: %v", err)
+	}
+	cursor, err := journalStepBoundary(steps, "publish-and-delete-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Done, j.TagTargetSHA, j.TagObjectSHA = cursor, f.j.TagTargetSHA, f.j.TagObjectSHA
+	j.RemoteTargets = append([]finishRemoteTarget(nil), f.j.RemoteTargets...)
+	if err = writeAtomic(path, j); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.w.publishFinishedAndDeleteRemote(ctx, path, j, f.targets, f.tag); err != nil {
+		t.Fatalf("simulate accepted hotfix transaction: %v", err)
+	}
+	gitTest(t, f.repo, "checkout", "--no-guess", "main")
+	f.j, f.path = j, path
+	return f
+}
+
+func setLateFinishCursor(t *testing.T, f *atomicFinishFixture, operation, cursor string) {
+	t.Helper()
+	deleteStep, err := journalStepBoundary(f.j.Steps, "delete-local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch cursor {
+	case "delete-local":
+		f.j.Done = deleteStep
+	case "terminal":
+		f.j.Done = len(f.j.Steps)
+	default:
+		t.Fatalf("unknown cursor %q for %s", cursor, operation)
+	}
+	if err = writeAtomic(f.path, f.j); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mutateCompletedFinishReplay(t *testing.T, f *atomicFinishFixture, mutation string) {
+	t.Helper()
+	switch mutation {
+	case "corrupt-plan":
+		f.j.RemoteTargets = nil
+		if err := writeAtomic(f.path, f.j); err != nil {
+			t.Fatal(err)
+		}
+	case "reset-target":
+		target := f.j.RemoteTargets[0]
+		gitTest(t, f.repo, "push", "--force", "origin", target.BeforeSHA+":refs/heads/"+target.Name)
+	case "removed-tag":
+		gitTest(t, f.repo, "push", "origin", ":refs/tags/"+f.tag)
+	case "restored-source":
+		gitTest(t, f.repo, "push", "origin", f.j.SourceSHA+":refs/heads/"+f.source)
+	default:
+		t.Fatalf("unknown completed replay mutation %q", mutation)
+	}
+}
+
 func TestReleaseFinishRejectsNonCanonicalSourceIdentityAfterAcceptedAtomicTransaction(t *testing.T) {
 	ctx := context.Background()
 	for _, sourceKind := range []string{"symbolic", "abbreviated", "corrupt"} {

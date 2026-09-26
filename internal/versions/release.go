@@ -217,7 +217,14 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 			}
 			e = w.publishFinishedAndDeleteRemote(ctx, p, j, targets, version)
 		case "delete-local":
-			e = w.deleteLocalBranch(ctx, branch)
+			targets := []string{target}
+			if w.hasDevelop() {
+				targets = append(targets, "develop")
+			}
+			e = w.validateFinishedRemoteCompletion(ctx, j, targets, version)
+			if e == nil {
+				e = w.deleteLocalBranch(ctx, branch)
+			}
 		}
 		if e != nil {
 			return fmt.Errorf("%s: %w", s, e)
@@ -225,6 +232,13 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		if e = w.advanceJournal(p, j); e != nil {
 			return e
 		}
+	}
+	targets := []string{target}
+	if w.hasDevelop() {
+		targets = append(targets, "develop")
+	}
+	if e = w.validateFinishedRemoteCompletion(ctx, j, targets, version); e != nil {
+		return fmt.Errorf("finalize completed release finish: %w", e)
 	}
 	return clearJournal(p)
 }

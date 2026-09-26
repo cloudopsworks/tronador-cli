@@ -189,7 +189,10 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		case "publish-and-delete-remote":
 			e = w.publishFinishedAndDeleteRemote(ctx, p, j, []string{target}, version)
 		case "delete-local":
-			e = w.deleteLocalBranch(ctx, branch)
+			e = w.validateFinishedRemoteCompletion(ctx, j, []string{target}, version)
+			if e == nil {
+				e = w.deleteLocalBranch(ctx, branch)
+			}
 		}
 		if e != nil {
 			return fmt.Errorf("%s: %w", s, e)
@@ -197,6 +200,9 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		if e = w.advanceJournal(p, j); e != nil {
 			return e
 		}
+	}
+	if e = w.validateFinishedRemoteCompletion(ctx, j, []string{target}, version); e != nil {
+		return fmt.Errorf("finalize completed hotfix finish: %w", e)
 	}
 	return clearJournal(p)
 }

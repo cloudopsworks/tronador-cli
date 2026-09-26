@@ -208,6 +208,48 @@ func (w *Workflows) verifyFinishedRemoteReplay(ctx context.Context, j *journal, 
 	return nil
 }
 
+// validateFinishedRemoteCompletion is the irreversible-cleanup gate for a
+// completed server transaction.  The publish cursor can be advanced before a
+// crash, so retries at delete-local (and a retry already at the terminal
+// cursor) must not trust that cursor alone.  Recheck the persisted topology
+// and every remote postcondition before deleting the only local source copy or
+// discarding the recovery breadcrumb.
+func (w *Workflows) validateFinishedRemoteCompletion(ctx context.Context, j *journal, targets []string, tag string) error {
+	if j == nil {
+		return fmt.Errorf("cannot validate completed finish without journal")
+	}
+	if err := w.validateJournalSourceIdentity(ctx, j); err != nil {
+		return err
+	}
+	if err := w.validateFinishedRemotePlan(ctx, j, targets, tag); err != nil {
+		return err
+	}
+	_, exists, err := w.remoteBranchSHA(ctx, j.Source)
+	if err != nil {
+		return fmt.Errorf("verify completed source %s: %w", j.Source, err)
+	}
+	if exists {
+		return fmt.Errorf("completed source %s is present on %s", j.Source, w.remote)
+	}
+	for _, target := range j.RemoteTargets {
+		current, exists, err := w.remoteBranchSHA(ctx, target.Name)
+		if err != nil {
+			return fmt.Errorf("verify completed target %s: %w", target.Name, err)
+		}
+		if !exists || current != target.DesiredSHA {
+			return fmt.Errorf("completed target %s does not match planned result", target.Name)
+		}
+	}
+	object, peeled, err := w.remoteAnnotatedTag(ctx, tag)
+	if err != nil {
+		return err
+	}
+	if object != j.TagObjectSHA || peeled != j.TagTargetSHA {
+		return fmt.Errorf("remote annotated tag %s does not match completed publication plan", tag)
+	}
+	return nil
+}
+
 func (w *Workflows) remoteAnnotatedTag(ctx context.Context, tag string) (string, string, error) {
 	ref := "refs/tags/" + tag
 	out, err := w.git(ctx, "ls-remote", "--tags", w.remote, ref, ref+"^{}")
