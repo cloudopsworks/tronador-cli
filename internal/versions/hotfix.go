@@ -148,7 +148,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
 		if s == "delete-remote" {
-			if err := w.verifyFinished(ctx, target, branch, version); err != nil {
+			if err := w.verifyFinished(ctx, target, j.SourceSHA, version); err != nil {
 				return err
 			}
 		}
@@ -158,7 +158,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		case "merge":
 			e = w.mergeContinue(ctx)
 			if e == nil {
-				_, e = w.git(ctx, "merge", "--no-ff", branch, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
 			}
 		case "tag":
 			e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Hotfix Release %s", version), target)

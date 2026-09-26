@@ -520,6 +520,96 @@ func TestJournalLockExcludesConcurrentFinishAndIsReleased(t *testing.T) {
 	unlock2()
 }
 
+func TestJournalLockRecoversPersistentStaleFileAndExcludesActiveOwner(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := w.journalPath(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(p+".lock", []byte("orphaned after SIGKILL\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	unlock, err := w.acquireJournalLock(ctx)
+	if err != nil {
+		t.Fatalf("persistent stale lock blocked recovery: %v", err)
+	}
+	defer unlock()
+	if _, err = w.acquireJournalLock(ctx); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("active lock did not exclude concurrent owner: %v", err)
+	}
+}
+
+func TestJournalSourceRevalidationFailsClosedBeforeDeletionAndAllowsPostDeletionResume(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, source string
+	}{
+		{name: "hotfix", operation: "hotfix-finish", source: "hotfix/v0.1.1"},
+		{name: "release", operation: "release-finish", source: "release/v0.2.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, tc.operation == "release-finish")
+			gitTest(t, repo, "checkout", "-b", tc.source)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", "source")
+			gitTest(t, repo, "push", "-u", "origin", tc.source)
+			sha := strings.TrimSpace(gitTest(t, repo, "rev-parse", tc.source))
+			gitTest(t, repo, "checkout", "main")
+
+			wow := "githubflow"
+			if tc.operation == "release-finish" {
+				wow = "gitflow"
+			}
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: wow, MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			j, journalPath, err := w.startJournal(ctx, tc.operation, tc.source, "main", sha, w.localFinishSteps(tc.operation))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = clearJournal(journalPath) }()
+			if err = w.revalidateJournalSource(ctx, j); err != nil {
+				t.Fatalf("published journaled source rejected: %v", err)
+			}
+
+			gitTest(t, repo, "checkout", tc.source)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", "advance local source")
+			mainBefore := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+			if _, _, err = w.startLocalFinishJournal(ctx, tc.operation, tc.source, "main", strings.TrimPrefix(tc.source, "hotfix/"), w.localFinishSteps(tc.operation)); err == nil {
+				t.Fatal("locally advanced source accepted before deletion boundary")
+			}
+			if mainAfter := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main")); mainAfter != mainBefore {
+				t.Fatalf("target changed after rejected journal resume: got %s, want %s", mainAfter, mainBefore)
+			}
+			gitTest(t, repo, "reset", "--hard", sha)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", "advance remote source")
+			gitTest(t, repo, "push", "origin", tc.source)
+			if err = w.revalidateJournalSource(ctx, j); err == nil || !strings.Contains(err.Error(), "journaled source") {
+				t.Fatalf("advanced source accepted before deletion boundary: %v", err)
+			}
+
+			deleteStep, err := journalStepBoundary(j.Steps, "delete-remote")
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Done = deleteStep
+			gitTest(t, repo, "push", "origin", ":"+tc.source)
+			if err = w.revalidateJournalSource(ctx, j); err != nil {
+				t.Fatalf("post-deletion journal was not resumable: %v", err)
+			}
+		})
+	}
+}
+
 func TestJournalRejectsWrongRepositoryIdentity(t *testing.T) {
 	ctx := context.Background()
 	_, repo := setupWorkflowRemote(t, false)

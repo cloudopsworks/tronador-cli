@@ -121,10 +121,10 @@ func writeAtomic(path string, v *journal) error {
 	return os.Rename(tmp, path)
 }
 
-// startLocalFinishJournal verifies the source has been fetched and exactly
-// published before writing any durable state or mutating a target. A matching
-// existing journal is a resume and deliberately skips this check: later finish
-// steps may already have removed the source branch.
+// startLocalFinishJournal verifies the fetched source and finish tag before
+// writing any durable state or mutating a target. An existing journal remains
+// resumable after its remote-deletion step, but otherwise its immutable source
+// identity must still be exactly published before it can mutate a target.
 func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, target, tag string, steps []string) (*journal, string, error) {
 	j, _, err := w.readJournal(ctx)
 	if err != nil {
@@ -144,10 +144,66 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 	if err != nil {
 		return nil, "", err
 	}
+	if err = w.revalidateJournalSource(ctx, started); err != nil {
+		return nil, "", err
+	}
 	if err = w.preflightFinishTag(ctx, tag, started); err != nil {
 		return nil, "", err
 	}
 	return started, path, nil
+}
+
+// revalidateJournalSource keeps a resumed finish bound to the exact source
+// that was journaled. At its remote-deletion step, the remote must still match
+// or be proven absent: a crash after the server accepts deletion but before the
+// journal advances must remain restartable, and no target mutation remains.
+func (w *Workflows) revalidateJournalSource(ctx context.Context, j *journal) error {
+	deleteStep, err := journalStepBoundary(j.Steps, "delete-remote")
+	if err != nil {
+		return err
+	}
+	if j.Done > deleteStep {
+		return nil
+	}
+	if j.Done == deleteStep {
+		remoteSHA, exists, err := w.remoteBranchSHA(ctx, j.Source)
+		if err != nil {
+			return fmt.Errorf("revalidate journaled source %s: %w", j.Source, err)
+		}
+		if !exists {
+			return nil
+		}
+		if remoteSHA != j.SourceSHA {
+			return fmt.Errorf("journaled source %s changed: expected %s, got %s", j.Source, j.SourceSHA, remoteSHA)
+		}
+		return nil
+	}
+	sha, err := w.remoteParitySHA(ctx, j.Source)
+	if err != nil {
+		return fmt.Errorf("revalidate journaled source %s: %w", j.Source, err)
+	}
+	if sha != j.SourceSHA {
+		return fmt.Errorf("journaled source %s changed: expected %s, got %s", j.Source, j.SourceSHA, sha)
+	}
+	return nil
+}
+
+func (w *Workflows) remoteBranchSHA(ctx context.Context, branch string) (string, bool, error) {
+	if err := w.ensureSafeRef(branch); err != nil {
+		return "", false, err
+	}
+	out, err := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
+	if err != nil {
+		return "", false, err
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return "", false, nil
+	}
+	if len(fields) < 2 {
+		return "", false, fmt.Errorf("unexpected remote branch response %q", strings.TrimSpace(out))
+	}
+	return fields[0], true, nil
 }
 
 func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journal) error {
@@ -188,18 +244,22 @@ func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journ
 }
 
 func finishTagBoundary(steps []string) (int, error) {
+	return journalStepBoundary(steps, "tag")
+}
+
+func journalStepBoundary(steps []string, wanted string) (int, error) {
 	index := -1
 	for i, step := range steps {
-		if step != "tag" {
+		if step != wanted {
 			continue
 		}
 		if index >= 0 {
-			return 0, fmt.Errorf("finish journal plan has multiple tag steps")
+			return 0, fmt.Errorf("finish journal plan has multiple %s steps", wanted)
 		}
 		index = i
 	}
 	if index < 0 {
-		return 0, fmt.Errorf("finish journal plan has no tag step")
+		return 0, fmt.Errorf("finish journal plan has no %s step", wanted)
 	}
 	return index, nil
 }
@@ -241,10 +301,10 @@ func (w *Workflows) journalRepository(ctx context.Context) (string, error) {
 	return p, nil
 }
 
-// acquireJournalLock serializes finish invocations within this worktree.  It
-// is intentionally short-lived: a merge conflict leaves the journal (the
-// resume breadcrumb) but never an orphaned lock that would make recovery
-// impossible after a process crash.
+// acquireJournalLock serializes finish invocations within this worktree. The
+// lock file is intentionally persistent: OS lock ownership is bound to the open
+// file descriptor and is released by the OS after crashes/SIGKILL. Keeping the
+// inode avoids unlink/recreate races that could permit concurrent owners.
 func (w *Workflows) acquireJournalLock(ctx context.Context) (func(), error) {
 	p, err := w.journalPath(ctx)
 	if err != nil {
@@ -254,19 +314,21 @@ func (w *Workflows) acquireJournalLock(ctx context.Context) (func(), error) {
 	if err = os.MkdirAll(filepath.Dir(lock), 0755); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(lock, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
-		if os.IsExist(err) {
+		return nil, err
+	}
+	if err = lockJournalFile(f); err != nil {
+		_ = f.Close()
+		if journalLockBusy(err) {
 			return nil, fmt.Errorf("another versions finish is already running for this worktree")
 		}
 		return nil, err
 	}
-	_, _ = fmt.Fprintf(f, "pid=%d\ncreated=%s\n", os.Getpid(), time.Now().UTC().Format(time.RFC3339Nano))
-	if err = f.Close(); err != nil {
-		_ = os.Remove(lock)
-		return nil, err
-	}
-	return func() { _ = os.Remove(lock) }, nil
+	return func() {
+		_ = unlockJournalFile(f)
+		_ = f.Close()
+	}, nil
 }
 
 func (w *Workflows) startJournal(ctx context.Context, op, source, target, sourceSHA string, steps []string) (*journal, string, error) {

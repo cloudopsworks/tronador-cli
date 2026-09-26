@@ -133,7 +133,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
 		if s == "delete-remote" {
-			if err := w.verifyFinished(ctx, target, branch, version); err != nil {
+			if err := w.verifyFinished(ctx, target, j.SourceSHA, version); err != nil {
 				return err
 			}
 		}
@@ -143,7 +143,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "merge-main", "merge-develop":
 			e = w.mergeContinue(ctx)
 			if e == nil {
-				_, e = w.git(ctx, "merge", "--no-ff", branch, "-m", fmt.Sprintf("chore: Release %s", version))
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
 			}
 		case "tag":
 			e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), target)
@@ -176,9 +176,9 @@ func (w *Workflows) ReleasePurge(ctx context.Context, name string) error {
 	}
 	return w.purge(ctx, "release/"+n)
 }
-func (w *Workflows) verifyFinished(ctx context.Context, target, branch, tag string) error {
-	if _, e := w.git(ctx, "merge-base", "--is-ancestor", branch, target); e != nil {
-		return fmt.Errorf("finish postcondition: %s is not merged into %s: %w", branch, target, e)
+func (w *Workflows) verifyFinished(ctx context.Context, target, sourceSHA, tag string) error {
+	if _, e := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, target); e != nil {
+		return fmt.Errorf("finish postcondition: %s is not merged into %s: %w", sourceSHA, target, e)
 	}
 	if _, e := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); e != nil {
 		return fmt.Errorf("finish postcondition: annotated tag %s missing: %w", tag, e)
