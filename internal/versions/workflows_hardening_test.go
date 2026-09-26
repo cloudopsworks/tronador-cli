@@ -101,12 +101,12 @@ func TestRequireAnnotatedFinishTagAcceptsProvenAbsentTag(t *testing.T) {
 }
 
 func TestLocalFinishRejectsFinishTagProbeOperationalErrorBeforeMutation(t *testing.T) {
-	f := &fakeRunner{errs: map[string]error{
+	f := &fakeRunner{replies: map[string]string{key("git", "rev-parse", "--git-path", "tronador/versions-journal.json"): filepath.Join(t.TempDir(), "journal")}, errs: map[string]error{
 		key("git", "show-ref", "--verify", "--quiet", "refs/tags/v1.2.3"): fmt.Errorf("repository unavailable"),
 	}}
-	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+	w, _ := NewWorkflows(WorkflowOptions{MainBranch: "main", Runner: f})
 	err := w.HotfixFinish(context.Background(), "1.2.3", true)
-	if err == nil || !strings.Contains(err.Error(), "verify existing finish tag") || !strings.Contains(err.Error(), "repository unavailable") {
+	if err == nil || !strings.Contains(err.Error(), "verify fetched finish tag") || !strings.Contains(err.Error(), "repository unavailable") {
 		t.Fatalf("operational probe error = %v", err)
 	}
 	for _, c := range f.calls {
@@ -126,11 +126,12 @@ func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
+				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"):                  "abc\n",
+				key("git", "rev-parse", "--git-path", "tronador/versions-journal.json"): filepath.Join(t.TempDir(), "journal"),
 			}, errs: map[string]error{
 				key("git", "rev-parse", "--verify", "v1.2.3^{tag}"): fmt.Errorf("lightweight tag"),
 			}}
-			w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+			w, _ := NewWorkflows(WorkflowOptions{MainBranch: "main", Runner: f})
 			err := tc.finish(w)
 			if err == nil || !strings.Contains(err.Error(), "lightweight tag") {
 				t.Fatalf("local finish error = %v", err)
@@ -139,6 +140,53 @@ func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T)
 				if c.name == "git" && (len(c.args) > 0 && (c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push")) {
 					t.Fatalf("local finish mutated after lightweight-tag preflight: %#v", f.calls)
 				}
+			}
+		})
+	}
+}
+
+func TestLocalFinishRejectsRemoteOnlyAnnotatedTagBeforeMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name, branch string
+		finish       func(*Workflows) error
+	}{
+		{name: "hotfix", branch: "hotfix/v1.2.3", finish: func(w *Workflows) error { return w.HotfixFinish(context.Background(), "1.2.3", true) }},
+		{name: "release", branch: "release/v1.2.3", finish: func(w *Workflows) error { return w.ReleaseFinish(context.Background(), "1.2.3", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, repo := setupWorkflowRemote(t, false)
+			gitTest(t, repo, "checkout", "-b", tc.branch)
+			writeFile(t, filepath.Join(repo, "source.txt"), tc.name+"\n")
+			gitTest(t, repo, "add", "source.txt")
+			gitTest(t, repo, "commit", "-m", tc.name)
+			gitTest(t, repo, "push", "-u", "origin", tc.branch)
+
+			tagger := filepath.Join(root, "tagger-"+tc.name)
+			gitTest(t, root, "clone", filepath.Join(root, "remote.git"), tagger)
+			gitTest(t, tagger, "config", "user.email", "test@example.test")
+			gitTest(t, tagger, "config", "user.name", "Test")
+			gitTest(t, tagger, "checkout", "--track", "origin/"+tc.branch)
+			gitTest(t, tagger, "tag", "-a", "v1.2.3", "-m", "remote incompatible tag")
+			gitTest(t, tagger, "push", "origin", "v1.2.3")
+			if got := gitTest(t, repo, "tag", "-l", "v1.2.3"); got != "" {
+				t.Fatalf("working clone unexpectedly already has remote tag: %q", got)
+			}
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.finish(w); err == nil || !strings.Contains(err.Error(), "existing annotated tag") {
+				t.Fatalf("remote tag preflight error = %v", err)
+			}
+			if got := gitTest(t, repo, "branch", "--show-current"); got != tc.branch+"\n" {
+				t.Fatalf("finish changed branch after remote tag rejection: %q", got)
+			}
+			if _, statErr := os.Stat(filepath.Join(repo, ".git", "tronador", "versions-journal.json")); !os.IsNotExist(statErr) {
+				t.Fatalf("remote tag rejection wrote journal: %v", statErr)
+			}
+			if got := gitTest(t, repo, "log", "--format=%s", "main", "--", "source.txt"); strings.Contains(got, tc.name) {
+				t.Fatalf("finish merged source despite remote tag rejection: %q", got)
 			}
 		})
 	}

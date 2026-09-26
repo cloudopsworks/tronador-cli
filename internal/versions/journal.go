@@ -131,12 +131,12 @@ func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, tar
 		return nil, "", err
 	}
 	if j == nil {
+		if err = w.preflightFinishTag(ctx, tag, nil); err != nil {
+			return nil, "", err
+		}
 		sha, parityErr := w.remoteParitySHA(ctx, source)
 		if parityErr != nil {
 			return nil, "", parityErr
-		}
-		if err = w.preflightFinishTag(ctx, tag, nil); err != nil {
-			return nil, "", err
 		}
 		return w.startJournal(ctx, op, source, target, sha, steps)
 	}
