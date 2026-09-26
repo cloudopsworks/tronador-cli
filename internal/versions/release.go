@@ -121,9 +121,6 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	if _, e = w.git(ctx, "fetch", w.remote, "--prune", "--tags"); e != nil {
 		return e
 	}
-	if e = w.requireAnnotatedFinishTag(ctx, version); e != nil {
-		return e
-	}
 	target, e := w.Main(ctx)
 	if e != nil {
 		return e

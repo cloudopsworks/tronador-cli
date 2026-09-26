@@ -137,9 +137,6 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	if _, e = w.git(ctx, "fetch", w.remote, "--prune", "--tags"); e != nil {
 		return e
 	}
-	if e = w.requireAnnotatedFinishTag(ctx, version); e != nil {
-		return e
-	}
 	target, e := w.hotfixTargetFromFetched(ctx, version)
 	if e != nil {
 		return e
