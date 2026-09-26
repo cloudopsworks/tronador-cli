@@ -288,6 +288,20 @@ func (w *Workflows) ensureAnnotatedTag(ctx context.Context, tag, message, expect
 	return err
 }
 
+// requireAnnotatedFinishTag prevents a local finish from merging and pushing a
+// release only to discover during cleanup that a pre-existing lightweight tag
+// cannot satisfy the finish's annotated-tag postcondition. Public `versions
+// tag` deliberately continues to accept a matching lightweight tag.
+func (w *Workflows) requireAnnotatedFinishTag(ctx context.Context, tag string) error {
+	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}"); err != nil {
+		return nil // no existing tag; the finish will create its annotated tag
+	}
+	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); err != nil {
+		return fmt.Errorf("existing lightweight tag %s blocks local finish; replace it with an annotated tag or remove it before retrying", tag)
+	}
+	return nil
+}
+
 func (w *Workflows) mergeContinue(ctx context.Context) error {
 	p, e := w.gitPath(ctx, "MERGE_HEAD")
 	if e == nil {

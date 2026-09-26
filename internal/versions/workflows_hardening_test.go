@@ -69,6 +69,49 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 	}
 }
 
+func TestEnsureAnnotatedTagReusesMatchingAnnotatedTag(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "rev-parse", "--verify", "main^{commit}"):   "abc\n",
+		key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
+		key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
+	}}
+	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+	if err := w.ensureAnnotatedTag(context.Background(), "v1.2.3", "release", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if f.saw("git", "tag", "-a", "v1.2.3", "main", "-m", "release") {
+		t.Fatalf("matching annotated tag was recreated: %#v", f.calls)
+	}
+}
+
+func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		finish func(*Workflows) error
+	}{
+		{name: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(context.Background(), "1.2.3", true) }},
+		{name: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(context.Background(), "1.2.3", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeRunner{replies: map[string]string{
+				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
+			}, errs: map[string]error{
+				key("git", "rev-parse", "--verify", "v1.2.3^{tag}"): fmt.Errorf("lightweight tag"),
+			}}
+			w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+			err := tc.finish(w)
+			if err == nil || !strings.Contains(err.Error(), "lightweight tag") {
+				t.Fatalf("local finish error = %v", err)
+			}
+			for _, c := range f.calls {
+				if c.name == "git" && (len(c.args) > 0 && (c.args[0] == "fetch" || c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push")) {
+					t.Fatalf("local finish mutated after lightweight-tag preflight: %#v", f.calls)
+				}
+			}
+		})
+	}
+}
+
 func TestFeatureFinishUsesWorkflowSpecificPullRequestBase(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -129,6 +129,9 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	if w.isDryRun() {
 		return nil
 	}
+	if e := w.requireAnnotatedFinishTag(ctx, version); e != nil {
+		return e
+	}
 	unlock, e := w.acquireJournalLock(ctx)
 	if e != nil {
 		return e
