@@ -97,7 +97,7 @@ func TestFeatureFinishRequiresExactRemoteParity(t *testing.T) {
 	}
 }
 func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
-	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
+	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	tag, e := w.Tag(context.Background(), "test", true)
 	if e != nil {
@@ -108,6 +108,9 @@ func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
 	}
 	if !f.saw("git", "push", "origin", "refs/tags/"+tag+":refs/tags/"+tag) {
 		t.Fatalf("not exact tag: %#v", f.calls)
+	}
+	if !f.saw("git", "tag", "-a", tag, "HEAD", "-m", "chore: Version Tagging: "+tag) {
+		t.Fatalf("annotated tag was not created: %#v", f.calls)
 	}
 }
 func TestSupportIsGitflowOnly(t *testing.T) {
@@ -136,7 +139,7 @@ func TestRequireParityChecksNamedBranchInsteadOfHEAD(t *testing.T) {
 
 func TestSupportStartFetchesTagsBeforeValidatingTag(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
+		key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{commit}"): "abc\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", Runner: f})
 	if err != nil {
