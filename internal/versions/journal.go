@@ -125,22 +125,62 @@ func writeAtomic(path string, v *journal) error {
 // published before writing any durable state or mutating a target. A matching
 // existing journal is a resume and deliberately skips this check: later finish
 // steps may already have removed the source branch.
-func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, target string, steps []string) (*journal, string, error) {
+func (w *Workflows) startLocalFinishJournal(ctx context.Context, op, source, target, tag string, steps []string) (*journal, string, error) {
 	j, _, err := w.readJournal(ctx)
 	if err != nil {
 		return nil, "", err
 	}
 	if j == nil {
-		if _, err = w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
-			return nil, "", err
-		}
 		sha, parityErr := w.remoteParitySHA(ctx, source)
 		if parityErr != nil {
 			return nil, "", parityErr
 		}
+		if err = w.preflightFinishTag(ctx, tag, nil); err != nil {
+			return nil, "", err
+		}
 		return w.startJournal(ctx, op, source, target, sha, steps)
 	}
-	return w.startJournal(ctx, op, source, target, "", steps)
+	started, path, err := w.startJournal(ctx, op, source, target, "", steps)
+	if err != nil {
+		return nil, "", err
+	}
+	if err = w.preflightFinishTag(ctx, tag, started); err != nil {
+		return nil, "", err
+	}
+	return started, path, nil
+}
+
+func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journal) error {
+	if _, err := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/tags/"+tag); err != nil {
+		if isExitStatus(err, 1) {
+			if j != nil && j.Done > 2 {
+				return fmt.Errorf("finish journal requires annotated tag %s, but it is absent", tag)
+			}
+			return nil
+		}
+		return fmt.Errorf("verify fetched finish tag %s: %w", tag, err)
+	}
+	if err := w.requireAnnotatedFinishTag(ctx, tag); err != nil {
+		return err
+	}
+	if j == nil {
+		return fmt.Errorf("existing annotated tag %s blocks a new local finish", tag)
+	}
+	if j.Done <= 2 {
+		return fmt.Errorf("existing annotated tag %s is incompatible with unfinished local finish state", tag)
+	}
+	tagCommit, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
+	}
+	targetCommit, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("resolve finished target %s: %w", j.Target, err)
+	}
+	if strings.TrimSpace(tagCommit) != strings.TrimSpace(targetCommit) {
+		return fmt.Errorf("existing annotated tag %s is incompatible with finished target %s", tag, j.Target)
+	}
+	return nil
 }
 
 func (w *Workflows) journalWorktree(ctx context.Context) (string, error) {

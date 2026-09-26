@@ -113,20 +113,23 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	if w.isDryRun() {
 		return nil
 	}
-	if e := w.requireAnnotatedFinishTag(ctx, version); e != nil {
-		return e
-	}
 	unlock, e := w.acquireJournalLock(ctx)
 	if e != nil {
 		return e
 	}
 	defer unlock()
+	if _, e = w.git(ctx, "fetch", w.remote, "--prune", "--tags"); e != nil {
+		return e
+	}
+	if e = w.requireAnnotatedFinishTag(ctx, version); e != nil {
+		return e
+	}
 	target, e := w.Main(ctx)
 	if e != nil {
 		return e
 	}
 	steps := w.localFinishSteps("release-finish")
-	j, p, e := w.startLocalFinishJournal(ctx, "release-finish", branch, target, steps)
+	j, p, e := w.startLocalFinishJournal(ctx, "release-finish", branch, target, version, steps)
 	if e != nil {
 		return e
 	}
@@ -139,7 +142,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		}
 		switch s {
 		case "checkout-main":
-			e = w.checkoutBase(ctx, target)
+			e = w.checkoutFetchedBase(ctx, target)
 		case "merge-main", "merge-develop":
 			e = w.mergeContinue(ctx)
 			if e == nil {
@@ -152,7 +155,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		case "push-tag":
 			_, e = w.git(ctx, "push", w.remote, version)
 		case "checkout-develop":
-			e = w.checkoutBase(ctx, "develop")
+			e = w.checkoutFetchedBase(ctx, "develop")
 		case "push-develop":
 			_, e = w.git(ctx, "push", w.remote, "develop")
 		case "delete-remote":

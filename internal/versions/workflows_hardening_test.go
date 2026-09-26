@@ -110,7 +110,7 @@ func TestLocalFinishRejectsFinishTagProbeOperationalErrorBeforeMutation(t *testi
 		t.Fatalf("operational probe error = %v", err)
 	}
 	for _, c := range f.calls {
-		if c.name == "git" && len(c.args) > 0 && (c.args[0] == "fetch" || c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push") {
+		if c.name == "git" && len(c.args) > 0 && (c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push") {
 			t.Fatalf("local finish mutated after operational tag probe failure: %#v", f.calls)
 		}
 	}
@@ -136,7 +136,7 @@ func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T)
 				t.Fatalf("local finish error = %v", err)
 			}
 			for _, c := range f.calls {
-				if c.name == "git" && (len(c.args) > 0 && (c.args[0] == "fetch" || c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push")) {
+				if c.name == "git" && (len(c.args) > 0 && (c.args[0] == "checkout" || c.args[0] == "merge" || c.args[0] == "push")) {
 					t.Fatalf("local finish mutated after lightweight-tag preflight: %#v", f.calls)
 				}
 			}

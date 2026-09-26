@@ -129,19 +129,22 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	if w.isDryRun() {
 		return nil
 	}
-	if e := w.requireAnnotatedFinishTag(ctx, version); e != nil {
-		return e
-	}
 	unlock, e := w.acquireJournalLock(ctx)
 	if e != nil {
 		return e
 	}
 	defer unlock()
-	target, e := w.hotfixTarget(ctx, version)
+	if _, e = w.git(ctx, "fetch", w.remote, "--prune", "--tags"); e != nil {
+		return e
+	}
+	if e = w.requireAnnotatedFinishTag(ctx, version); e != nil {
+		return e
+	}
+	target, e := w.hotfixTargetFromFetched(ctx, version)
 	if e != nil {
 		return e
 	}
-	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, w.localFinishSteps("hotfix-finish"))
+	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, version, w.localFinishSteps("hotfix-finish"))
 	if e != nil {
 		return e
 	}
@@ -154,7 +157,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		}
 		switch s {
 		case "checkout-target":
-			e = w.checkoutBase(ctx, target)
+			e = w.checkoutFetchedBase(ctx, target)
 		case "merge":
 			e = w.mergeContinue(ctx)
 			if e == nil {
