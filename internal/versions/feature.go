@@ -10,15 +10,9 @@ func (w *Workflows) FeatureStart(ctx context.Context, name string) error {
 	if e := w.ensureSafeRef(name); e != nil {
 		return e
 	}
-	base := ""
-	var e error
-	if w.hasDevelop() {
-		base = "develop"
-	} else {
-		base, e = w.Main(ctx)
-		if e != nil {
-			return e
-		}
+	base, e := w.featureBase(ctx)
+	if e != nil {
+		return e
 	}
 	if e = w.checkoutBase(ctx, base); e != nil {
 		return e
@@ -50,6 +44,9 @@ func (w *Workflows) featureBranch(ctx context.Context, name string) (string, err
 	return b, nil
 }
 func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
+	if e := w.validateFeaturePrimaryOverride(ctx); e != nil {
+		return e
+	}
 	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
@@ -63,6 +60,10 @@ func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
 
 // FeatureFinish creates the same guarded PR the legacy make target created.
 func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
+	base, e := w.featureBase(ctx)
+	if e != nil {
+		return e
+	}
 	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
@@ -70,24 +71,40 @@ func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
 	if e = w.RequireParity(ctx, branch); e != nil {
 		return e
 	}
-	base := ""
-	if w.hasDevelop() {
-		base = "develop"
-	} else {
-		base, e = w.Main(ctx)
-		if e != nil {
-			return e
-		}
-	}
 	_, e = w.gh(ctx, "pr", "create", "--head", branch, "-B", base, "-b", fmt.Sprintf("Feature %q finish, will merge into %q.", branch, base), "-t", fmt.Sprintf("chore: Feature Finish from %s", branch))
 	return e
 }
 func (w *Workflows) FeaturePurge(ctx context.Context, name string) error {
+	if _, e := w.featureBase(ctx); e != nil {
+		return e
+	}
 	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
 		return e
 	}
 	return w.purge(ctx, branch)
+}
+
+// validateFeaturePrimaryOverride ensures an explicitly supplied primary stays
+// valid even when GitFlow feature operations use develop as their direct base.
+// The main value is only populated without a user override after Main has
+// already resolved it, so validating that cached value is also conservative.
+func (w *Workflows) validateFeaturePrimaryOverride(ctx context.Context) error {
+	if w.hasDevelop() && w.main != "" {
+		_, err := w.Main(ctx)
+		return err
+	}
+	return nil
+}
+
+func (w *Workflows) featureBase(ctx context.Context) (string, error) {
+	if w.hasDevelop() {
+		if err := w.validateFeaturePrimaryOverride(ctx); err != nil {
+			return "", err
+		}
+		return "develop", nil
+	}
+	return w.Main(ctx)
 }
 func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if err := w.ensureSafeRef(branch); err != nil {
