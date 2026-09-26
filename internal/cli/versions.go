@@ -201,8 +201,8 @@ func newVersionsHotfixCommand() *cobra.Command {
 		Use:   "hotfix",
 		Short: "Manage hotfix branches",
 		Long: `Manage hotfix branches. Start calculates the next patch version from GitVersion.
-Finish creates a guarded pull request by default; --local completes the guarded
-local merge, tag, push, and cleanup sequence.`,
+Finish creates a guarded pull request by default; --local journals local merge
+and tag work, then atomically publishes the target, tag, and source deletion.`,
 	}
 	command.AddCommand(
 		versionsAction("start", "Start the next hotfix branch", "Calculate the next patch version and start hotfix/vX.Y.Z.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
@@ -211,7 +211,7 @@ local merge, tag, push, and cleanup sequence.`,
 		versionsAction("publish", "Publish the current hotfix branch", "Publish the current hotfix/* branch.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
 			return workflow.HotfixPublish(ctx, "")
 		}),
-		newVersionsFinishAction("finish", "Finish the current hotfix", "Finish the current hotfix via pull request, or use --local for the restartable local finish sequence.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
+		newVersionsFinishAction("finish", "Finish the current hotfix", "Finish the current hotfix via pull request, or use --local for journaled atomic remote publication.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
 			return workflow.HotfixFinish(ctx, "", local)
 		}),
 		versionsAction("purge [number]", "Delete a hotfix branch locally and remotely", "Delete hotfix/v<number>; infer it from the current hotfix branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
@@ -228,7 +228,8 @@ func newVersionsReleaseCommand() *cobra.Command {
 		Long: `Manage release branches. GitFlow starts releases from develop and merges
 finished releases back into develop; GitHub Flow and trunk-based use main.
 Finish creates a guarded pull request by default; --local uses restartable
-breadcrumbs so a merge conflict can be resolved and continued safely.`,
+breadcrumbs for local merge/tag work, then atomically publishes every required
+target, the tag, and source deletion.`,
 	}
 	var patch, minor, major bool
 	start := versionsAction("start", "Start a release branch", "Start release/vX.Y.Z. Exactly one of --patch, --minor, or --major is required.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
@@ -246,7 +247,7 @@ breadcrumbs so a merge conflict can be resolved and continued safely.`,
 		versionsAction("publish [name]", "Publish a release branch", "Publish release/vX.Y.Z; infer the name from the current release branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.ReleasePublish(ctx, optionalArg(args))
 		}),
-		newVersionsFinishAction("finish", "Finish the current release", "Finish the current release via pull request, or use --local for the restartable local finish sequence.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
+		newVersionsFinishAction("finish", "Finish the current release", "Finish the current release via pull request, or use --local for journaled atomic remote publication.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
 			return workflow.ReleaseFinish(ctx, "", local)
 		}),
 		versionsAction("purge [name]", "Delete a release branch locally and remotely", "Delete release/vX.Y.Z; infer it from the current release branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
@@ -316,7 +317,7 @@ func newVersionsFinishAction(use, short, long string, action func(context.Contex
 	command := versionsAction(use, short, long, cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
 		return action(ctx, workflow, local)
 	})
-	command.Flags().BoolVar(&local, "local", false, "Finish locally instead of creating a pull request")
+	command.Flags().BoolVar(&local, "local", false, "Finish locally with journaled atomic remote publication")
 	return command
 }
 

@@ -132,12 +132,12 @@ from a `support/*` branch, that branch is retained as the base. `publish` and
 version and otherwise infers it from the current `hotfix/*` or `fix/*` branch.
 
 The default `finish` creates a guarded pull request to the primary branch.
-`--local` instead performs the guarded local release sequence: merge, create
-an annotated `vX.Y.Z` tag, push the target and tag, then remove the local and
-remote hotfix branch. In a GitFlow repository, a matching `support/vX.Y`
-branch receives the local hotfix when one exists; otherwise the primary branch
-receives it. GitHub Flow and trunk-based repositories always target the
-primary branch.
+`--local` journals the merge and annotated `vX.Y.Z` tag, then publishes the
+required target, that exact annotated tag, and the source-branch deletion in
+one server-side atomic push with leases. In a GitFlow repository, a matching
+`support/vX.Y` branch receives the local hotfix when one exists; otherwise the
+primary branch receives it. GitHub Flow and trunk-based repositories always
+target the primary branch.
 
 ## Release branches
 
@@ -160,30 +160,38 @@ operates on the current release branch.
 The normal finish creates a guarded pull request into the primary branch. In
 GitFlow it also creates a second guarded pull request from the release branch
 to `develop`, so both integration lines are explicit. With `--local`, Tronador
-merges the release to the primary branch and creates and pushes an annotated
-version tag. GitFlow then merges that release back into `develop` and pushes
-`develop`; the other workflows do not use `develop`. Only after every required
-merge and push succeeds does it remove the release branch locally and from
-`origin`.
+journals the local merges and annotated version tag, then publishes every
+required target (`main` and `develop` for GitFlow), that exact annotated tag,
+and the source-branch deletion in one server-side atomic push with leases. The
+other workflows publish only the primary branch target.
 
 ### Resuming a local finish
 
-Before a new local hotfix or release finish writes its journal, Tronador fetches
-the source and requires it to exactly match `origin`. This prevents a local
-finish from merging unpublished source work. Local finishes use a journal at
-Git's `tronador/versions-journal.json` path plus a short-lived exclusive lock
-to prevent simultaneous finish invocations in the same worktree. The lock is
-not a recovery mechanism.
+Before a new local hotfix or release finish writes its schema-v4 journal,
+Tronador fetches the source and requires it to exactly match `origin`. This
+prevents a local finish from merging unpublished source work. Local finishes
+use a journal at Git's `tronador/versions-journal.json` path plus a short-lived
+exclusive lock to prevent simultaneous finish invocations in the same
+worktree. The lock is not a recovery mechanism.
 
 If a merge conflict interrupts the operation, resolve the conflict and rerun
 the same `finish --local` command. The workflow continues `git merge
 --continue` when a merge is in progress and then follows the recorded next
 step. A resume journal is accepted only when its schema, WayOfWork, repository,
 worktree, operation, source/target, step plan, and cursor match the current
-operation; otherwise Tronador stops for manual resolution. A matching resume
-may skip the source-parity check because a later completed step can have
-already removed the source branch. The journal is removed only after all merge,
-tag, push, and cleanup postconditions have completed.
+operation; otherwise Tronador stops for manual resolution. Pre-schema-v4
+journals are incompatible and fail closed before a remote mutation. A matching
+resume may skip the source-parity check because a later completed step can
+already have removed the source branch.
+
+The atomic publication plan records each required remote target's observed and
+desired commit plus the annotated tag object. A remote without atomic-push
+support, a changed remote ref, or a prepublished/no-op target or tag fails
+closed: the journal and source branch remain for resolution or retry. If the
+server accepted the atomic transaction but the client did not receive its
+result, rerunning the same command validates that every target contains the
+planned result and that the remote annotated tag has the exact recorded object
+and target before it deletes the local source and clears the journal.
 
 ## Support branches (GitFlow only)
 

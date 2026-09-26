@@ -149,7 +149,7 @@ usage: |-
   - `versions support` — manage persistent maintenance branches in GitFlow only.
   - `versions tag [qualifier] --publish` — create the legacy GitVersion tag and optionally push it.
 
-  Finishes and tags require the named local branch to exactly match its `origin` branch. `--main-branch` must name a safe branch available at `origin`; `--dry-run` is mutation-free for all workflow actions. Purges prove the branch is merged before safe deletion. Local hotfix/release finishes first require source parity, then use a validated journal to resume after conflict resolution. See [docs/versions-command.md](docs/versions-command.md) for workflow-sensitive bases, all flags, and safety guards.
+  Finishes and tags require the named local branch to exactly match its `origin` branch. `--main-branch` must name a safe branch available at `origin`; `--dry-run` is mutation-free for all workflow actions. Purges prove the branch is merged before safe deletion. Local hotfix/release finishes use a schema-v4 journal: after local merge/tag work, they publish every required target, the exact annotated tag, and source deletion in one lease-protected atomic server push. Unsupported atomic remotes and prepublished/no-op state fail closed with the journal and source preserved; a retry after an unacknowledged transaction verifies remote target ancestry and exact tag identity before local cleanup. See [docs/versions-command.md](docs/versions-command.md) for workflow-sensitive bases, all flags, and safety guards.
 
   ### README and Documentation Commands
 
