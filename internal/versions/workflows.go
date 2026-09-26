@@ -288,15 +288,6 @@ func (w *Workflows) ensureAnnotatedTag(ctx context.Context, tag, message, expect
 	return err
 }
 
-// requireAnnotatedFinishTag prevents a local finish from merging and pushing a
-// release only to discover during cleanup that a pre-existing lightweight tag
-// cannot satisfy the finish's annotated-tag postcondition. Public `versions
-// tag` deliberately continues to accept a matching lightweight tag.
-func (w *Workflows) requireAnnotatedFinishTag(ctx context.Context, tag string) error {
-	_, _, err := w.probeAnnotatedFinishTag(ctx, tag)
-	return err
-}
-
 // probeAnnotatedFinishTag is the strict local-finish-only tag probe. It
 // distinguishes a proven absent ref from operational failures and lightweight
 // tags without changing the public `versions tag` compatibility path.

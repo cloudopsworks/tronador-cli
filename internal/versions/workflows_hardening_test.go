@@ -75,8 +75,12 @@ func TestRequireAnnotatedFinishTagAcceptsAnnotatedTag(t *testing.T) {
 		key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
-	if err := w.requireAnnotatedFinishTag(context.Background(), "v1.2.3"); err != nil {
+	commit, exists, err := w.probeAnnotatedFinishTag(context.Background(), "v1.2.3")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if !exists || commit != "abc" {
+		t.Fatalf("annotated probe = %q, exists=%v", commit, exists)
 	}
 	if !f.saw("git", "rev-parse", "--verify", "v1.2.3^{tag}") {
 		t.Fatalf("annotation probe was not consumed: %#v", f.calls)
@@ -92,8 +96,12 @@ func TestRequireAnnotatedFinishTagAcceptsProvenAbsentTag(t *testing.T) {
 		key("git", "show-ref", "--verify", "--quiet", "refs/tags/v1.2.3"): absent,
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
-	if err := w.requireAnnotatedFinishTag(context.Background(), "v1.2.3"); err != nil {
+	commit, exists, err := w.probeAnnotatedFinishTag(context.Background(), "v1.2.3")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if exists || commit != "" {
+		t.Fatalf("absent probe = %q, exists=%v", commit, exists)
 	}
 	if f.saw("git", "rev-parse", "--verify", "v1.2.3^{commit}") {
 		t.Fatalf("absent tag incorrectly resolved: %#v", f.calls)
