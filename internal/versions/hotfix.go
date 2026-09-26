@@ -138,7 +138,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 	if e != nil {
 		return e
 	}
-	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, []string{"checkout-target", "merge", "tag", "push-target", "push-tag", "delete-remote", "delete-local"})
+	j, p, e := w.startLocalFinishJournal(ctx, "hotfix-finish", branch, target, w.localFinishSteps("hotfix-finish"))
 	if e != nil {
 		return e
 	}

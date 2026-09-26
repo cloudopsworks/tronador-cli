@@ -383,6 +383,7 @@ func TestInitExistingDevelopRejectsInvalidConfiguredPrimary(t *testing.T) {
 "status --porcelain") exit 0;;
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, MainBranch: "bad branch", Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	if err != nil {
@@ -400,6 +401,7 @@ func TestInitExistingDevelopRejectsWrongCurrentConfiguredPrimary(t *testing.T) {
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "branch --show-current") echo main;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, MainBranch: "primary", Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	if err != nil {
@@ -419,6 +421,7 @@ func TestInitExistingDevelopRejectsDivergentConfiguredPrimary(t *testing.T) {
 "branch --show-current") echo primary;;
 "rev-parse HEAD") echo local;;
 "rev-parse refs/remotes/origin/primary") echo remote;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, MainBranch: "primary", Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	if err != nil {
@@ -426,5 +429,29 @@ func TestInitExistingDevelopRejectsDivergentConfiguredPrimary(t *testing.T) {
 	}
 	if _, err = r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow}); err == nil || !strings.Contains(err.Error(), "primary is not equal to origin/primary") {
 		t.Fatalf("divergent override error = %v", err)
+	}
+}
+
+func TestInitExistingDevelopAllowsMatchingConfiguredPrimary(t *testing.T) {
+	dir := workflowFixture(t)
+	git := fakeGit(t, `case "$*" in
+"status --porcelain") exit 0;;
+"remote get-url origin") echo https://example.test/acme/repo.git;;
+"fetch origin --prune") exit 0;;
+"branch --show-current") echo primary;;
+"rev-parse HEAD"|"rev-parse refs/remotes/origin/primary") echo same;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 0;;
+"show-ref --verify --quiet refs/heads/develop") exit 1;;
+*) echo "unexpected git $*" >&2; exit 2;; esac`)
+	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, MainBranch: "primary", Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitFlow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DevelopCreated {
+		t.Fatalf("existing remote develop unexpectedly reported created: %+v", result)
 	}
 }

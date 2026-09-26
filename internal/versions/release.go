@@ -122,11 +122,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	if e != nil {
 		return e
 	}
-	steps := []string{"checkout-main", "merge-main", "tag", "push-main", "push-tag"}
-	if w.hasDevelop() {
-		steps = append(steps, "checkout-develop", "merge-develop", "push-develop")
-	}
-	steps = append(steps, "delete-remote", "delete-local")
+	steps := w.localFinishSteps("release-finish")
 	j, p, e := w.startLocalFinishJournal(ctx, "release-finish", branch, target, steps)
 	if e != nil {
 		return e

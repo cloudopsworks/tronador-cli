@@ -429,9 +429,12 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	// A configured primary is an explicit safety contract, even if origin/develop
 	// already exists and initialization would otherwise be a no-op. Do not let a
 	// stale, divergent, or wrong checkout silently pass that contract.
+	primary, remote := "", ""
 	if r.mainBranch != "" {
-		if _, err := r.validateConfiguredPrimary(ctx); err != nil {
-			return false, err
+		var validateErr error
+		primary, remote, validateErr = r.validateConfiguredPrimary(ctx)
+		if validateErr != nil {
+			return false, validateErr
 		}
 	}
 	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/remotes/origin/develop"); err == nil {
@@ -457,34 +460,26 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	} else if !isExitStatus(err, 1) {
 		return false, err
 	}
-	branch, err := r.git(ctx, "branch", "--show-current")
-	if err != nil {
-		return false, err
-	}
-	primary := r.mainBranch
-	if primary != "" {
-		if !safeRef(primary) {
-			return false, fmt.Errorf("invalid configured main branch %q", primary)
+	if primary == "" {
+		branch, branchErr := r.git(ctx, "branch", "--show-current")
+		if branchErr != nil {
+			return false, branchErr
 		}
-		if branch != primary {
-			return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out configured main branch %q first", branch, primary)
-		}
-	} else {
 		if branch != "main" && branch != "master" {
 			return false, fmt.Errorf("refusing to initialize GitFlow from %q; check out main or master first", branch)
 		}
 		primary = branch
-	}
-	local, err := r.git(ctx, "rev-parse", "HEAD")
-	if err != nil {
-		return false, err
-	}
-	remote, err := r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
-	if err != nil {
-		return false, fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
-	}
-	if local != remote {
-		return false, fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+		local, localErr := r.git(ctx, "rev-parse", "HEAD")
+		if localErr != nil {
+			return false, localErr
+		}
+		remote, err = r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
+		if err != nil {
+			return false, fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
+		}
+		if local != remote {
+			return false, fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+		}
 	}
 	if _, err := r.git(ctx, "show-ref", "--verify", "--quiet", "refs/heads/develop"); err == nil {
 		localDevelop, localErr := r.git(ctx, "rev-parse", "refs/heads/develop")
@@ -510,30 +505,30 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (r *Runner) validateConfiguredPrimary(ctx context.Context) (string, error) {
+func (r *Runner) validateConfiguredPrimary(ctx context.Context) (string, string, error) {
 	primary := r.mainBranch
 	if !safeRef(primary) {
-		return "", fmt.Errorf("invalid configured main branch %q", primary)
+		return "", "", fmt.Errorf("invalid configured main branch %q", primary)
 	}
 	branch, err := r.git(ctx, "branch", "--show-current")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if branch != primary {
-		return "", fmt.Errorf("refusing to initialize GitFlow from %q; check out configured main branch %q first", branch, primary)
+		return "", "", fmt.Errorf("refusing to initialize GitFlow from %q; check out configured main branch %q first", branch, primary)
 	}
 	local, err := r.git(ctx, "rev-parse", "HEAD")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	remote, err := r.git(ctx, "rev-parse", "refs/remotes/origin/"+primary)
 	if err != nil {
-		return "", fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
+		return "", "", fmt.Errorf("refusing to initialize GitFlow without origin/%s: %w", primary, err)
 	}
 	if local != remote {
-		return "", fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
+		return "", "", fmt.Errorf("refusing to initialize GitFlow: %s is not equal to origin/%s", primary, primary)
 	}
-	return primary, nil
+	return primary, remote, nil
 }
 
 func isExitStatus(err error, code int) bool {
