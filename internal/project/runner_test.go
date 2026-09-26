@@ -1658,6 +1658,102 @@ func (f failingProjectAtomicTempFile) Write(data []byte) (int, error) {
 	return f.File.Write(data)
 }
 
+type failingProjectRootAtomicTempFile struct {
+	*os.File
+	chmodErr error
+	writeErr error
+	closeErr error
+	closed   *bool
+}
+
+func (f failingProjectRootAtomicTempFile) Chmod(mode os.FileMode) error {
+	if f.chmodErr != nil {
+		return f.chmodErr
+	}
+	return f.File.Chmod(mode)
+}
+
+func (f failingProjectRootAtomicTempFile) Write(data []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return f.File.Write(data)
+}
+
+func (f failingProjectRootAtomicTempFile) Close() error {
+	err := f.File.Close()
+	*f.closed = true
+	if f.closeErr != nil {
+		return f.closeErr
+	}
+	return err
+}
+
+func TestVersionGenerateRootedMarkerWriteFailuresPreserveDestinationAndCleanTemporary(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		chmodErr error
+		writeErr error
+		closeErr error
+		replace  bool
+	}{
+		{name: "chmod", chmodErr: errors.New("chmod failed")},
+		{name: "write", writeErr: errors.New("write failed")},
+		{name: "close", closeErr: errors.New("close failed")},
+		{name: "replace", replace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := fixture(t, ".golang")
+			layout := filepath.Join(workdir, ".cloudopsworks")
+			marker := filepath.Join(layout, "_VERSION")
+			if err := os.WriteFile(marker, []byte("original\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			originalCreate := createProjectRootAtomicTempFile
+			var closed bool
+			createProjectRootAtomicTempFile = func(root *os.Root) (string, projectAtomicTempFile, error) {
+				name, file, err := newProjectRootAtomicTempFile(root)
+				if err != nil {
+					return "", nil, err
+				}
+				return name, failingProjectRootAtomicTempFile{
+					File: file, chmodErr: tc.chmodErr, writeErr: tc.writeErr, closeErr: tc.closeErr, closed: &closed,
+				}, nil
+			}
+			t.Cleanup(func() { createProjectRootAtomicTempFile = originalCreate })
+
+			originalReplace := replaceProjectMarkerAtomicFileInRoot
+			if tc.replace {
+				replaceProjectMarkerAtomicFileInRoot = func(*os.Root, string, string) error {
+					return errors.New("replace failed")
+				}
+			}
+			t.Cleanup(func() { replaceProjectMarkerAtomicFileInRoot = originalReplace })
+
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+				ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")},
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"MajorMinorPatch":"5.10.3"}`}, nil
+				},
+			})
+			if _, err := runner.Run(context.Background(), "version", nil); codeOf(err) != "project_operation_failed" {
+				t.Fatalf("Run(version --generate) error = %v, code = %q", err, codeOf(err))
+			}
+			if !closed {
+				t.Fatal("temporary marker handle was not closed")
+			}
+			if got := string(mustRead(t, marker)); got != "original\n" {
+				t.Fatalf("destination changed after temporary failure: %q", got)
+			}
+			if temporary, err := filepath.Glob(filepath.Join(layout, ".tronador-marker-*")); err != nil || len(temporary) != 0 {
+				t.Fatalf("temporary marker files = %v, %v", temporary, err)
+			}
+		})
+	}
+}
+
 func TestWriteProjectFileAtomicallyPreservesDestinationOnTemporaryFailure(t *testing.T) {
 	for _, test := range []struct {
 		name     string

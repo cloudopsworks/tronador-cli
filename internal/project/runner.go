@@ -1276,13 +1276,16 @@ func buildLegacyBlueprintMarkerChangeInTarget(target catalogMarkerTarget, versio
 
 var beforeProjectMarkerAtomicTempCreate = func() {}
 var replaceProjectMarkerAtomicFileInRoot = replacement.ReplaceInRoot
+var createProjectRootAtomicTempFile = func(root *os.Root) (string, projectAtomicTempFile, error) {
+	return newProjectRootAtomicTempFile(root)
+}
 
 func writeLegacyBlueprintMarkerAtomically(target catalogMarkerTarget, data []byte) error {
 	if err := target.layout.ensure(); err != nil {
 		return err
 	}
 	beforeProjectMarkerAtomicTempCreate()
-	name, file, err := newProjectRootAtomicTempFile(target.layout.root)
+	name, file, err := createProjectRootAtomicTempFile(target.layout.root)
 	if err != nil {
 		return fmt.Errorf("create temporary marker: %w", err)
 	}
