@@ -47,7 +47,7 @@ func (w *Workflows) featureBranch(ctx context.Context, name string) (string, err
 	return b, nil
 }
 func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	if e := w.validateFeaturePrimaryOverride(ctx); e != nil {
@@ -66,7 +66,7 @@ func (w *Workflows) FeaturePublish(ctx context.Context, name string) error {
 
 // FeatureFinish creates the same guarded PR the legacy make target created.
 func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	base, e := w.featureBase(ctx)
@@ -84,7 +84,7 @@ func (w *Workflows) FeatureFinish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) FeaturePurge(ctx context.Context, name string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	if _, e := w.featureBase(ctx); e != nil {

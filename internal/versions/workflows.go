@@ -68,19 +68,27 @@ func NewWorkflows(o WorkflowOptions) (*Workflows, error) {
 	return &Workflows{dir: o.Dir, wow: normalizeWOW(o.WayOfWork), remote: o.Remote, main: o.MainBranch, mainConfigured: o.MainBranch != "", run: o.Runner}, nil
 }
 
-// validateGitFlowTopology prevents a GitFlow repository from treating develop
-// as both its integration branch and primary release branch. The check is
-// deliberately performed before every GitFlow operation that can mutate Git,
-// and Main applies the same invariant to discovered remote defaults.
+// validateGitFlowTopology resolves a GitFlow primary only where the operation
+// needs that resolution before its first mutation. Main also applies the same
+// invariant to every path that discovers a remote default. Operations that do
+// not select a primary retain their established command ordering while the
+// configured-primary guard still rejects develop without Git I/O.
+func (w *Workflows) validateConfiguredGitFlowTopology() error {
+	if w.hasDevelop() && w.mainConfigured && w.main == "develop" {
+		return errors.New("gitflow primary branch must not be develop")
+	}
+	return nil
+}
+
 func (w *Workflows) validateGitFlowTopology(ctx context.Context) error {
-	if !w.hasDevelop() {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
+		return err
+	}
+	if !w.hasDevelop() || w.mainConfigured {
 		return nil
 	}
-	if w.mainConfigured {
-		if w.main == "develop" {
-			return errors.New("gitflow primary branch must not be develop")
-		}
-		return nil
+	if w.main != "" {
+		return w.validateGitFlowPrimary(w.main)
 	}
 	_, err := w.Main(ctx)
 	return err

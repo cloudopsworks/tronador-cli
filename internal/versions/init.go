@@ -593,8 +593,8 @@ func (r *Runner) git(ctx context.Context, args ...string) (string, error) {
 // ensureDevelop is intentionally conservative: it only creates a branch when
 // the checked-out primary branch exactly equals its origin tracking ref.
 func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
-	if err := r.validateGitFlowPrimaryDistinct(ctx); err != nil {
-		return false, err
+	if r.mainBranch == "develop" {
+		return false, errors.New("gitflow primary branch must not be develop")
 	}
 	if r.dryRun {
 		return false, nil
@@ -644,6 +644,9 @@ func (r *Runner) ensureDevelop(ctx context.Context) (bool, error) {
 		}
 		return false, nil
 	} else if !isExitStatus(err, 1) {
+		return false, err
+	}
+	if err := r.validateGitFlowPrimaryDistinct(ctx); err != nil {
 		return false, err
 	}
 	if primary == "" {

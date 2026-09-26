@@ -104,7 +104,7 @@ func TestInitGitFlowRejectsConfiguredDevelopPrimaryBeforeConfigOrGitMutation(t *
 	}
 }
 
-func TestInitGitFlowRejectsDiscoveredDevelopPrimaryBeforeExistingDevelopIdempotency(t *testing.T) {
+func TestInitGitFlowRejectsDiscoveredDevelopPrimaryBeforeBranchMutation(t *testing.T) {
 	dir := workflowFixture(t)
 	target := filepath.Join(dir, cloudOpsWorksDir, "gitversion.yaml")
 	before := mustReadFile(t, target)
@@ -115,7 +115,8 @@ case "$*" in
 "remote get-url origin") echo https://example.test/acme/repo.git;;
 "fetch origin --prune") exit 0;;
 "symbolic-ref --quiet refs/remotes/origin/HEAD") echo refs/remotes/origin/develop;;
-"show-ref --verify --quiet refs/remotes/origin/develop"|"checkout "*|"push "*) echo "unexpected mutation path $*" >&2; exit 2;;
+"show-ref --verify --quiet refs/remotes/origin/develop") exit 1;;
+"checkout "*|"push "*) echo "unexpected mutation path $*" >&2; exit 2;;
 *) echo "unexpected git $*" >&2; exit 2;; esac`)
 	t.Setenv("GIT_LOG", log)
 	r, err := NewRunner(Options{WorkDir: dir, GitPath: git, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -129,8 +130,8 @@ case "$*" in
 		t.Fatalf("gitversion config changed before topology rejection:\n%s", got)
 	}
 	calls := mustReadFile(t, log)
-	if strings.Contains(calls, "show-ref --verify --quiet refs/remotes/origin/develop") || strings.Contains(calls, "checkout ") || strings.Contains(calls, "push ") {
-		t.Fatalf("Init continued into existing-develop idempotency or mutation path: %s", calls)
+	if strings.Contains(calls, "checkout ") || strings.Contains(calls, "push ") {
+		t.Fatalf("Init continued into a branch mutation path: %s", calls)
 	}
 }
 

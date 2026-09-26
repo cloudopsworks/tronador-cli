@@ -8,7 +8,7 @@ import (
 )
 
 func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	if w.hasDevelop() {
@@ -57,7 +57,7 @@ func (w *Workflows) releaseName(ctx context.Context, name string) (string, error
 	return n, nil
 }
 func (w *Workflows) ReleasePublish(ctx context.Context, name string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	n, e := w.releaseName(ctx, name)
@@ -72,7 +72,7 @@ func (w *Workflows) ReleasePublish(ctx context.Context, name string) error {
 	return e
 }
 func (w *Workflows) ReleaseFinish(ctx context.Context, name string, local bool) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	if local && name == "" {
@@ -241,7 +241,7 @@ func (w *Workflows) verifyReleaseFinished(ctx context.Context, target, sourceSHA
 	return nil
 }
 func (w *Workflows) ReleasePurge(ctx context.Context, name string) error {
-	if err := w.validateGitFlowTopology(ctx); err != nil {
+	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
 	n, e := w.releaseName(ctx, name)
