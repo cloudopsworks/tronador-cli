@@ -42,7 +42,8 @@ func (w *Workflows) Tag(ctx context.Context, qualifier string, publish bool) (st
 		return "", e
 	}
 	if publish {
-		if _, e = w.git(ctx, "push", w.remote, v); e != nil {
+		tagRef := "refs/tags/" + v
+		if _, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef); e != nil {
 			return "", e
 		}
 	}

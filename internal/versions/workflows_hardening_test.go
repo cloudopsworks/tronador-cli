@@ -49,7 +49,7 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "abc\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 		key("gitversion", "-showvariable", "SemVer"):                                 "1.2.3-alpha.1\n",
-		key("git", "rev-parse", "--verify", tag+"^{commit}"):                         "abc\n",
+		key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"):            "abc\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{Runner: f})
 	if err != nil {
@@ -65,15 +65,15 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 	if f.saw("git", "tag", "-a", tag, "-m", "chore: Version Tagging: "+tag) {
 		t.Fatalf("existing tag was recreated: %#v", f.calls)
 	}
-	if !f.saw("git", "push", "origin", tag) {
+	if !f.saw("git", "push", "origin", "refs/tags/"+tag+":refs/tags/"+tag) {
 		t.Fatalf("existing tag was not published: %#v", f.calls)
 	}
 }
 
 func TestRequireAnnotatedFinishTagAcceptsAnnotatedTag(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "abc\n",
-		key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
+		key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{commit}"): "abc\n",
+		key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{tag}"):    "tag-object\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	commit, exists, err := w.probeAnnotatedFinishTag(context.Background(), "v1.2.3")
@@ -83,7 +83,7 @@ func TestRequireAnnotatedFinishTagAcceptsAnnotatedTag(t *testing.T) {
 	if !exists || commit != "abc" {
 		t.Fatalf("annotated probe = %q, exists=%v", commit, exists)
 	}
-	if !f.saw("git", "rev-parse", "--verify", "v1.2.3^{tag}") {
+	if !f.saw("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{tag}") {
 		t.Fatalf("annotation probe was not consumed: %#v", f.calls)
 	}
 }
@@ -104,8 +104,71 @@ func TestRequireAnnotatedFinishTagAcceptsProvenAbsentTag(t *testing.T) {
 	if exists || commit != "" {
 		t.Fatalf("absent probe = %q, exists=%v", commit, exists)
 	}
-	if f.saw("git", "rev-parse", "--verify", "v1.2.3^{commit}") {
+	if f.saw("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{commit}") {
 		t.Fatalf("absent tag incorrectly resolved: %#v", f.calls)
+	}
+}
+
+func TestEnsureAnnotatedTagCreatesTagDespiteSameNamedBranch(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	gitTest(t, repo, "checkout", "-b", "v1.2.3")
+	gitTest(t, repo, "checkout", "main")
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ensureAnnotatedTag(ctx, "v1.2.3", "tag", "HEAD"); err != nil {
+		t.Fatalf("same-named branch blocked tag creation: %v", err)
+	}
+	gitTest(t, repo, "show-ref", "--verify", "refs/tags/v1.2.3")
+}
+
+func TestSupportStartRequiresExactTagRefDespiteSameNamedBranch(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, true)
+	gitTest(t, repo, "checkout", "-b", "v1.2.3")
+	gitTest(t, repo, "push", "-u", "origin", "v1.2.3")
+	gitTest(t, repo, "checkout", "main")
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.SupportStart(ctx, "1.2.3"); err == nil || !strings.Contains(err.Error(), "requires existing tag") {
+		t.Fatalf("branch-only collision accepted as tag: %v", err)
+	}
+	if gitTest(t, repo, "branch", "--list", "support/v1.2.3") != "" {
+		t.Fatal("support branch created from same-named branch")
+	}
+
+	gitTest(t, repo, "tag", "-a", "v1.2.3", "-m", "release")
+	gitTest(t, repo, "push", "origin", "refs/tags/v1.2.3:refs/tags/v1.2.3")
+	if err = w.SupportStart(ctx, "1.2.3"); err != nil {
+		t.Fatalf("branch+tag collision did not use exact tag: %v", err)
+	}
+	if got := gitTest(t, repo, "branch", "--show-current"); got != "support/v1.2.3\n" {
+		t.Fatalf("support branch = %q", got)
+	}
+}
+
+func TestTagPublishUsesExplicitTagRefspec(t *testing.T) {
+	ctx := context.Background()
+	const tag = "v1.2.3-alpha.1+deploy-test"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                                       "feature/a\n",
+		key("git", "rev-parse", "--verify", "feature/a^{commit}"):                    "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"):                    "abc\trefs/heads/feature/a\n",
+		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
+		key("gitversion", "-showvariable", "SemVer"):                                 "1.2.3-alpha.1\n",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                         "abc\n",
+	}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"): fmt.Errorf("missing")}}
+	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
+	if _, err := w.Tag(ctx, "test", true); err != nil {
+		t.Fatal(err)
+	}
+	ref := "refs/tags/" + tag
+	if !f.saw("git", "push", "origin", ref+":"+ref) {
+		t.Fatalf("tag publish did not use explicit tag refspec: %#v", f.calls)
 	}
 }
 
@@ -141,9 +204,9 @@ func TestFinishTagPreflightReplaysExactTagStepButRejectsEarlierStep(t *testing.T
 	for _, operation := range []string{"hotfix-finish", "release-finish"} {
 		t.Run(operation, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "target-sha\n",
-				key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
-				key("git", "rev-parse", "--verify", "main^{commit}"):   "target-sha\n",
+				key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{commit}"): "target-sha\n",
+				key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{tag}"):    "tag-object\n",
+				key("git", "rev-parse", "--verify", "main^{commit}"):             "target-sha\n",
 			}}
 			w, err := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
 			if err != nil {
@@ -176,10 +239,10 @@ func TestLocalFinishRejectsPreexistingLightweightTagBeforeMutation(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"):                  "abc\n",
+				key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{commit}"):        "abc\n",
 				key("git", "rev-parse", "--git-path", "tronador/versions-journal.json"): filepath.Join(t.TempDir(), "journal"),
 			}, errs: map[string]error{
-				key("git", "rev-parse", "--verify", "v1.2.3^{tag}"): fmt.Errorf("lightweight tag"),
+				key("git", "rev-parse", "--verify", "refs/tags/v1.2.3^{tag}"): fmt.Errorf("lightweight tag"),
 			}}
 			w, _ := NewWorkflows(WorkflowOptions{MainBranch: "main", Runner: f})
 			err := tc.finish(w)
@@ -705,7 +768,7 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 		key("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"): "origin/main\n",
 		key("gitversion", "-showvariable", "SemVer"):                                 "1.2.3-alpha.1\n",
 		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                         "expected\n",
-		key("git", "rev-parse", "--verify", tag+"^{commit}"):                         "wrong\n",
+		key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"):            "wrong\n",
 	}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	if _, err := w.Tag(context.Background(), "test", false); err == nil || !strings.Contains(err.Error(), "not expected commit") {

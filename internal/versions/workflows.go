@@ -302,7 +302,8 @@ func (w *Workflows) ensureAnnotatedTag(ctx context.Context, tag, message, expect
 	// An existing lightweight tag is a valid already-created tag too.  The
 	// important safety invariant is its target, not its object type: users may
 	// use the legacy command solely to publish a tag created elsewhere.
-	if tagCommit, resolveErr := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}"); resolveErr == nil {
+	tagRef := "refs/tags/" + tag
+	if tagCommit, resolveErr := w.git(ctx, "rev-parse", "--verify", tagRef+"^{commit}"); resolveErr == nil {
 		if strings.TrimSpace(tagCommit) != expectedCommit {
 			return fmt.Errorf("existing tag %s points to %s, not expected commit %s", tag, strings.TrimSpace(tagCommit), expectedCommit)
 		}
@@ -328,11 +329,12 @@ func (w *Workflows) probeAnnotatedFinishTag(ctx context.Context, tag string) (st
 		}
 		return "", false, fmt.Errorf("verify existing finish tag %s: %w", tag, err)
 	}
-	commit, err := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}")
+	tagRef := "refs/tags/" + tag
+	commit, err := w.git(ctx, "rev-parse", "--verify", tagRef+"^{commit}")
 	if err != nil {
 		return "", false, fmt.Errorf("resolve existing finish tag %s: %w", tag, err)
 	}
-	if _, err := w.git(ctx, "rev-parse", "--verify", tag+"^{tag}"); err != nil {
+	if _, err := w.git(ctx, "rev-parse", "--verify", tagRef+"^{tag}"); err != nil {
 		return "", false, fmt.Errorf("existing lightweight tag %s blocks local finish; replace it with an annotated tag or remove it before retrying", tag)
 	}
 	return strings.TrimSpace(commit), true, nil

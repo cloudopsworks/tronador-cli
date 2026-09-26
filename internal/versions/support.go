@@ -23,10 +23,11 @@ func (w *Workflows) SupportStart(ctx context.Context, tag string) error {
 	if _, err := w.git(ctx, "fetch", w.remote, "--tags"); err != nil {
 		return err
 	}
-	if _, e := w.git(ctx, "rev-parse", "--verify", tag+"^{commit}"); e != nil {
+	tagRef := "refs/tags/" + tag
+	if _, e := w.git(ctx, "rev-parse", "--verify", tagRef+"^{commit}"); e != nil {
 		return fmt.Errorf("support start requires existing tag %s: %w", tag, e)
 	}
-	_, err := w.git(ctx, "checkout", "-b", "support/"+tag, tag)
+	_, err := w.git(ctx, "checkout", "-b", "support/"+tag, tagRef)
 	return err
 }
 func (w *Workflows) supportName(ctx context.Context, name string) (string, error) {
