@@ -85,14 +85,29 @@ func (w *Workflows) FeaturePurge(ctx context.Context, name string) error {
 	return w.purge(ctx, branch)
 }
 
-// validateFeaturePrimaryOverride ensures an explicitly supplied primary stays
-// valid even when GitFlow feature operations use develop as their direct base.
-// The main value is only populated without a user override after Main has
-// already resolved it, so validating that cached value is also conservative.
+// validateFeaturePrimaryOverride proves a supplied primary exists at the live
+// remote. GitFlow feature operations use develop as their direct base, but a
+// stale remote-tracking ref must not make an explicit primary override appear
+// valid before an operation mutates the repository.
 func (w *Workflows) validateFeaturePrimaryOverride(ctx context.Context) error {
-	if w.hasDevelop() && w.main != "" {
-		_, err := w.Main(ctx)
+	if !w.hasDevelop() || !w.mainConfigured {
+		return nil
+	}
+	if err := w.ensureSafeRef(w.main); err != nil {
 		return err
+	}
+	ref := "refs/heads/" + w.main
+	out, err := w.git(ctx, "ls-remote", w.remote, ref)
+	if err != nil {
+		return fmt.Errorf("verify configured main branch %q on %s: %w", w.main, w.remote, err)
+	}
+	lines := strings.FieldsFunc(strings.TrimSpace(out), func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 {
+		return fmt.Errorf("configured main branch %q is not available as exactly one live branch on %s", w.main, w.remote)
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) != 2 || fields[0] == "" || fields[1] != ref {
+		return fmt.Errorf("configured main branch %q is not available as exactly one live branch on %s", w.main, w.remote)
 	}
 	return nil
 }

@@ -40,6 +40,7 @@ type WorkflowOptions struct {
 }
 type Workflows struct {
 	dir, wow, remote, main string
+	mainConfigured         bool
 	run                    CommandRunner
 }
 
@@ -64,7 +65,7 @@ func NewWorkflows(o WorkflowOptions) (*Workflows, error) {
 	if o.Runner == nil {
 		o.Runner = ExecRunner{Dir: o.Dir}
 	}
-	return &Workflows{dir: o.Dir, wow: normalizeWOW(o.WayOfWork), remote: o.Remote, main: o.MainBranch, run: o.Runner}, nil
+	return &Workflows{dir: o.Dir, wow: normalizeWOW(o.WayOfWork), remote: o.Remote, main: o.MainBranch, mainConfigured: o.MainBranch != "", run: o.Runner}, nil
 }
 func normalizeWOW(v string) string {
 	v = strings.ToLower(strings.ReplaceAll(v, "-", ""))
