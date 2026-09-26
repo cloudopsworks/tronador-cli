@@ -1,6 +1,7 @@
 package versions
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -132,6 +133,36 @@ func TestFinishTagBoundaryDerivesAndRejectsMalformedPlans(t *testing.T) {
 		if _, err := finishTagBoundary(steps); err == nil {
 			t.Fatalf("malformed plan accepted: %#v", steps)
 		}
+	}
+}
+
+func TestFinishTagPreflightReplaysExactTagStepButRejectsEarlierStep(t *testing.T) {
+	ctx := context.Background()
+	for _, operation := range []string{"hotfix-finish", "release-finish"} {
+		t.Run(operation, func(t *testing.T) {
+			f := &fakeRunner{replies: map[string]string{
+				key("git", "rev-parse", "--verify", "v1.2.3^{commit}"): "target-sha\n",
+				key("git", "rev-parse", "--verify", "v1.2.3^{tag}"):    "tag-object\n",
+				key("git", "rev-parse", "--verify", "main^{commit}"):   "target-sha\n",
+			}}
+			w, err := NewWorkflows(WorkflowOptions{WayOfWork: "githubflow", Runner: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			j := &journal{Target: "main", Steps: w.localFinishSteps(operation)}
+			boundary, err := finishTagBoundary(j.Steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Done = boundary
+			if err = w.preflightFinishTag(ctx, "v1.2.3", j); err != nil {
+				t.Fatalf("tag-step replay rejected matching annotated tag: %v", err)
+			}
+			j.Done = boundary - 1
+			if err = w.preflightFinishTag(ctx, "v1.2.3", j); err == nil || !strings.Contains(err.Error(), "unfinished") {
+				t.Fatalf("matching tag accepted before tag step: %v", err)
+			}
+		})
 	}
 }
 
@@ -546,6 +577,71 @@ func TestJournalLockRecoversPersistentStaleFileAndExcludesActiveOwner(t *testing
 	if _, err = w.acquireJournalLock(ctx); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("active lock did not exclude concurrent owner: %v", err)
 	}
+}
+
+func TestJournalLockRecoversAfterKilledOwner(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, false)
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := w.journalPath(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock := p + ".lock"
+	cmd := exec.Command(os.Args[0], "-test.run=^TestJournalLockCrashHelper$")
+	cmd.Env = append(os.Environ(), "TRONADOR_JOURNAL_LOCK_HELPER="+lock)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}()
+	ready := bufio.NewScanner(stdout)
+	if !ready.Scan() || ready.Text() != "locked" {
+		t.Fatalf("lock helper did not become ready: %q, %v", ready.Text(), ready.Err())
+	}
+	if err = cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.Wait(); err == nil {
+		t.Fatal("killed lock helper exited successfully")
+	}
+	cmd.Process = nil
+
+	unlock, err := w.acquireJournalLock(ctx)
+	if err != nil {
+		t.Fatalf("lock remained held after SIGKILL: %v", err)
+	}
+	unlock()
+}
+
+func TestJournalLockCrashHelper(t *testing.T) {
+	lock := os.Getenv("TRONADOR_JOURNAL_LOCK_HELPER")
+	if lock == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(lock), 0755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(lock, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = lockJournalFile(f); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintln(os.Stdout, "locked")
+	select {}
 }
 
 func TestJournalSourceRevalidationFailsClosedBeforeDeletionAndAllowsPostDeletionResume(t *testing.T) {

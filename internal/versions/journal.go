@@ -230,7 +230,7 @@ func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journ
 	if err != nil {
 		return err
 	}
-	if j.Done <= boundary {
+	if j.Done < boundary {
 		return fmt.Errorf("existing annotated tag %s is incompatible with unfinished local finish state", tag)
 	}
 	targetCommit, err := w.git(ctx, "rev-parse", "--verify", j.Target+"^{commit}")
