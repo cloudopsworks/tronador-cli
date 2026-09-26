@@ -3,6 +3,7 @@ package versions
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"tronador-cli/internal/replacement"
@@ -57,27 +59,37 @@ func (r *Runner) Init(ctx context.Context, options InitOptions) (InitResult, err
 	if err := ctx.Err(); err != nil {
 		return InitResult{}, err
 	}
-	if err := r.validateCloudOpsWorksDir(); err != nil {
-		return InitResult{}, err
-	}
-	selectorPaths, err := r.validateSelectorFiles()
+	layout, err := r.validateCloudOpsWorksDir()
 	if err != nil {
 		return InitResult{}, err
 	}
-	chosen, err := r.chooseWayOfWork(options.WayOfWork)
+	defer layout.root.Close()
+	selectorPaths, err := r.validateSelectorFiles(layout)
+	if err != nil {
+		return InitResult{}, err
+	}
+	chosen, err := r.chooseWayOfWorkInLayout(options.WayOfWork, layout)
 	if err != nil {
 		return InitResult{}, err
 	}
 	result := InitResult{WayOfWork: chosen}
 
-	target := filepath.Join(r.workDir, cloudOpsWorksDir, "gitversion.yaml")
-	if data, readErr := os.ReadFile(target); readErr == nil {
+	target := "gitversion.yaml"
+	if err := layout.ensure(); err != nil {
+		return InitResult{}, err
+	}
+	if data, readErr := layout.root.ReadFile(target); readErr == nil {
+		if err := layout.ensure(); err != nil {
+			return InitResult{}, err
+		}
 		old := currentWayOfWork(data)
 		warning := fmt.Sprintf("warning: replacing existing %s (current WayOfWork=%s) with %s", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"), old, chosen)
 		result.Warnings = append(result.Warnings, warning)
 		fmt.Fprintln(r.stderr, warning)
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return InitResult{}, fmt.Errorf("read current gitversion config: %w", readErr)
+	} else if err := layout.ensure(); err != nil {
+		return InitResult{}, err
 	}
 
 	// A GitFlow init must prove repository safety before writing a tracked
@@ -90,14 +102,14 @@ func (r *Runner) Init(ctx context.Context, options InitOptions) (InitResult, err
 		result.DevelopCreated = created
 	}
 	if !r.dryRun {
-		changed, copyErr := copyAtomically(selectorPaths[chosen], target)
+		changed, copyErr := copyAtomically(layout, selectorPaths[chosen], target)
 		if copyErr != nil {
 			return InitResult{}, copyErr
 		}
 		result.Changed = changed || result.DevelopCreated
 		if chosen == WayOfWorkGitFlow {
 			// Selecting GitFlow makes CI's corresponding capability explicit.
-			ciChanged, ciErr := r.setGitFlowEnabled(true)
+			ciChanged, ciErr := r.setGitFlowEnabledInLayout(layout, true)
 			if ciErr != nil {
 				return InitResult{}, ciErr
 			}
@@ -111,40 +123,110 @@ func (r *Runner) Init(ctx context.Context, options InitOptions) (InitResult, err
 
 // validateCloudOpsWorksDir rejects a symlinked configuration layout before any
 // configuration read or Git mutation can follow it outside the selected workdir.
-func (r *Runner) validateCloudOpsWorksDir() error {
-	path := filepath.Join(r.workDir, cloudOpsWorksDir)
-	info, err := os.Lstat(path)
+type cloudOpsWorksLayout struct {
+	path string
+	info os.FileInfo
+	root *os.Root
+}
+
+type selectorFile struct {
+	name string
+	data []byte
+	mode os.FileMode
+}
+
+func readRegularFile(root *os.Root, name string) ([]byte, os.FileMode, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
+	linkInfo, err := root.Lstat(name)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !os.SameFile(info, linkInfo) {
+		return nil, 0, errors.New("must be a regular non-symlink file")
+	}
+	data, err := io.ReadAll(file)
+	return data, info.Mode().Perm(), err
+}
+
+// ensure proves that .cloudopsworks is still the same non-symlink directory
+// that Init validated. Each path-based operation is bracketed by this check so
+// a directory-to-symlink replacement fails closed before later actions (such
+// as Git) can use configuration outside the workdir.
+func (layout cloudOpsWorksLayout) ensure() error {
+	rootInfo, err := layout.root.Stat(".")
+	if err != nil || !os.SameFile(layout.info, rootInfo) {
+		return fmt.Errorf("required workflow config directory %s changed during initialization", cloudOpsWorksDir)
+	}
+	info, err := os.Lstat(layout.path)
 	if err != nil {
 		return fmt.Errorf("required workflow config directory %s: %w", cloudOpsWorksDir, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("required workflow config directory %s must be a non-symlink directory", cloudOpsWorksDir)
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !os.SameFile(layout.info, info) {
+		return fmt.Errorf("required workflow config directory %s changed during initialization", cloudOpsWorksDir)
 	}
 	return nil
 }
 
-func (r *Runner) validateSelectorFiles() (map[WayOfWork]string, error) {
-	paths := make(map[WayOfWork]string, 3)
+func (r *Runner) validateCloudOpsWorksDir() (cloudOpsWorksLayout, error) {
+	if runtime.GOOS == "js" || runtime.GOOS == "plan9" {
+		return cloudOpsWorksLayout{}, fmt.Errorf("required workflow config directory %s cannot be safely contained on %s", cloudOpsWorksDir, runtime.GOOS)
+	}
+	path := filepath.Join(r.workDir, cloudOpsWorksDir)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return cloudOpsWorksLayout{}, fmt.Errorf("required workflow config directory %s: %w", cloudOpsWorksDir, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return cloudOpsWorksLayout{}, fmt.Errorf("required workflow config directory %s must be a non-symlink directory", cloudOpsWorksDir)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return cloudOpsWorksLayout{}, fmt.Errorf("open required workflow config directory %s: %w", cloudOpsWorksDir, err)
+	}
+	layout := cloudOpsWorksLayout{path: path, info: info, root: root}
+	if err := layout.ensure(); err != nil {
+		_ = root.Close()
+		return cloudOpsWorksLayout{}, err
+	}
+	return layout, nil
+}
+
+func (r *Runner) validateSelectorFiles(layout cloudOpsWorksLayout) (map[WayOfWork]selectorFile, error) {
+	paths := make(map[WayOfWork]selectorFile, 3)
 	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
-		path := filepath.Join(r.workDir, cloudOpsWorksDir, wow.selectorFileName())
-		info, err := os.Lstat(path)
+		name := wow.selectorFileName()
+		data, mode, err := readRegularFile(layout.root, name)
 		if err != nil {
 			return nil, fmt.Errorf("required workflow config %s: %w", filepath.Join(cloudOpsWorksDir, wow.selectorFileName()), err)
 		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("required workflow config %s must be a regular non-symlink file", filepath.Join(cloudOpsWorksDir, wow.selectorFileName()))
-		}
-		paths[wow] = path
+		paths[wow] = selectorFile{name: name, data: data, mode: mode}
+	}
+	if err := layout.ensure(); err != nil {
+		return nil, err
 	}
 	return paths, nil
 }
 
 func (r *Runner) chooseWayOfWork(requested WayOfWork) (WayOfWork, error) {
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		return "", err
+	}
+	defer layout.root.Close()
+	return r.chooseWayOfWorkInLayout(requested, layout)
+}
+
+func (r *Runner) chooseWayOfWorkInLayout(requested WayOfWork, layout cloudOpsWorksLayout) (WayOfWork, error) {
 	if requested != "" {
 		wow, err := ParseWayOfWork(string(requested))
 		return wow, err
 	}
-	enabled, supported, err := r.gitFlowConfig()
+	enabled, supported, err := r.gitFlowConfigInLayout(layout)
 	if err != nil {
 		return "", err
 	}
@@ -156,12 +238,33 @@ func (r *Runner) chooseWayOfWork(requested WayOfWork) (WayOfWork, error) {
 		return "", err
 	}
 	wow, err = ParseWayOfWork(string(wow))
-	return wow, err
+	if err != nil {
+		return "", err
+	}
+	if err := layout.ensure(); err != nil {
+		return "", err
+	}
+	return wow, nil
 }
 
 func (r *Runner) gitFlowConfig() (enabled, supported bool, err error) {
-	path := filepath.Join(r.workDir, cloudOpsWorksDir, "cloudopsworks-ci.yaml")
-	data, readErr := os.ReadFile(path)
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		return false, false, err
+	}
+	defer layout.root.Close()
+	return r.gitFlowConfigInLayout(layout)
+}
+
+func (r *Runner) gitFlowConfigInLayout(layout cloudOpsWorksLayout) (enabled, supported bool, err error) {
+	path := "cloudopsworks-ci.yaml"
+	if err := layout.ensure(); err != nil {
+		return false, false, err
+	}
+	data, readErr := layout.root.ReadFile(path)
+	if ensureErr := layout.ensure(); ensureErr != nil {
+		return false, false, ensureErr
+	}
 	if errors.Is(readErr, os.ErrNotExist) {
 		return false, false, nil
 	}
@@ -176,8 +279,23 @@ func (r *Runner) gitFlowConfig() (enabled, supported bool, err error) {
 }
 
 func (r *Runner) setGitFlowEnabled(enabled bool) (bool, error) {
-	path := filepath.Join(r.workDir, cloudOpsWorksDir, "cloudopsworks-ci.yaml")
-	data, err := os.ReadFile(path)
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		return false, err
+	}
+	defer layout.root.Close()
+	return r.setGitFlowEnabledInLayout(layout, enabled)
+}
+
+func (r *Runner) setGitFlowEnabledInLayout(layout cloudOpsWorksLayout, enabled bool) (bool, error) {
+	path := "cloudopsworks-ci.yaml"
+	if err := layout.ensure(); err != nil {
+		return false, err
+	}
+	data, err := layout.root.ReadFile(path)
+	if ensureErr := layout.ensure(); ensureErr != nil {
+		return false, ensureErr
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -199,7 +317,11 @@ func (r *Runner) setGitFlowEnabled(enabled bool) (bool, error) {
 	if string(updated) == string(data) {
 		return false, nil
 	}
-	if err := writeAtomically(path, updated, fileMode(path)); err != nil {
+	mode := os.FileMode(0o644)
+	if info, statErr := layout.root.Stat(path); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := writeAtomicallyInLayout(layout, path, updated, mode); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -374,17 +496,25 @@ func currentWayOfWork(data []byte) WayOfWork {
 	return WayOfWorkGitFlow
 }
 
-func copyAtomically(source, target string) (bool, error) {
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return false, fmt.Errorf("read selected workflow config: %w", err)
+func copyAtomically(layout cloudOpsWorksLayout, source selectorFile, target string) (bool, error) {
+	if err := layout.ensure(); err != nil {
+		return false, err
 	}
-	if current, readErr := os.ReadFile(target); readErr == nil && string(current) == string(data) {
+	data := source.data
+	if err := layout.ensure(); err != nil {
+		return false, err
+	}
+	if current, readErr := layout.root.ReadFile(target); readErr == nil && string(current) == string(data) {
+		if err := layout.ensure(); err != nil {
+			return false, err
+		}
 		return false, nil
 	} else if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 		return false, fmt.Errorf("read current workflow config: %w", readErr)
+	} else if err := layout.ensure(); err != nil {
+		return false, err
 	}
-	if err := writeAtomically(target, data, fileMode(source)); err != nil {
+	if err := writeAtomicallyInLayout(layout, target, data, source.mode); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -411,13 +541,22 @@ var createAtomicTempFile = func(dir, pattern string) (atomicTempFile, error) {
 var replaceAtomicFile = replacement.Replace
 
 func writeAtomically(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	file, err := createAtomicTempFile(dir, ".tronador-*")
+	return writeAtomicallyWithCheck(path, data, mode, nil)
+}
+
+func writeAtomicallyInLayout(layout cloudOpsWorksLayout, path string, data []byte, mode os.FileMode) error {
+	if err := layout.ensure(); err != nil {
+		return err
+	}
+	temporary, file, err := createRootAtomicTempFile(layout.root)
 	if err != nil {
 		return fmt.Errorf("create temporary config: %w", err)
 	}
-	temporary := file.Name()
-	defer os.Remove(temporary)
+	defer layout.root.Remove(temporary)
+	if err := layout.ensure(); err != nil {
+		_ = file.Close()
+		return err
+	}
 	if err := file.Chmod(mode); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("prepare temporary config: %w", err)
@@ -428,6 +567,69 @@ func writeAtomically(path string, data []byte, mode os.FileMode) error {
 	}
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := layout.ensure(); err != nil {
+		return err
+	}
+	if err := layout.root.Rename(temporary, path); err != nil {
+		return fmt.Errorf("replace config atomically: %w", err)
+	}
+	return nil
+}
+
+var beforeRootAtomicTempCreate = func() {}
+
+func createRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
+	beforeRootAtomicTempCreate()
+	var random [12]byte
+	for range 100 {
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", nil, err
+		}
+		name := fmt.Sprintf(".tronador-%x", random)
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return name, file, err
+	}
+	return "", nil, errors.New("create unique temporary config")
+}
+
+func writeAtomicallyWithCheck(path string, data []byte, mode os.FileMode, check func() error) error {
+	if check != nil {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	dir := filepath.Dir(path)
+	file, err := createAtomicTempFile(dir, ".tronador-*")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if check != nil {
+		if err := check(); err != nil {
+			_ = file.Close()
+			return err
+		}
+	}
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("prepare temporary config: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if check != nil {
+		if err := check(); err != nil {
+			return err
+		}
 	}
 	if err := replaceAtomicFile(temporary, path); err != nil {
 		return fmt.Errorf("replace config atomically: %w", err)

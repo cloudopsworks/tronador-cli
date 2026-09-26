@@ -465,6 +465,71 @@ exit 0`)
 	}
 }
 
+func TestInitRejectsDirectorySwapBeforeConfigReadOrGitMutation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	dir := workflowFixture(t)
+	writeFile(t, filepath.Join(dir, cloudOpsWorksDir, "cloudopsworks-ci.yaml"), "config:\n  gitFlow:\n    enabled: false\n")
+	external := t.TempDir()
+	writeFile(t, filepath.Join(external, "gitversion.yaml"), "# Agents: WayOfWork=gitflow\nexternal: unchanged\n")
+	gitCalled := filepath.Join(t.TempDir(), "git-called")
+	git := fakeGit(t, `touch "`+gitCalled+`"
+exit 0`)
+	r, err := NewRunner(Options{
+		WorkDir: dir,
+		GitPath: git,
+		SelectWayOfWork: func(io.Reader, io.Writer) (WayOfWork, error) {
+			swapCloudOpsWorksDir(t, dir, external)
+			return WayOfWorkGitFlow, nil
+		},
+		Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Init(context.Background(), InitOptions{}); err == nil || !strings.Contains(err.Error(), "changed during initialization") {
+		t.Fatalf("Init error = %v", err)
+	}
+	if got := mustReadFile(t, filepath.Join(external, "gitversion.yaml")); got != "# Agents: WayOfWork=gitflow\nexternal: unchanged\n" {
+		t.Fatalf("external gitversion.yaml mutated:\n%s", got)
+	}
+	if _, err := os.Stat(gitCalled); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Git mutation began after directory swap: %v", err)
+	}
+}
+
+func TestInitRootAnchorsAtomicWriteAcrossDirectorySwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink permissions vary on Windows")
+	}
+	dir := workflowFixture(t)
+	external := t.TempDir()
+	gitVersion := filepath.Join(external, "gitversion.yaml")
+	writeFile(t, gitVersion, "# Agents: WayOfWork=gitflow\nexternal: unchanged\n")
+	oldHook := beforeRootAtomicTempCreate
+	beforeRootAtomicTempCreate = func() { swapCloudOpsWorksDir(t, dir, external) }
+	t.Cleanup(func() { beforeRootAtomicTempCreate = oldHook })
+	r := newInitRunner(t, dir, SelectWayOfWork)
+	if _, err := r.Init(context.Background(), InitOptions{WayOfWork: WayOfWorkGitHubFlow}); err == nil || !strings.Contains(err.Error(), "changed during initialization") {
+		t.Fatalf("Init error = %v", err)
+	}
+	if got := mustReadFile(t, gitVersion); got != "# Agents: WayOfWork=gitflow\nexternal: unchanged\n" {
+		t.Fatalf("external gitversion.yaml mutated:\n%s", got)
+	}
+}
+
+func swapCloudOpsWorksDir(t *testing.T, workDir, external string) {
+	t.Helper()
+	config := filepath.Join(workDir, cloudOpsWorksDir)
+	if err := os.Rename(config, config+".original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, config); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitRejectsSymlinkSelector(t *testing.T) {
 	dir := workflowFixture(t)
 	path := filepath.Join(dir, cloudOpsWorksDir, "gitversion_trunkbased.yaml")
