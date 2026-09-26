@@ -185,7 +185,8 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				_, e = w.git(ctx, "push", w.remote, target)
 			}
 		case "push-tag":
-			_, e = w.git(ctx, "push", w.remote, version)
+			tagRef := "refs/tags/" + version
+			_, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef)
 		case "checkout-develop":
 			e = w.checkoutFetchedBase(ctx, "develop")
 		case "push-develop":

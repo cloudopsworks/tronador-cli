@@ -62,7 +62,7 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 	if got != tag {
 		t.Fatalf("tag = %q, want %q", got, tag)
 	}
-	if f.saw("git", "tag", "-a", tag, "-m", "chore: Version Tagging: "+tag) {
+	if f.saw("git", "tag", "-a", tag, "HEAD", "-m", "chore: Version Tagging: "+tag) {
 		t.Fatalf("existing tag was recreated: %#v", f.calls)
 	}
 	if !f.saw("git", "push", "origin", "refs/tags/"+tag+":refs/tags/"+tag) {
@@ -675,6 +675,58 @@ func TestDeleteCursorDoesNotAdvanceForSameNamedBranchWithoutTag(t *testing.T) {
 			if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/"+branch); !strings.Contains(got, "refs/heads/"+branch) {
 				t.Fatalf("source deleted without exact tag: %q", got)
 			}
+		})
+	}
+}
+
+func TestLocalFinishPublishesExactTagWhenBranchHasSameName(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, operation, prefix string
+		finish                  func(*Workflows) error
+	}{
+		{name: "hotfix", operation: "hotfix-finish", prefix: "hotfix", finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }},
+		{name: "release", operation: "release-finish", prefix: "release", finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, repo := setupWorkflowRemote(t, false)
+			branch := tc.prefix + "/v0.2.0"
+			gitTest(t, repo, "checkout", "-b", branch)
+			gitTest(t, repo, "commit", "--allow-empty", "-m", tc.name)
+			gitTest(t, repo, "push", "-u", "origin", branch)
+			sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", branch))
+			gitTest(t, repo, "checkout", "main")
+			gitTest(t, repo, "merge", "--no-ff", branch, "-m", "merge "+tc.name)
+			tagTargetSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "main"))
+			gitTest(t, repo, "tag", "-a", "v0.2.0", "-m", tc.name)
+			gitTest(t, repo, "branch", "v0.2.0")
+			gitTest(t, repo, "push", "origin", "main")
+			gitTest(t, repo, "push", "origin", "refs/heads/v0.2.0:refs/heads/v0.2.0")
+
+			w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "githubflow", MainBranch: "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			steps := w.localFinishSteps(tc.operation)
+			j, path, err := w.startJournal(ctx, tc.operation, branch, "main", sourceSHA, steps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pushTag, err := journalStepBoundary(steps, "push-tag")
+			if err != nil {
+				t.Fatal(err)
+			}
+			j.Done, j.TagTargetSHA = pushTag, tagTargetSHA
+			if err = writeAtomic(path, j); err != nil {
+				t.Fatal(err)
+			}
+			if err = tc.finish(w); err != nil {
+				t.Fatalf("finish retry with branch/tag collision: %v", err)
+			}
+			if got := gitTest(t, repo, "ls-remote", "origin", "refs/tags/v0.2.0"); !strings.Contains(got, "refs/tags/v0.2.0") {
+				t.Fatalf("exact tag was not published: %q", got)
+			}
+			assertBranchAbsent(t, repo, branch)
 		})
 	}
 }

@@ -171,7 +171,8 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 		case "push-target":
 			_, e = w.git(ctx, "push", w.remote, target)
 		case "push-tag":
-			_, e = w.git(ctx, "push", w.remote, version)
+			tagRef := "refs/tags/" + version
+			_, e = w.git(ctx, "push", w.remote, tagRef+":"+tagRef)
 		case "delete-remote":
 			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
 		case "delete-local":
