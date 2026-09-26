@@ -1468,7 +1468,7 @@ func TestHotfixStartSynchronizesSelectedSupportBeforeDerivingVersion(t *testing.
 
 func TestHotfixTargetMatchesExactSupportMajorMinor(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/support/"): "support/v1.20.0\nsupport/v1.2.9\n",
+		key("git", "for-each-ref", "--format=%(refname)", "refs/heads/support/"): "refs/heads/support/v1.20.0\nrefs/heads/support/v1.2.9\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
 	if err != nil {
@@ -1485,7 +1485,7 @@ func TestHotfixTargetMatchesExactSupportMajorMinor(t *testing.T) {
 
 func TestHotfixTargetRejectsAmbiguousSupportLines(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/support/"): "support/v1.2.0\nsupport/v1.2.9\n",
+		key("git", "for-each-ref", "--format=%(refname)", "refs/heads/support/"): "refs/heads/support/v1.2.0\nrefs/heads/support/v1.2.9\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
 	if err != nil {
@@ -1498,9 +1498,9 @@ func TestHotfixTargetRejectsAmbiguousSupportLines(t *testing.T) {
 
 func TestHotfixStartUsesRemoteOnlySupportTrackingBase(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
-		key("git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/support/"): "origin/support/v1.2.0\n",
-		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"):      "support\n",
-		key("git", "rev-parse", "--verify", "refs/heads/support/v1.2.0^{commit}"):               "support\n",
+		key("git", "for-each-ref", "--format=%(refname)", "refs/remotes/origin/support/"):  "refs/remotes/origin/support/v1.2.0\n",
+		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"): "support\n",
+		key("git", "rev-parse", "--verify", "refs/heads/support/v1.2.0^{commit}"):          "support\n",
 	}}
 	f.errs = map[string]error{key("git", "show-ref", "--verify", "--quiet", "refs/heads/support/v1.2.0"): fmt.Errorf("missing local support")}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})

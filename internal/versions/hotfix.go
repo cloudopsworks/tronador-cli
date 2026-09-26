@@ -223,15 +223,21 @@ func (w *Workflows) hotfixTargetFromFetched(ctx context.Context, version string)
 	if m == nil {
 		return "", fmt.Errorf("invalid hotfix version %q", version)
 	}
-	refs := []string{"refs/heads/support/", "refs/remotes/" + w.remote + "/support/"}
+	namespaces := []struct{ prefix string }{
+		{prefix: "refs/heads/support/"},
+		{prefix: "refs/remotes/" + w.remote + "/support/"},
+	}
 	matchesByName := map[string]struct{}{}
-	for _, ref := range refs {
-		out, listErr := w.git(ctx, "for-each-ref", "--format=%(refname:short)", ref)
+	for _, namespace := range namespaces {
+		out, listErr := w.git(ctx, "for-each-ref", "--format=%(refname)", namespace.prefix)
 		if listErr != nil {
 			return "", listErr
 		}
-		for _, candidate := range strings.Fields(out) {
-			candidate = strings.TrimPrefix(candidate, w.remote+"/")
+		for _, ref := range strings.Fields(out) {
+			if !strings.HasPrefix(ref, namespace.prefix) {
+				continue
+			}
+			candidate := "support/" + strings.TrimPrefix(ref, namespace.prefix)
 			major, minor, ok := supportLine(candidate)
 			if ok && major == m[1] && minor == m[2] {
 				matchesByName[candidate] = struct{}{}
