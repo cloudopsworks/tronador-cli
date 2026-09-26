@@ -133,28 +133,48 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
 		if s == "delete-remote" {
-			if err := w.verifyFinished(ctx, target, j.SourceSHA, version); err != nil {
+			if err := w.verifyReleaseFinished(ctx, target, j.SourceSHA, version); err != nil {
 				return err
 			}
 		}
 		switch s {
 		case "checkout-main":
 			e = w.checkoutFetchedBase(ctx, target)
-		case "merge-main", "merge-develop":
-			e = w.mergeContinue(ctx)
+		case "merge-main":
+			e = w.checkoutReleaseBranch(ctx, target)
+			if e == nil {
+				e = w.mergeContinue(ctx)
+			}
+			if e == nil {
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
+			}
+		case "merge-develop":
+			e = w.checkoutReleaseBranch(ctx, "develop")
+			if e == nil {
+				e = w.mergeContinue(ctx)
+			}
 			if e == nil {
 				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
 			}
 		case "tag":
-			e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), target)
+			e = w.checkoutReleaseBranch(ctx, target)
+			if e == nil {
+				e = w.ensureAnnotatedTag(ctx, version, fmt.Sprintf("chore: Release %s", version), target)
+			}
 		case "push-main":
-			_, e = w.git(ctx, "push", w.remote, target)
+			e = w.checkoutReleaseBranch(ctx, target)
+			if e == nil {
+				_, e = w.git(ctx, "push", w.remote, target)
+			}
 		case "push-tag":
 			_, e = w.git(ctx, "push", w.remote, version)
 		case "checkout-develop":
 			e = w.checkoutFetchedBase(ctx, "develop")
 		case "push-develop":
-			_, e = w.git(ctx, "push", w.remote, "develop")
+			e = w.checkoutReleaseBranch(ctx, "develop")
+			if e == nil {
+				_, e = w.git(ctx, "push", w.remote, "develop")
+			}
 		case "delete-remote":
 			e = w.deleteRemoteBranch(ctx, branch, j.SourceSHA)
 		case "delete-local":
@@ -168,6 +188,39 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 		}
 	}
 	return clearJournal(p)
+}
+
+func (w *Workflows) checkoutReleaseBranch(ctx context.Context, branch string) error {
+	current, err := w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current == branch {
+		return nil
+	}
+	if _, err = w.git(ctx, "checkout", branch); err != nil {
+		return err
+	}
+	current, err = w.Current(ctx)
+	if err != nil {
+		return err
+	}
+	if current != branch {
+		return fmt.Errorf("expected current branch %s, got %s", branch, current)
+	}
+	return nil
+}
+
+func (w *Workflows) verifyReleaseFinished(ctx context.Context, target, sourceSHA, tag string) error {
+	if err := w.verifyFinished(ctx, target, sourceSHA, tag); err != nil {
+		return err
+	}
+	if w.hasDevelop() {
+		if _, err := w.git(ctx, "merge-base", "--is-ancestor", sourceSHA, "develop"); err != nil {
+			return fmt.Errorf("finish postcondition: %s is not merged into develop: %w", sourceSHA, err)
+		}
+	}
+	return nil
 }
 func (w *Workflows) ReleasePurge(ctx context.Context, name string) error {
 	n, e := w.releaseName(ctx, name)

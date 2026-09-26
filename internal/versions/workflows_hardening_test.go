@@ -395,6 +395,92 @@ func TestReleaseLocalFinishResumesAfterConflict(t *testing.T) {
 	assertBranchAbsent(t, repo, "release/v0.2.0")
 }
 
+func TestReleaseLocalFinishReplaysMergeDevelopFromDevelopNotWrongHEAD(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, true)
+	gitTest(t, repo, "checkout", "develop")
+	gitTest(t, repo, "checkout", "-b", "release/v0.2.0")
+	writeFile(t, filepath.Join(repo, "release.txt"), "release\n")
+	gitTest(t, repo, "add", "release.txt")
+	gitTest(t, repo, "commit", "-m", "release")
+	gitTest(t, repo, "push", "-u", "origin", "release/v0.2.0")
+	sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "release/v0.2.0"))
+
+	gitTest(t, repo, "checkout", "main")
+	gitTest(t, repo, "merge", "--no-ff", "release/v0.2.0", "-m", "merge release into main")
+	gitTest(t, repo, "tag", "-a", "v0.2.0", "-m", "release")
+	gitTest(t, repo, "push", "origin", "main", "v0.2.0")
+
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := w.localFinishSteps("release-finish")
+	j, path, err := w.startJournal(ctx, "release-finish", "release/v0.2.0", "main", sourceSHA, steps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergeDevelop, err := journalStepBoundary(steps, "merge-develop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Done = mergeDevelop
+	if err = writeAtomic(path, j); err != nil {
+		t.Fatal(err)
+	}
+	// A crashed run can be resumed from main even though its next step is the
+	// develop merge. The replay must move to develop before merging/pushing.
+	if got := gitTest(t, repo, "branch", "--show-current"); got != "main\n" {
+		t.Fatalf("fixture HEAD = %q, want main", got)
+	}
+	if err = w.ReleaseFinish(ctx, "", true); err != nil {
+		t.Fatalf("replay release finish: %v", err)
+	}
+	gitTest(t, repo, "merge-base", "--is-ancestor", sourceSHA, "develop")
+	if got := gitTest(t, repo, "branch", "--show-current"); got != "develop\n" {
+		t.Fatalf("final branch = %q, want develop", got)
+	}
+	assertBranchAbsent(t, repo, "release/v0.2.0")
+}
+
+func TestReleaseLocalFinishDoesNotDeleteSourceUntilDevelopContainsRelease(t *testing.T) {
+	ctx := context.Background()
+	_, repo := setupWorkflowRemote(t, true)
+	gitTest(t, repo, "checkout", "develop")
+	gitTest(t, repo, "checkout", "-b", "release/v0.2.0")
+	gitTest(t, repo, "commit", "--allow-empty", "-m", "release")
+	gitTest(t, repo, "push", "-u", "origin", "release/v0.2.0")
+	sourceSHA := strings.TrimSpace(gitTest(t, repo, "rev-parse", "release/v0.2.0"))
+	gitTest(t, repo, "checkout", "main")
+	gitTest(t, repo, "merge", "--no-ff", "release/v0.2.0", "-m", "merge release into main")
+	gitTest(t, repo, "tag", "-a", "v0.2.0", "-m", "release")
+	gitTest(t, repo, "push", "origin", "main", "v0.2.0")
+
+	w, err := NewWorkflows(WorkflowOptions{Dir: repo, WayOfWork: "gitflow", MainBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := w.localFinishSteps("release-finish")
+	j, path, err := w.startJournal(ctx, "release-finish", "release/v0.2.0", "main", sourceSHA, steps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteRemote, err := journalStepBoundary(steps, "delete-remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Done = deleteRemote
+	if err = writeAtomic(path, j); err != nil {
+		t.Fatal(err)
+	}
+	if err = w.ReleaseFinish(ctx, "", true); err == nil || !strings.Contains(err.Error(), "not merged into develop") {
+		t.Fatalf("release source deletion was allowed without develop merge: %v", err)
+	}
+	if got := gitTest(t, repo, "ls-remote", "origin", "refs/heads/release/v0.2.0"); !strings.Contains(got, "refs/heads/release/v0.2.0") {
+		t.Fatalf("source was deleted despite missing develop merge: %q", got)
+	}
+}
+
 func setupWorkflowRemote(t *testing.T, develop bool) (string, string) {
 	t.Helper()
 	root := t.TempDir()
