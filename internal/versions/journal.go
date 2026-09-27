@@ -207,6 +207,27 @@ func (w *Workflows) revalidateJournalSource(ctx context.Context, j *journal) err
 	return nil
 }
 
+// exactRemoteBranchAdvertisement accepts only one exact branch advertisement.
+// git ls-remote ref patterns may tail-match nested names such as
+// refs/heads/refs/heads/main; accepting the first row would therefore turn an
+// absent target into a destructive proof for an unrelated branch.
+func exactRemoteBranchAdvertisement(out, branch string) (string, bool, error) {
+	ref := "refs/heads/" + branch
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return "", false, nil
+	}
+	lines := strings.FieldsFunc(trimmed, func(r rune) bool { return r == '\n' || r == '\r' })
+	if len(lines) != 1 {
+		return "", false, fmt.Errorf("unexpected remote branch response %q", trimmed)
+	}
+	fields := strings.Fields(lines[0])
+	if len(fields) != 2 || fields[0] == "" || fields[1] != ref {
+		return "", false, fmt.Errorf("unexpected remote branch response %q", trimmed)
+	}
+	return fields[0], true, nil
+}
+
 func (w *Workflows) remoteBranchSHA(ctx context.Context, branch string) (string, bool, error) {
 	if err := w.ensureSafeRef(branch); err != nil {
 		return "", false, err
@@ -215,14 +236,7 @@ func (w *Workflows) remoteBranchSHA(ctx context.Context, branch string) (string,
 	if err != nil {
 		return "", false, err
 	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 {
-		return "", false, nil
-	}
-	if len(fields) < 2 {
-		return "", false, fmt.Errorf("unexpected remote branch response %q", strings.TrimSpace(out))
-	}
-	return fields[0], true, nil
+	return exactRemoteBranchAdvertisement(out, branch)
 }
 
 func (w *Workflows) preflightFinishTag(ctx context.Context, tag string, j *journal) error {

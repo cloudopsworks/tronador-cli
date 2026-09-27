@@ -259,15 +259,14 @@ func (w *Workflows) remoteParitySHA(ctx context.Context, branch string) (string,
 	if e != nil {
 		return "", fmt.Errorf("local branch %s is required for parity verification: %w", branch, e)
 	}
-	remote, e := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
+	remote, exists, e := w.remoteBranchSHA(ctx, branch)
 	if e != nil {
 		return "", e
 	}
-	fields := strings.Fields(remote)
-	if len(fields) == 0 || fields[0] != strings.TrimSpace(local) {
+	if !exists || remote != strings.TrimSpace(local) {
 		return "", fmt.Errorf("%s is not exactly published at HEAD; publish it before continuing", branch)
 	}
-	return fields[0], nil
+	return remote, nil
 }
 func (w *Workflows) branchExists(ctx context.Context, b string) bool {
 	_, e := w.git(ctx, "show-ref", "--verify", "--quiet", "refs/heads/"+b)
@@ -541,11 +540,11 @@ func (w *Workflows) deleteRemoteBranch(ctx context.Context, branch, expectedSHA 
 	if err := w.ensureSafeRef(branch); err != nil {
 		return err
 	}
-	out, err := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
+	_, exists, err := w.remoteBranchSHA(ctx, branch)
 	if err != nil {
 		return err
 	}
-	if len(strings.Fields(out)) == 0 {
+	if !exists {
 		return nil
 	}
 	if expectedSHA == "" {

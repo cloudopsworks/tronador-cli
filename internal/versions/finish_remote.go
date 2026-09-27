@@ -187,14 +187,14 @@ func (w *Workflows) verifyRemotePlanBeforePublish(ctx context.Context, j *journa
 
 func (w *Workflows) verifyFinishedRemoteReplay(ctx context.Context, j *journal, tag string) error {
 	for _, target := range j.RemoteTargets {
-		if _, err := w.git(ctx, "fetch", w.remote, "refs/heads/"+target.Name); err != nil {
-			return fmt.Errorf("fetch finished target %s after source deletion: %w", target.Name, err)
-		}
-		current, err := w.git(ctx, "rev-parse", "--verify", "FETCH_HEAD^{commit}")
+		current, exists, err := w.remoteBranchSHA(ctx, target.Name)
 		if err != nil {
-			return fmt.Errorf("resolve finished target %s after source deletion: %w", target.Name, err)
+			return fmt.Errorf("verify finished target %s after source deletion: %w", target.Name, err)
 		}
-		if _, err = w.git(ctx, "merge-base", "--is-ancestor", target.DesiredSHA, strings.TrimSpace(current)); err != nil {
+		if !exists {
+			return fmt.Errorf("finished target %s is absent after source deletion", target.Name)
+		}
+		if _, err = w.git(ctx, "merge-base", "--is-ancestor", target.DesiredSHA, current); err != nil {
 			return fmt.Errorf("finished target %s no longer contains planned result: %w", target.Name, err)
 		}
 	}

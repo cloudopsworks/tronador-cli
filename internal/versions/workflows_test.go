@@ -276,3 +276,48 @@ func TestPublishUsesQualifiedBranchRefspecs(t *testing.T) {
 		})
 	}
 }
+
+func TestExactRemoteBranchAdvertisementRejectsNestedAndAmbiguousResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		out    string
+		sha    string
+		exists bool
+		bad    bool
+	}{
+		{name: "absent", out: "", exists: false},
+		{name: "exact", out: "sha\trefs/heads/feature/a\n", sha: "sha", exists: true},
+		{name: "nested-tail-match", out: "sha\trefs/heads/refs/heads/feature/a\n", bad: true},
+		{name: "multiple", out: "one\trefs/heads/feature/a\ntwo\trefs/heads/refs/heads/feature/a\n", bad: true},
+		{name: "malformed", out: "sha\n", bad: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sha, exists, err := exactRemoteBranchAdvertisement(tc.out, "feature/a")
+			if tc.bad {
+				if err == nil {
+					t.Fatal("malformed remote advertisement was accepted")
+				}
+				return
+			}
+			if err != nil || sha != tc.sha || exists != tc.exists {
+				t.Fatalf("parse = sha=%q exists=%v err=%v; want sha=%q exists=%v", sha, exists, err, tc.sha, tc.exists)
+			}
+		})
+	}
+}
+
+func TestDeleteRemoteBranchRejectsNestedAdvertisementWithoutPush(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"): "sha\trefs/heads/refs/heads/feature/a\n",
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = w.deleteRemoteBranch(context.Background(), "feature/a", "sha"); err == nil {
+		t.Fatal("nested remote advertisement was accepted for branch deletion")
+	}
+	if f.sawPrefix("git", "push") {
+		t.Fatalf("branch deletion pushed after rejected advertisement: %#v", f.calls)
+	}
+}

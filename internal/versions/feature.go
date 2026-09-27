@@ -124,12 +124,10 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 	if _, err := w.git(ctx, "fetch", w.remote, "--prune"); err != nil {
 		return err
 	}
-	remoteOut, err := w.git(ctx, "ls-remote", w.remote, "refs/heads/"+branch)
+	_, remoteExists, err := w.remoteBranchSHA(ctx, branch)
 	if err != nil {
 		return err
 	}
-	remoteFields := strings.Fields(remoteOut)
-	remoteExists := len(remoteFields) > 0
 	localExists := w.branchExists(ctx, branch)
 	if remoteExists {
 		if !localExists {

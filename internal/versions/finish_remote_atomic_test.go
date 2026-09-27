@@ -609,3 +609,48 @@ func TestReleaseFinishRejectsNonCanonicalSourceIdentityAfterAcceptedAtomicTransa
 		})
 	}
 }
+
+// A ls-remote pattern can legally advertise refs/heads/refs/heads/<source>
+// when refs/heads/<source> is absent.  The production finish entrypoints must
+// reject that tail match at every cursor before deleting the local source or
+// journal.
+func TestFinishRejectsNestedRemoteSourceAdvertisementAtEveryLateCursor(t *testing.T) {
+	ctx := context.Background()
+	flows := []struct {
+		name    string
+		fixture func(*testing.T) *atomicFinishFixture
+		finish  func(*Workflows) error
+		op      string
+	}{
+		{name: "hotfix", fixture: newHotfixReplayFixture, finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }, op: "hotfix-finish"},
+		{name: "gitflow-release", fixture: newGitFlowReleaseReplayFixture, finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }, op: "release-finish"},
+	}
+	for _, flow := range flows {
+		for _, cursor := range []string{"publish", "delete-local", "terminal"} {
+			t.Run(flow.name+"/"+cursor, func(t *testing.T) {
+				f := flow.fixture(t)
+				if cursor != "publish" {
+					setLateFinishCursor(t, f, flow.op, cursor)
+				}
+				journalBefore, err := os.ReadFile(f.path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// The exact source was atomically deleted by the fixture. Publish a
+				// legal nested ref that git's pattern matching can return for the
+				// requested source suffix.
+				gitTest(t, f.repo, "push", "origin", f.j.SourceSHA+":refs/heads/refs/heads/"+f.source)
+				if err := flow.finish(f.w); err == nil || !strings.Contains(err.Error(), "unexpected remote branch response") {
+					t.Fatalf("nested remote source advertisement was accepted: %v", err)
+				}
+				journalAfter, err := os.ReadFile(f.path)
+				if err != nil || string(journalAfter) != string(journalBefore) {
+					t.Fatalf("journal changed after nested-advertisement rejection: err=%v before=%s after=%s", err, journalBefore, journalAfter)
+				}
+				if _, err := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); err != nil {
+					t.Fatalf("local source removed after nested-advertisement rejection: %v", err)
+				}
+			})
+		}
+	}
+}
