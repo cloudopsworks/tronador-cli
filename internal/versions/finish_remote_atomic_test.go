@@ -654,3 +654,54 @@ func TestFinishRejectsNestedRemoteSourceAdvertisementAtEveryLateCursor(t *testin
 		}
 	}
 }
+
+// After a server transaction, a retry at the publication, delete-local, or
+// terminal cursor must not let ls-remote's suffix matching turn a nested target
+// ref into proof that the exact completed target still exists. This models the
+// reproduced GitFlow develop collision directly and also covers Hotfix's main
+// target topology.
+func TestFinishRejectsNestedRemoteTargetAdvertisementAtEveryLateCursor(t *testing.T) {
+	ctx := context.Background()
+	flows := []struct {
+		name            string
+		fixture         func(*testing.T) *atomicFinishFixture
+		finish          func(*Workflows) error
+		op              string
+		wantExactParser bool
+	}{
+		{name: "hotfix-main", fixture: newHotfixReplayFixture, finish: func(w *Workflows) error { return w.HotfixFinish(ctx, "", true) }, op: "hotfix-finish"},
+		{name: "gitflow-release-develop", fixture: newGitFlowReleaseReplayFixture, finish: func(w *Workflows) error { return w.ReleaseFinish(ctx, "", true) }, op: "release-finish", wantExactParser: true},
+	}
+	for _, flow := range flows {
+		for _, cursor := range []string{"publish", "delete-local", "terminal"} {
+			t.Run(flow.name+"/"+cursor, func(t *testing.T) {
+				f := flow.fixture(t)
+				if cursor != "publish" {
+					setLateFinishCursor(t, f, flow.op, cursor)
+				}
+				target := f.j.RemoteTargets[len(f.j.RemoteTargets)-1]
+				journalBefore, err := os.ReadFile(f.path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				gitTest(t, f.repo, "push", "origin", ":refs/heads/"+target.Name)
+				gitTest(t, f.repo, "push", "origin", target.DesiredSHA+":refs/heads/refs/heads/"+target.Name)
+				if got := strings.TrimSpace(gitTest(t, filepath.Join(f.root, "remote.git"), "for-each-ref", "--format=%(refname)", "refs/heads/"+target.Name)); got != "" {
+					t.Fatalf("exact target %s remains after collision setup: %q", target.Name, got)
+				}
+				if err := flow.finish(f.w); err == nil {
+					t.Fatal("nested remote target advertisement was accepted")
+				} else if flow.wantExactParser && !strings.Contains(err.Error(), "unexpected remote branch response") {
+					t.Fatalf("nested remote target did not reach exact-advertisement guard: %v", err)
+				}
+				journalAfter, err := os.ReadFile(f.path)
+				if err != nil || string(journalAfter) != string(journalBefore) {
+					t.Fatalf("journal changed after nested-target rejection: err=%v before=%s after=%s", err, journalBefore, journalAfter)
+				}
+				if _, err := os.Stat(filepath.Join(f.repo, ".git", "refs", "heads", f.source)); err != nil {
+					t.Fatalf("local source removed after nested-target rejection: %v", err)
+				}
+			})
+		}
+	}
+}
