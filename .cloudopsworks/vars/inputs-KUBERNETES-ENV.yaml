@@ -6,7 +6,7 @@
 environment: "dev|uat|prod|demo"
 #runner_set: "RUNNER-ENV" # Optional: when using self-hosted runners
 #disable_deploy: true
-container_registry: REGISTRY
+container_registry: REGISTRY # Required for any Kubernetes deployment.
 cluster_name: CLUSTER_NAME
 namespace: NAMESPACE
 secret_files:
