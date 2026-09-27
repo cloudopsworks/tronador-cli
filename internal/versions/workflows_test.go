@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,6 +20,9 @@ type fakeRunner struct {
 }
 
 func key(n string, a ...string) string { return n + " " + strings.Join(a, " ") }
+func gitVersionKey(variable string) string {
+	return key("gitversion", "-config", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"), "-showvariable", variable)
+}
 func (f *fakeRunner) Run(_ context.Context, n string, a ...string) (string, error) {
 	f.calls = append(f.calls, call{n, append([]string(nil), a...)})
 	k := key(n, a...)
@@ -147,7 +151,7 @@ func TestHotfixAliasUsesExactCurrentBranch(t *testing.T) {
 	}
 }
 func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
-	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n", key("gitversion", "-showvariable", "SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
+	f := &fakeRunner{replies: map[string]string{key("git", "branch", "--show-current"): "feature/a\n", key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n", key("git", "ls-remote", "origin", "refs/heads/feature/a"): "abc\trefs/heads/feature/a\n", key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n", gitVersionKey("SemVer"): "1.2.3-alpha.1\n", key("git", "rev-parse", "--verify", "HEAD^{commit}"): "abc\n"}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.1+deploy-test^{commit}"): fmt.Errorf("missing")}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
 	tag, e := w.Tag(context.Background(), "test", true)
 	if e != nil {
@@ -161,6 +165,29 @@ func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
 	}
 	if !f.saw("git", "tag", "-a", tag, "HEAD", "-m", "chore: Version Tagging: "+tag) {
 		t.Fatalf("annotated tag was not created: %#v", f.calls)
+	}
+}
+
+func TestTagUsesRepositoryGitVersionConfig(t *testing.T) {
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                               "feature/a\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n",
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "abc\trefs/heads/feature/a\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
+		gitVersionKey("SemVer"):                                              "1.2.3-alpha.3\n",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "abc\n",
+	}, errs: map[string]error{
+		key("git", "rev-parse", "--verify", "refs/tags/v1.2.3-alpha.3^{commit}"): fmt.Errorf("missing"),
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.Tag(context.Background(), "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("gitversion", "-config", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"), "-showvariable", "SemVer") {
+		t.Fatalf("tag ignored repository GitVersion config: %#v", f.calls)
 	}
 }
 func TestSupportIsGitflowOnly(t *testing.T) {

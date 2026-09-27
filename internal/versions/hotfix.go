@@ -9,7 +9,7 @@ import (
 )
 
 func (w *Workflows) CurrentVersion(ctx context.Context) (string, error) {
-	o, e := w.run.Run(ctx, "gitversion", "-showvariable", "MajorMinorPatch")
+	o, e := w.gitVersion(ctx, "MajorMinorPatch")
 	if e != nil {
 		return "", e
 	}

@@ -23,7 +23,7 @@ func TestReleaseStartUsesWorkflowSpecificBase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				key("gitversion", "-showvariable", "MajorMinorPatch"):               "1.2.3\n",
+				gitVersionKey("MajorMinorPatch"):                                    "1.2.3\n",
 				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):   "refs/remotes/origin/main\n",
 				key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): "abc\trefs/heads/main\n",
 			}}
@@ -49,7 +49,7 @@ func TestTagExistingAnnotatedTagIsIdempotentlyPublished(t *testing.T) {
 		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "abc\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "abc\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
-		key("gitversion", "-showvariable", "SemVer"):                         "1.2.3-alpha.1\n",
+		gitVersionKey("SemVer"):                                              "1.2.3-alpha.1\n",
 		key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"):    "abc\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{Runner: f})
@@ -160,7 +160,7 @@ func TestTagPublishUsesExplicitTagRefspec(t *testing.T) {
 		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "abc\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "abc\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
-		key("gitversion", "-showvariable", "SemVer"):                         "1.2.3-alpha.1\n",
+		gitVersionKey("SemVer"):                                              "1.2.3-alpha.1\n",
 		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "abc\n",
 	}, errs: map[string]error{key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"): fmt.Errorf("missing")}}
 	w, _ := NewWorkflows(WorkflowOptions{Runner: f})
@@ -1012,7 +1012,7 @@ func TestTagRejectsExistingTagOnWrongCommit(t *testing.T) {
 		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "source\n",
 		key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "source\trefs/heads/feature/a\n",
 		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
-		key("gitversion", "-showvariable", "SemVer"):                         "1.2.3-alpha.1\n",
+		gitVersionKey("SemVer"):                                              "1.2.3-alpha.1\n",
 		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "expected\n",
 		key("git", "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}"):    "wrong\n",
 	}}
@@ -1434,7 +1434,7 @@ func TestHotfixStartSynchronizesSelectedSupportBeforeDerivingVersion(t *testing.
 		key("git", "branch", "--show-current"):                                             "support/v1.2.0\n",
 		key("git", "rev-parse", "--verify", "refs/heads/support/v1.2.0^{commit}"):          "support-head\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/support/v1.2.0^{commit}"): "support-head\n",
-		key("gitversion", "-showvariable", "MajorMinorPatch"):                              "1.2.3\n",
+		gitVersionKey("MajorMinorPatch"):                                                   "1.2.3\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
 	if err != nil {
@@ -1458,7 +1458,7 @@ func TestHotfixStartSynchronizesSelectedSupportBeforeDerivingVersion(t *testing.
 			pull = i
 		case "git rev-parse --verify refs/remotes/origin/support/v1.2.0^{commit}":
 			remoteParity = i
-		case "gitversion -showvariable MajorMinorPatch":
+		case gitVersionKey("MajorMinorPatch"):
 			gitversion = i
 		}
 	}
@@ -1675,7 +1675,7 @@ func TestHotfixStartWithoutVersionUsesSynchronizedMainOutsideSupport(t *testing.
 		key("git", "branch", "--show-current"):                                   "feature/unrelated\n",
 		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):          "main-head\n",
 		key("git", "rev-parse", "--verify", "refs/remotes/origin/main^{commit}"): "main-head\n",
-		key("gitversion", "-showvariable", "MajorMinorPatch"):                    "1.2.3\n",
+		gitVersionKey("MajorMinorPatch"):                                         "1.2.3\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "main", Runner: f})
 	if err != nil {

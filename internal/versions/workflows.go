@@ -44,6 +44,11 @@ type Workflows struct {
 	run                    CommandRunner
 }
 
+func (w *Workflows) gitVersion(ctx context.Context, variable string) (string, error) {
+	config := filepath.Join(cloudOpsWorksDir, "gitversion.yaml")
+	return w.run.Run(ctx, "gitversion", "-config", config, "-showvariable", variable)
+}
+
 func NewWorkflows(o WorkflowOptions) (*Workflows, error) {
 	if o.Dir == "" {
 		o.Dir = "."

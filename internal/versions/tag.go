@@ -24,7 +24,7 @@ func (w *Workflows) Tag(ctx context.Context, qualifier string, publish bool) (st
 	if branch == main {
 		variable = "MajorMinorPatch"
 	}
-	o, e := w.run.Run(ctx, "gitversion", "-showvariable", variable)
+	o, e := w.gitVersion(ctx, variable)
 	if e != nil {
 		return "", e
 	}

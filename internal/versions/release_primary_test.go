@@ -21,7 +21,7 @@ func TestGitFlowReleaseStartRejectsMissingLiveConfiguredPrimaryBeforeMutation(t 
 	for _, mutation := range [][]string{
 		{"git", "fetch", "origin", "--prune"},
 		{"git", "checkout"},
-		{"gitversion", "-showvariable", "MajorMinorPatch"},
+		{"gitversion"},
 	} {
 		if f.sawPrefix(mutation...) {
 			t.Fatalf("ReleaseStart continued after missing configured primary: %#v", f.calls)
@@ -50,7 +50,7 @@ func TestGitFlowReleaseStartPropagatesLiveConfiguredPrimaryProbeFailure(t *testi
 func TestGitFlowReleaseStartAcceptsExactLiveConfiguredPrimaryAndUsesDevelop(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "ls-remote", "origin", "refs/heads/primary"): "abc\trefs/heads/primary\n",
-		key("gitversion", "-showvariable", "MajorMinorPatch"):   "1.2.3\n",
+		gitVersionKey("MajorMinorPatch"):                        "1.2.3\n",
 	}}
 	w, err := NewWorkflows(WorkflowOptions{WayOfWork: "gitflow", MainBranch: "primary", Runner: f})
 	if err != nil {
