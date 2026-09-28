@@ -104,6 +104,13 @@ as well as applicable `vars/`, `vars/helm/`, `vars/apigw/`, and `vars/preview/`
 YAML. Target YAML supplies the baseline, retaining its active structure, comments,
 and defaults; active repository values overlay it recursively.
 
+For v5.10+ targets of the `terraform-module` and `terragrunt` templates, the
+target `.cloudopsworks/gitversion.yaml` is authoritative and replaces the
+implementation file's exact content without merging values. Those templates own
+versioning policy, so consumer-side changes to that file are not retained; the
+existing implementation file permissions are preserved. Other template types
+continue to merge GitVersion configuration using the value-aware rules above.
+
 Only a template's explicitly configured opaque boilerplate subtree is
 byte-for-byte exact-refreshed. Root policy YAML is not opaque boilerplate and is
 therefore value-aware merged.

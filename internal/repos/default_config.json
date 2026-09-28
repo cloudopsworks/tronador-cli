@@ -125,6 +125,7 @@
       "boilerplatePathPre510": ".cloudopsworks",
       "boilerplatePathV510Plus": ".cloudopsworks/boilerplate",
       "agentsOverride": true,
+      "gitVersionAuthoritative": true,
       "migration": "terragrunt/510"
     },
     {
@@ -139,6 +140,7 @@
       "boilerplatePathPre510": ".cloudopsworks",
       "boilerplatePathV510Plus": ".cloudopsworks/boilerplate",
       "agentsOverride": true,
+      "gitVersionAuthoritative": true,
       "migration": "terraform/510"
     }
   ],

@@ -32,10 +32,14 @@ type cloudOpsworksConfigPlan struct {
 }
 
 func (r *Runner) buildCloudOpsworksConfigPlan(state RepositoryState) (cloudOpsworksConfigPlan, error) {
-	return r.buildCloudOpsworksConfigPlanExcluding(state, "")
+	return r.buildCloudOpsworksConfigPlanForTemplate(state, "", Template{})
 }
 
 func (r *Runner) buildCloudOpsworksConfigPlanExcluding(state RepositoryState, excludedSubtree string) (cloudOpsworksConfigPlan, error) {
+	return r.buildCloudOpsworksConfigPlanForTemplate(state, excludedSubtree, Template{})
+}
+
+func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, excludedSubtree string, template Template) (cloudOpsworksConfigPlan, error) {
 	templateBase := r.templatePath()
 	templateRoot := filepath.Join(templateBase, ".cloudopsworks")
 	if !exists(templateRoot) {
@@ -120,6 +124,14 @@ func (r *Runner) buildCloudOpsworksConfigPlanExcluding(state RepositoryState, ex
 			continue
 		}
 		target := templates[targetName]
+		if localName == "gitversion.yaml" && template.GitVersionAuthoritative {
+			// These reusable Terraform templates define the repository's versioning
+			// policy. Unlike app-template values, consumer overrides must not survive
+			// an upgrade: use the target file's exact content without merging values.
+			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, mode: target.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
+			usedTargets[targetName] = true
+			continue
+		}
 		if !hasActiveYAMLNode(local.node) {
 			if hasYAMLComment(local.data) {
 				warnConfig(r, localName, "comment-only")

@@ -45,6 +45,53 @@ func TestUpgradeCloudOpsworksConfigPreservesValuesAndAddsTargetStructure(t *test
 	assertContainsAll(t, out.String(), "inputs-dev.yaml", "legacy_flag")
 }
 
+func TestTerraformTemplatesReplaceGitVersionConfigAuthoritatively(t *testing.T) {
+	for _, templateName := range []string{"terraform-module", "terragrunt"} {
+		for _, pre510 := range []bool{false, true} {
+			name := fmt.Sprintf("%s/pre510=%t", templateName, pre510)
+			t.Run(name, func(t *testing.T) {
+				dir, runner, _ := configUpgradeRunner(t, false)
+				blueprintPath, versionPath, currentVersion := ".cloudopsworks", ".cloudopsworks/_VERSION", "v5.10.1"
+				gitVersionPath := ".cloudopsworks/gitversion.yaml"
+				if pre510 {
+					blueprintPath, versionPath, currentVersion = ".github", ".github/_VERSION", "v5.9.8"
+					gitVersionPath = ".github/gitversion.yaml"
+				}
+				writeConfigFixture(t, dir, gitVersionPath, "# consumer customization\nmode: ContinuousDeployment\nnext-version: 99.0.0\n")
+				mustWrite(t, filepath.Join(dir, filepath.FromSlash(versionPath)), currentVersion+"\n")
+				want := "# template policy\nmode: Mainline\nnext-version: 5.10.0\n"
+				writeConfigFixture(t, dir, ".template/.cloudopsworks/gitversion.yaml", want)
+				mustWrite(t, filepath.Join(dir, ".template/.cloudopsworks/_VERSION"), "v5.10.2\n")
+				template, ok := runner.Config.FindTemplate(templateName)
+				if !ok || !template.GitVersionAuthoritative {
+					t.Fatalf("default catalog template %q does not declare authoritative GitVersion ownership", templateName)
+				}
+				state := RepositoryState{WorkDir: dir, BlueprintPath: blueprintPath, VersionFile: versionPath, Pre510: pre510, Version: currentVersion}
+				if err := runner.applyVersionedTemplate(template, state, "v5.10.2"); err != nil {
+					t.Fatalf("applyVersionedTemplate() error = %v", err)
+				}
+				if got := mustRead(t, filepath.Join(dir, ".cloudopsworks/gitversion.yaml")); got != want {
+					t.Fatalf("GitVersion config = %q, want authoritative template file %q", got, want)
+				}
+				if pre510 && exists(filepath.Join(dir, ".github/gitversion.yaml")) {
+					t.Fatal("legacy GitVersion configuration was not removed after migration")
+				}
+			})
+		}
+	}
+}
+
+func TestOtherTemplatesContinueMergingGitVersionConfig(t *testing.T) {
+	dir, runner, _ := configUpgradeRunner(t, false)
+	writeConfigFixture(t, dir, ".cloudopsworks/gitversion.yaml", "mode: ContinuousDeployment\n")
+	want := "# target GitVersion\nmode: Mainline\nnext-version: 5.10.0\n"
+	writeConfigFixture(t, dir, ".template/.cloudopsworks/gitversion.yaml", want)
+	if err := runner.upgradeCloudOpsworksConfig(RepositoryState{WorkDir: dir, BlueprintPath: ".cloudopsworks"}); err != nil {
+		t.Fatalf("upgradeCloudOpsworksConfig() error = %v", err)
+	}
+	assertContainsAll(t, mustRead(t, filepath.Join(dir, ".cloudopsworks/gitversion.yaml")), "# target GitVersion", "mode: ContinuousDeployment", "next-version: 5.10.0")
+}
+
 func TestUpgradeCloudOpsworksConfigMapsKubernetesCustomEnvironmentSubdirectories(t *testing.T) {
 	dir, runner, _ := configUpgradeRunner(t, false)
 	writeConfigFixture(t, dir, ".cloudopsworks/vars/inputs-global.yaml", "cloud: aws\ncloud_type: eks\n")

@@ -544,7 +544,7 @@ func (r *Runner) Stack(ctx context.Context, opts StackOptions) (err error) {
 		if _, sourceErr := r.regularLeaves(r.templatePath(".cloudopsworks")); sourceErr != nil {
 			return sourceErr
 		}
-		configPlan, err = r.buildCloudOpsworksConfigPlanExcluding(opts.State, opts.Template.BoilerplatePathV510Plus)
+		configPlan, err = r.buildCloudOpsworksConfigPlanForTemplate(opts.State, opts.Template.BoilerplatePathV510Plus, opts.Template)
 		if err != nil {
 			return err
 		}
@@ -1502,7 +1502,7 @@ func treeFiles(root string) ([]string, error) {
 }
 
 func (r *Runner) applyVersionedTemplate(tmpl Template, state RepositoryState, templateVersion string) error {
-	plan, err := r.buildCloudOpsworksConfigPlan(state)
+	plan, err := r.buildCloudOpsworksConfigPlanForTemplate(state, "", tmpl)
 	if err != nil {
 		return err
 	}

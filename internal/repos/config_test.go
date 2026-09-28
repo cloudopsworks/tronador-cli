@@ -47,6 +47,13 @@ func TestTerraformModuleTemplateConfigMatchesMakefileVersionedBehavior(t *testin
 	if !tmpl.Boilerplate {
 		t.Fatalf("terraform-module template must keep boilerplate handling enabled")
 	}
+	if !tmpl.GitVersionAuthoritative {
+		t.Fatalf("terraform-module template must own its GitVersion configuration")
+	}
+	terragrunt, ok := cfg.FindTemplate("terragrunt")
+	if !ok || !terragrunt.GitVersionAuthoritative {
+		t.Fatalf("terragrunt template must own its GitVersion configuration")
+	}
 }
 
 func TestArgoCDTemplateConfigSupportsWorkInProgressRepository(t *testing.T) {

@@ -38,6 +38,7 @@ type Template struct {
 	BoilerplatePathPre510   string `json:"boilerplatePathPre510"`
 	BoilerplatePathV510Plus string `json:"boilerplatePathV510Plus"`
 	AgentsOverride          bool   `json:"agentsOverride"`
+	GitVersionAuthoritative bool   `json:"gitVersionAuthoritative"`
 	Migration               string `json:"migration"`
 }
 
