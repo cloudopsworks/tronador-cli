@@ -1009,10 +1009,10 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 	return result, nil
 }
 
-// legacyBlueprintMarkerPath accepts only repositories identified by the
-// repository-template catalog. A project implementation marker alone is not
-// sufficient: _VERSION controls blueprint upgrades and must not be created in
-// arbitrary repositories.
+// legacyBlueprintMarkerPath accepts versioned repository-template catalog
+// markers and the private base blueprint marker. A project implementation
+// marker alone is not sufficient: _VERSION controls blueprint upgrades and
+// must not be created in arbitrary repositories.
 type catalogMarkerTarget struct {
 	path      string
 	marker    string
@@ -1104,6 +1104,12 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 		mode     os.FileMode
 	}
 	var candidates []markerCandidate
+	// The base blueprint repository is not a pullable template, so keep this
+	// marker local to guarded version generation instead of the public catalog.
+	markerTemplates := append([]repospkg.Template(nil), catalog.Templates...)
+	markerTemplates = append(markerTemplates, repospkg.Template{
+		Name: "blueprint", Description: "Base blueprint repository", Marker: ".blueprint", Versioned: true,
+	})
 	closeCandidates := func() {
 		for _, candidate := range candidates {
 			_ = closeProjectMarkerRoot(candidate.root.root)
@@ -1132,7 +1138,7 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 				}
 			}()
 			var active []repospkg.Template
-			for _, template := range catalog.Templates {
+			for _, template := range markerTemplates {
 				markerInfo, markerStatErr := layout.root.Lstat(template.Marker)
 				if errors.Is(markerStatErr, os.ErrNotExist) {
 					continue

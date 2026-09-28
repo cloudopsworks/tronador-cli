@@ -1564,6 +1564,59 @@ func TestVersionGenerateSupportsEveryVersionedCatalogMarker(t *testing.T) {
 	}
 }
 
+func TestVersionGenerateSupportsBaseBlueprintMarkerWithoutCatalogEntry(t *testing.T) {
+	for _, layout := range []string{".cloudopsworks", ".github"} {
+		t.Run(layout, func(t *testing.T) {
+			workdir := t.TempDir()
+			markerDir := filepath.Join(workdir, layout)
+			if err := os.MkdirAll(markerDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(markerDir, ".blueprint"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DefaultRegistry().Detect(workdir); codeOf(err) != "project_implementation_unknown" {
+				t.Fatalf("base marker unexpectedly exposed as a project profile: %v", err)
+			}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, Generate: true, Yes: true, NoInstallTools: true,
+				ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")},
+				ExecuteTool: func(context.Context, ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"MajorMinorPatch":"5.10.3"}`}, nil
+				},
+			})
+			detection, plan, err := runner.Plan("version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if detection.ProfileID != "blueprint" || detection.Marker != filepath.ToSlash(filepath.Join(layout, ".blueprint")) || plan.Operation != "generate-version" {
+				t.Fatalf("generate plan = detection %+v plan %+v", detection, plan)
+			}
+			result, err := runner.Run(context.Background(), "version", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			markerPath := filepath.ToSlash(filepath.Join(layout, "_VERSION"))
+			if result.Version != "v5.10.3" || result.TagCreated || len(result.GeneratedArtifacts) != 1 || result.GeneratedArtifacts[0] != markerPath {
+				t.Fatalf("generate result = %+v", result)
+			}
+			if got := string(mustRead(t, filepath.Join(markerDir, "_VERSION"))); got != "v5.10.3\n" {
+				t.Fatalf("generated marker = %q", got)
+			}
+		})
+	}
+}
+
+func TestVersionGenerateBaseBlueprintMarkerRejectsAmbiguousLayout(t *testing.T) {
+	workdir := fixture(t, ".blueprint")
+	if err := os.WriteFile(filepath.Join(workdir, ".cloudopsworks", ".golang"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacyBlueprintMarkerPath(workdir); codeOf(err) != "project_version_marker_unsupported" {
+		t.Fatalf("ambiguous marker error = %v, code = %q", err, codeOf(err))
+	}
+}
+
 func TestVersionGenerateChecksCatalogEligibilityBeforeConfirmation(t *testing.T) {
 	ineligible := fixture(t, ".fluttermobile")
 	if _, err := mustRunner(t, Options{WorkDir: ineligible, Generate: true}).Run(context.Background(), "version", nil); codeOf(err) != "project_version_marker_unsupported" {
