@@ -123,13 +123,13 @@ func TestVersionsWorkflowCommandGrammar(t *testing.T) {
 	}
 }
 
-func TestVersionsReleaseStartRequiresExactlyOneBumpFlag(t *testing.T) {
+func TestVersionsReleaseStartDefaultsToMinorAndAllowsOneBumpFlag(t *testing.T) {
 	for _, test := range []struct {
 		patch, minor, major bool
 		want                string
 		valid               bool
 	}{
-		{patch: true, want: "patch", valid: true}, {minor: true, want: "minor", valid: true}, {major: true, want: "major", valid: true}, {}, {patch: true, minor: true},
+		{patch: true, want: "patch", valid: true}, {minor: true, want: "minor", valid: true}, {major: true, want: "major", valid: true}, {want: "minor", valid: true}, {patch: true, minor: true},
 	} {
 		got, err := releaseBumpKind(test.patch, test.minor, test.major)
 		if test.valid && (err != nil || got != test.want) {
@@ -162,6 +162,22 @@ func TestVersionsHelpDocumentsRepositorySensitiveCapabilities(t *testing.T) {
 				t.Fatalf("help for %s missing %q:\n%s", test.command.Name(), want, output.String())
 			}
 		}
+	}
+}
+
+func TestVersionsReleaseStartHelpDocumentsMinorDefault(t *testing.T) {
+	release := newVersionsReleaseCommand()
+	start, _, err := release.Find([]string{"start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	start.SetOut(&output)
+	if err := start.Help(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "defaults to --minor") {
+		t.Fatalf("release start help omits default bump:\n%s", output.String())
 	}
 }
 

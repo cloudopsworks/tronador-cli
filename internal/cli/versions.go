@@ -232,7 +232,7 @@ breadcrumbs for local merge/tag work, then atomically publishes every required
 target, the tag, and source deletion.`,
 	}
 	var patch, minor, major bool
-	start := versionsAction("start", "Start a release branch", "Start release/vX.Y.Z. Exactly one of --patch, --minor, or --major is required.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
+	start := versionsAction("start", "Start a release branch", "Start release/vX.Y.Z; defaults to --minor when no bump flag is provided.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
 		kind, err := releaseBumpKind(patch, minor, major)
 		if err != nil {
 			return err
@@ -287,7 +287,12 @@ func newVersionsTagCommand() *cobra.Command {
 		Long: `Create the tag calculated by GitVersion. On main it uses MajorMinorPatch;
 on another branch it uses SemVer. The optional qualifier is compatible with the
 legacy gitflow version tag target and becomes +deploy-<qualifier>. --publish
-pushes the created tag, or pushes the existing compatible tag when present.`,
+pushes a unique unpushed version tag already on HEAD when present (or does
+nothing if the selected tag is already published), otherwise publishes the
+calculated tag. When several qualifier tags exist, one unpushed tag is preferred;
+multiple unpushed candidates are rejected unless a qualifier selects one.
+different semantic versions (including different prereleases) on one commit
+are rejected; only deployment-qualified aliases of the same version are allowed.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
@@ -339,8 +344,11 @@ func releaseBumpKind(patch, minor, major bool) (string, error) {
 	if major {
 		count++
 	}
-	if count != 1 {
-		return "", fmt.Errorf("exactly one of --patch, --minor, or --major is required")
+	if count > 1 {
+		return "", fmt.Errorf("at most one of --patch, --minor, or --major may be provided")
+	}
+	if count == 0 {
+		return "minor", nil
 	}
 	if patch {
 		return "patch", nil

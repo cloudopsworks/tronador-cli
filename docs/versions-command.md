@@ -142,6 +142,7 @@ target the primary branch.
 ## Release branches
 
 ```bash
+tronador versions release start
 tronador versions release start --patch
 tronador versions release start --minor
 tronador versions release start --major
@@ -151,8 +152,10 @@ tronador versions release finish --local
 tronador versions release purge [version]
 ```
 
-`start` calculates the next GitVersion `MajorMinorPatch` and creates
-`release/vX.Y.Z`. Its base is `develop` in GitFlow and the primary branch in
+`start` defaults to a minor bump and calculates the next GitVersion
+`MajorMinorPatch` before creating `release/vX.Y.Z`. Pass one of `--patch`,
+`--minor`, or `--major` to select a different bump; combining multiple bump
+flags is an error. Its base is `develop` in GitFlow and the primary branch in
 GitHub Flow or trunk-based repositories. `publish` and `purge` infer the
 release version from the current `release/*` branch when omitted. `finish`
 operates on the current release branch.
@@ -225,11 +228,23 @@ the value to a `v`-prefixed annotated tag. An optional `<qualifier>` appends
 `v1.2.3-alpha.1+deploy-test`). This qualifier is deployment metadata, not a
 new semantic version.
 
-`--publish` pushes the exact tag to `origin` in the same invocation. Repeating
-a tag that already exists does not recreate it only when that tag resolves to
-the expected commit; a same-named tag pointing elsewhere is rejected.
-`--publish` can therefore push an existing compatible local tag. Tagging has
-the same exact remote-parity guard as a finish.
+`--publish` pushes the exact tag to `origin` in the same invocation. Before
+calculating a new version, it looks for a unique local SemVer tag already
+pointing at `HEAD` and publishes it if it is not yet on `origin`; if it is
+already published, the command is an idempotent no-op. This also checks the
+remote's advertised target before creating a tag, so a remote-only tag in a
+clone without fetched tags is not recreated with a conflicting annotated-tag
+object. This avoids silently calculating and creating the next version after
+`tag` has already tagged the commit locally. If multiple local version tags
+point at `HEAD`, one unpushed tag is preferred; multiple unpushed candidates
+fail rather than guessing (a supplied deployment qualifier can disambiguate).
+A same-named local or remote tag that points elsewhere is rejected before
+local mutation.
+One commit may have multiple deployment-qualified aliases of the same version
+(for example, `v1.2.3+deploy-test` and `v1.2.3+deploy-prod`). Prerelease
+identifiers are part of the version: `v1.2.3-beta.3` and `v1.2.3-beta.4` are
+different versions and cannot both tag one commit. Tagging has the same exact
+remote-parity guard as a finish.
 
 ## Related project-version marker generation
 
