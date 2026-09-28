@@ -20,7 +20,7 @@ func TestProjectCommandExposesNamespaceFreeGrammar(t *testing.T) {
 		t.Fatalf("project command is missing shared flags")
 	}
 	versionCmd, _, err := rootCmd.Find([]string{"project", "version"})
-	if err != nil || versionCmd == nil || versionCmd.Name() != "version" || versionCmd.Flag("snapshot") == nil || versionCmd.Flag("plain") == nil {
+	if err != nil || versionCmd == nil || versionCmd.Name() != "version" || versionCmd.Flag("snapshot") == nil || versionCmd.Flag("plain") == nil || versionCmd.Flag("generate") == nil {
 		t.Fatalf("project version command is missing version flags: cmd=%v err=%v", versionCmd, err)
 	}
 	if cmd.SilenceUsage != true || cmd.SilenceErrors != true {
@@ -70,6 +70,17 @@ func TestProjectPlainIsLimitedToVersion(t *testing.T) {
 	}
 }
 
+func TestProjectGenerateIsLimitedToVersion(t *testing.T) {
+	if err := validateGenerateCapability("version", true); err != nil {
+		t.Fatalf("version generate validation = %v", err)
+	}
+	for _, capability := range []string{"detect", "capabilities", "init"} {
+		if err := validateGenerateCapability(capability, true); err == nil {
+			t.Fatalf("%s unexpectedly accepted --generate", capability)
+		}
+	}
+}
+
 func TestProjectVersionHelpDocumentsOnlyVersionOptions(t *testing.T) {
 	var output bytes.Buffer
 	projectVersionCmd.SetOut(&output)
@@ -78,12 +89,12 @@ func TestProjectVersionHelpDocumentsOnlyVersionOptions(t *testing.T) {
 		t.Fatalf("version help: %v", err)
 	}
 	help := output.String()
-	for _, want := range []string{"Generate and write the detected project's version.", "--plain", "Node and Python projects", "--snapshot", "Java", "MajorMinorPatch", "dry-run"} {
+	for _, want := range []string{"Generate and write the detected project's version.", "--plain", "Node and Python projects", "--snapshot", "Java", "--generate", "--yes", "template-derived", "MajorMinorPatch", "dry-run"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("version help missing %q:\n%s", want, help)
 		}
 	}
-	for _, unwanted := range []string{"--engine", "--yes"} {
+	for _, unwanted := range []string{"--engine"} {
 		if strings.Contains(help, unwanted) {
 			t.Fatalf("version help includes unrelated %q:\n%s", unwanted, help)
 		}

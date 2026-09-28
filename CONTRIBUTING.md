@@ -16,7 +16,7 @@
 
 **Requirements**
 
-- Go 1.26.3 or later (matches `go.mod` toolchain target)
+- Go 1.26.5 or later (matches `go.mod` toolchain target)
 - `make` / `gmake`
 - AWS credentials with appropriate permissions for `aws` subcommands
 - `gh` CLI authenticated via `GH_TOKEN`, `GITHUB_TOKEN`, or `gh auth login` for `repos` subcommands

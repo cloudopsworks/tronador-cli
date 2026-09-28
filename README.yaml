@@ -30,7 +30,7 @@ introduction: |-
   - **Repository template lifecycle**: Run the Tronador `make repos/*` workflow from the CLI with `tronador repos`, including template detection, latest-tag upgrades, explicit version upgrades, recovery, migration, CICD metadata updates, and push helpers.
   - **README and docs generation**: Port Tronador `readme/*` and `docs/*` Makefile targets into the CLI with `tronador readme` and `tronador docs`, including GitHub-backed runtime template asset sync.
   - **Implicit project capabilities**: Detect implementation markers and run namespace-free `init`, `version`, `lint`, `format`, and cleanup capabilities through CLI-native typed pipelines with `tronador project`.
-  - **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [project capabilities](docs/project-command.md), [repository lifecycle commands](docs/repos-command.md), and [README/docs commands](docs/readme-docs-command.md).
+  - **Command documentation**: Public command surfaces are documented in [docs/commands.md](docs/commands.md), with dedicated guides for [AWS automation](docs/aws-command.md), [IaC module checks](docs/iac-command.md), [project capabilities](docs/project-command.md), [repository lifecycle commands](docs/repos-command.md), [branching and GitVersion workflows](docs/versions-command.md), and [README/docs commands](docs/readme-docs-command.md).
   - **Config-driven upgrade paths**: Repository templates and migration plans are loaded from JSON, so future upgrade paths such as `5.11` and `5.12` can be added without rewriting command dispatch code.
   - **Release packages**: GoReleaser publishes archives plus native Linux packages (`.deb`, `.rpm`, `.apk`), Homebrew casks, Chocolatey packages, and shell/PowerShell installers from the same release pipeline; release package names remain `tronador-cli` while the executable is `tronador`.
   - **Cross-platform support**: Linux, macOS, Windows, and FreeBSD builds are produced from a static `CGO_ENABLED=0` binary.
@@ -45,6 +45,7 @@ usage: |-
   - [IaC command](docs/iac-command.md) — `.cloudopsworks/.iac`-guarded module source version checks and updates.
   - [Project command](docs/project-command.md) — detection-driven, namespace-free capabilities and typed tool pipelines.
   - [Repos command](docs/repos-command.md) — repository template lifecycle workflows.
+  - [Versions command](docs/versions-command.md) — branching workflows, GitVersion configuration, and guarded tags.
   - [README/docs command](docs/readme-docs-command.md) — generated README files, Make target docs, Terraform docs, copyright headers, and runtime template assets.
 
   ### Binary Names
@@ -85,16 +86,41 @@ usage: |-
   - `repos clean`, `repos clean template`, and `repos template clean` — clean generated or temporary template files.
   - `repos upgrade [version]` — run the full template upgrade workflow; `[version]` is optional.
   - `repos recover` — overlay template files without committing.
-  - `repos push` — stage and commit template upgrade results.
+  - `repos push` — commit the changes already staged by the caller.
   - `repos cicd update` — update the workflow-version metadata footer.
 
   `repos upgrade` preserves implementation-owned GitHub templates: issue templates
   including `config.yml` and `.github/PULL_REQUEST_TEMPLATE.md` are copied only
   when missing; `.github/dependabot.yml` is copied only when the template has it
   and the implementation repository does not; reserved `98_*` and `99_*`
-  template-only issue forms are never propagated. Existing `auto-assign.yml`
-  configuration is preserved. The template `.gitignore` content is managed in a
-  marker-delimited block while user content outside the block is preserved; an
+  template-only issue forms are never propagated. Target generation is detected
+  from active CloudOps workflow blueprint references (not application `_VERSION`);
+  missing or mixed references stop the upgrade. For v5.10 targets, all
+  `.cloudopsworks` configuration YAML uses the template as a documented/default
+  baseline while retaining active repository values. This includes root policy YAML
+  such as `cloudopsworks-ci.yaml`, labeler, GitVersion, and auto-assignment
+  configuration, plus applicable `vars`, Helm, API-gateway, and preview
+  configuration; local-only YAML paths are preserved with warnings. Only an
+  explicitly configured opaque boilerplate subtree is byte-for-byte
+  exact-refreshed; root policy YAML is value-aware merged, not treated as opaque.
+  Input scaffold selection first treats any local `# Agents:` declarations as
+  authoritative. Declarations may use `|` alternatives for `cloud` or `cloud_type`;
+  every declared combination must resolve to exactly one same template baseline.
+  Otherwise, the file is preserved with a warning and Tronador does not fall back
+  to an exact filename, mobile, or global selection. Without local Agents metadata,
+  it prefers an exact relative filename, then one active Android/XCode/Flutter
+  mobile family, and finally
+  `cloud`/`cloud_type` from `vars/inputs-global.yaml` (including Kubernetes,
+  Lambda, Beanstalk, App Engine, Cloud Run, and library targets).
+  Exact or custom `dev`/`uat`/`prod` files retain their local names; missing or
+  ambiguous baselines preserve the local file with a warning. Unsafe duplicate,
+  alias/anchor, or multi-document YAML stops
+  the upgrade before `_VERSION` changes; `--dry-run` reports the plan without
+  mutation. v5.9-layout upgrades migrate and merge only target-matching legacy
+  root CloudOps YAML (including auto-assignment); arbitrary GitHub operational YAML
+  is not migrated as configuration. Targets that remain pre-v5.10 copy
+  auto-assign files only when missing. The template `.gitignore` content is managed
+  in a marker-delimited block while user content outside the block is preserved; an
   unmarked or malformed file is treated as user-owned and receives a fresh managed
   block.
 
@@ -107,10 +133,23 @@ usage: |-
 
   `tronador project` detects a supported implementation from `.cloudopsworks/`
   and runs namespace-free capabilities such as `init`, `version`, `lint`, and
-  `format` through CLI-native typed tool pipelines. See
+  `format` through CLI-native typed tool pipelines. `project version --generate --yes` is reserved for catalog-managed, versioned template-derived repositories: it updates the legacy blueprint `_VERSION` marker, warns on replacement, and never tags, commits, or pushes. See
   [docs/project-command.md](docs/project-command.md) for detection, tool flags,
   and safety behavior.
 
+
+  ### Repository Branching and GitVersion Workflows
+
+  `tronador versions` configures GitFlow, GitHub Flow, or trunk-based GitVersion behavior and runs guarded feature, hotfix, release, support, and tag workflows. `gitflow`, `gf`, `githubflow`, and `flow` are aliases for the same command tree.
+
+  - `versions init --gitflow|--githubflow|--trunkbased` — install a checked-in GitVersion workflow; an unset workflow can be selected interactively when CI explicitly disables GitFlow. GitFlow alone creates and publishes `develop`.
+  - `versions feature` — start, publish, finish, or purge feature branches; publish, finish, and purge infer a missing name from the current feature branch.
+  - `versions hotfix` — start the next patch, publish or finish the current hotfix, or purge a named/current hotfix.
+  - `versions release` — start a patch, minor, or major release; publish or purge a named/current release, or finish the current release.
+  - `versions support` — manage persistent maintenance branches in GitFlow only.
+  - `versions tag [qualifier] --publish` — create the legacy GitVersion tag and optionally push it.
+
+  Finishes and tags require the named local branch to exactly match its `origin` branch. `--main-branch` must name a safe branch available at `origin`; `--dry-run` is mutation-free for all workflow actions. Purges prove the branch is merged before safe deletion. Local hotfix/release finishes use a schema-v4 journal: after local merge/tag work, they publish every required target, the exact annotated tag, and source deletion in one lease-protected atomic server push. Unsupported atomic remotes and prepublished/no-op state fail closed with the journal and source preserved; a retry after an unacknowledged transaction verifies remote target ancestry and exact tag identity before local cleanup. See [docs/versions-command.md](docs/versions-command.md) for workflow-sensitive bases, all flags, and safety guards.
 
   ### README and Documentation Commands
 
@@ -331,7 +370,7 @@ quickstart: |-
 
   For source builds:
 
-  - Go 1.25 or later, matching the module toolchain target.
+  - Go 1.26.5 or later, matching the module toolchain target.
   - `make` or `gmake` if you use the repository Makefile targets.
 
   ### Installation

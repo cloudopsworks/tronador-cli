@@ -124,20 +124,31 @@ ingress:
   #annotations: {}
   #name: (optional)
 
-# KEDA ScaledObject Configuration
+# KEDA ScaledObject / Job Configuration
 #keda:
-#  enabled: true
+#  enabled: false                                             # Optional. Set to true if you want to create a ScaledObject resource for the target resource. Default: false, keda.job.enable takes precedence over this value
+#  job:
+#    enabled: false                                           # Optional. Set to true if the target resource is a Scaled Job instead of any other resource type. Default: false
+#    parallelism: 1                                           # Optional. Default: 1
+#    completions: 1                                           # Optional. Default: 1
+#    activeDeadlineSeconds: 600                               # Optional. Default: 600
+#    backoffLimit: 6                                          # Optional. Default: 6
+#    successfulJobsHistoryLimit: 5                            # Optional. Default: 5
+#    failedJobsHistoryLimit: 5                                # Optional. Default: 5
+#    rollout:                                                 # Optional. Section to specify rollout options
+#      strategy: {kind-of-strategy}                           # Optional. Default: "default"
+#      propagationPolicy: {kind-of-propagation-policy}        # Optional. Default: "background"
 #  annotations:
 #    scaledobject.keda.sh/transfer-hpa-ownership: "true"     # Optional. Use to transfer an existing HPA ownership to this ScaledObject
 #    validations.keda.sh/hpa-ownership: "true"               # Optional. Use to disable HPA ownership validation on this ScaledObject
 #    autoscaling.keda.sh/paused: "true"                      # Optional. Use to pause autoscaling of objects explicitly
-#  envSourceContainerName: {container-name}                # Optional. Default: .spec.template.spec.containers[0]
-#  pollingInterval:  30                                      # Optional. Default: 30 seconds
+#  envSourceContainerName: {container-name}                  # Optional. Default: .spec.template.spec.containers[0]
+#  pollingInterval:  30                                      # Optional. Default: 30 seconds, valid both for ScaledObject and ScaledJob
 #  cooldownPeriod:   300                                     # Optional. Default: 300 seconds
 #  initialCooldownPeriod:  0                                 # Optional. Default: 0 seconds
 #  idleReplicaCount: 0                                       # Optional. Default: ignored, must be less than minReplicaCount
-#  minReplicaCount:  1                                       # Optional. Default: 0
-#  maxReplicaCount:  100                                     # Optional. Default: 100
+#  minReplicaCount:  1                                       # Optional. Default: 0, valid both for ScaledObject and ScaledJob
+#  maxReplicaCount:  100                                     # Optional. Default: 100, valid both for ScaledObject and ScaledJob
 #  fallback:                                                 # Optional. Section to specify fallback options
 #    failureThreshold: 3                                     # Mandatory if fallback section is included
 #    replicas: 6                                             # Mandatory if fallback section is included
@@ -153,5 +164,16 @@ ingress:
 #            - type: Percent
 #              value: 100
 #              periodSeconds: 15
-#  triggers: {}
-#  # {list of triggers to activate scaling of the target resource, see keda documentation for details}
+#  auth: []
+#  # [list of objects to be used for TriggerAuthAuthentication authentication with the target resource, see keda documentation for details]
+#  #- name: {name-of-trigger-authentication-resource}      # Required: name of the TriggerAuthentication resource to be used for authentication with the target resource
+#  #  annotations: {}                                         # Optional: annotations to be added to the TriggerAuthentication resource
+#  #  spec: {}                                                # Optional: spec to be added to the TriggerAuthentication resource, refer to https://keda.sh/docs/2.20/concepts/authentication/
+#  triggers: []
+#  # [list of triggers to activate scaling of the target resource, see keda documentation for details]
+#  # https://keda.sh/docs/2.20/reference/scaledobject-spec/ for details on the available triggers and their configuration options for scaled Objects
+#  # https://keda.sh/docs/2.20/reference/scaledjob-spec/ for details on the available triggers and their configuration options for scaled Jobs, required when keda.job.enabled is set to true
+
+# Extra Objects to be added to the deployment, e.g. for custom resources or additional services, expressed as YAML lists.
+#  Each object should be a valid Kubernetes resource definition.
+#extraObjects: []

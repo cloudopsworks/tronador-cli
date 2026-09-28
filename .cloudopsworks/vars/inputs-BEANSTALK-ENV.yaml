@@ -112,11 +112,7 @@ beanstalk:
     #  max: 1
   networking:
     private_subnets: []
-    #      - SUBNET_ID
-    #      - SUBNET_ID2
     public_subnets: []
-    #      - SUBNET_ID3
-    #      - SUBNET_ID4
     vpc_id: VPC_ID
   ##
   # Optional variable for mapping ports to backend ports:
@@ -128,24 +124,6 @@ beanstalk:
       health_check: # for custom target group
         enabled: true
         path: "/health"
-#    - name: port443
-#      from_port: 443
-#      to_port: 8443
-#      protocol: HTTPS
-#      backend_protocol: HTTPS
-#      health_check: # for custom target group
-#        enabled: true
-#        protocol: HTTPS
-#        port: 8443 | traffic-port
-#        matcher: "200-302"
-#        path: "/"
-#        unhealthy_threshold: 2
-#        healthy_threshold: 2
-#        timeout: 5
-#        interval: 30
-#      # Rules are required if custom_shared_rules=false or not set
-#      rules:
-#        - RULENAME
 
   ##
   # Optional variable for adding extra tags to the environment
@@ -161,36 +139,12 @@ beanstalk:
       namespace: "aws:elasticbeanstalk:application"
       resource: ""
       value: "/health"
-  #    - name: SETTING_NAME
-  #      namespace: aws:NAMESPACE
-  #      resource: ""
-  #      value: "<VALUE>"
-  #    - name: SETTING_NAME_2
-  #      namespace: aws:NAMESPACE_2
-  #      resource: ""
-  #      value: "<VALUE>"
   ##
   # Enable custom shared Rules where below rule mappings mandate over elastic beanstalk configuration.
   #custom_shared_rules: true
   ##
   # Optional Variable for mapping rules for shared Load Balancer
   rule_mappings: []
-#    - name: RULENAME
-#      process: port_mapping_process
-#      host: host.address.com,host.address2.com
-#      path: /path
-#      priority: 100
-#      path_patterns:
-#        - /path
-#      query_strings:
-#        - query1=value1
-#        - query2=value2
-#      http_headers:
-#        - name: HEADERNAME
-#          values: ["value1", "valuepattern*"]
-#      source_ips:
-#        - IP1
-#        - IP2
 tags: {}
 # TAG1: value1
 # TAG2: value2

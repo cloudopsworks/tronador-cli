@@ -3,6 +3,7 @@ package project
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
+	"tronador-cli/internal/replacement"
+	repospkg "tronador-cli/internal/repos"
 	toolspkg "tronador-cli/internal/tools"
 )
 
@@ -33,6 +37,7 @@ type Options struct {
 	JSON           bool
 	Snapshot       bool
 	Plain          bool
+	Generate       bool
 	Stdin          io.Reader
 	Stdout         io.Writer
 	Stderr         io.Writer
@@ -255,6 +260,12 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 	if binding.PlainVersion {
 		flags = append(flags, FlagDefinition{Name: "plain", Type: "bool", Description: "generate the Node or Python project version as x.y.z", Default: "false"})
 	}
+	if binding.Operation == "generate-version" {
+		flags = append(flags,
+			FlagDefinition{Name: "generate", Type: "bool", Description: "generate the guarded legacy blueprint _VERSION marker for a catalog-managed template-derived repository", Default: "false"},
+			FlagDefinition{Name: "yes", Type: "bool", Description: "confirm legacy blueprint marker generation outside a dry-run", Default: "false"},
+		)
+	}
 	if binding.Executor == ExecutorNative && binding.ConfirmationPolicy == "yes_for_noninteractive" {
 		flags = append(flags, FlagDefinition{Name: "yes", Type: "bool", Description: "confirm destructive operations", Default: "false"})
 	}
@@ -283,6 +294,14 @@ func hasEngineRequirement(requirements []ToolRequirement) bool {
 // Plan resolves detection, capability identity, and positional arguments. It
 // does not resolve tools, invoke child processes, or mutate the workspace.
 func (r *Runner) Plan(capability string, args []string) (Detection, OperationPlan, error) {
+	capability = strings.ToLower(strings.TrimSpace(capability))
+	// The guarded blueprint-marker generation is catalog-defined rather than a
+	// project-profile capability.  Resolve it before ordinary profile detection:
+	// versioned catalog entries such as ArgoCD have no project profile, and the
+	// catalog's Flutter marker intentionally differs from the application one.
+	if r.Opts.Generate && capability == "version" {
+		return r.planCatalogVersionGenerate(args)
+	}
 	detection, err := r.Detect()
 	if err != nil {
 		return Detection{}, OperationPlan{}, err
@@ -291,7 +310,6 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	if !ok {
 		return detection, OperationPlan{}, withDetection(projectError("project_registry_invalid", "detected profile is not registered"), detection)
 	}
-	capability = strings.ToLower(strings.TrimSpace(capability))
 	if capability == "" {
 		return detection, OperationPlan{}, withDetection(projectError("project_capability_unsupported", "a project capability is required"), detection)
 	}
@@ -315,6 +333,12 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	if r.Opts.Plain && !binding.PlainVersion {
 		return detection, OperationPlan{}, withDetection(plainUnsupportedError(binding.Capability), detection)
 	}
+	if r.Opts.Generate && binding.Capability != "version" {
+		return detection, OperationPlan{}, withDetection(generateUnsupportedError(binding.Capability), detection)
+	}
+	if r.Opts.Generate && (r.Opts.Snapshot || r.Opts.Plain) {
+		return detection, OperationPlan{}, withDetection(projectError("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"), detection)
+	}
 	plan := OperationPlan{
 		Implementation: detection.ProfileID, Marker: detection.Marker, Capability: binding.Capability,
 		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
@@ -325,7 +349,7 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 	var steps []OperationStep
 	if binding.Executor != ExecutorNative {
 		var stepErr error
-		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot, r.Opts.Plain)
+		steps, stepErr = buildOperationSteps(binding, detection, arguments, r.Opts.WorkDir, r.Opts.Snapshot, r.Opts.Plain, r.Opts.Generate)
 		if stepErr != nil {
 			return detection, OperationPlan{}, withDetection(stepErr, detection)
 		}
@@ -339,6 +363,42 @@ func (r *Runner) Plan(capability string, args []string) (Detection, OperationPla
 		}
 	}
 	return detection, plan, nil
+}
+
+func (r *Runner) planCatalogVersionGenerate(args []string) (Detection, OperationPlan, error) {
+	target, err := legacyBlueprintMarkerTarget(r.Opts.WorkDir)
+	if err != nil {
+		return Detection{}, OperationPlan{}, err
+	}
+	defer target.Close()
+	if r.Opts.Snapshot || r.Opts.Plain {
+		return target.detection, OperationPlan{}, withDetection(projectError("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"), target.detection)
+	}
+	binding := CapabilityBinding{
+		Capability: "version", Executor: ExecutorToolPipe, Operation: "generate-version",
+		Tools:         []ToolRequirement{{Name: "gitversion", Executable: "gitversion", InstallPolicy: "provision", RequiredFor: []string{"version"}}},
+		MutationClass: MutationGenerated, NetworkPolicy: NetworkForbidden, ConfirmationPolicy: "none", DryRun: "required",
+	}
+	definition := r.Registry.Definitions["version"]
+	arguments, argumentErr := validateArguments(binding, definition, args)
+	if argumentErr != nil {
+		argumentErr.Capability = binding.Capability
+		argumentErr.RequestedArguments = append([]string(nil), args...)
+		return target.detection, OperationPlan{}, withDetection(argumentErr, target.detection)
+	}
+	steps, stepErr := buildOperationSteps(binding, target.detection, arguments, r.Opts.WorkDir, false, false, true)
+	if stepErr != nil {
+		return target.detection, OperationPlan{}, withDetection(stepErr, target.detection)
+	}
+	plan := OperationPlan{
+		Implementation: target.detection.ProfileID, Marker: target.detection.Marker, Capability: binding.Capability,
+		Arguments: arguments, Executor: binding.Executor, Operation: binding.Operation,
+		ToolRequirements: cloneRequirements(binding.Tools), MutationClass: binding.MutationClass,
+		NetworkPolicy: binding.NetworkPolicy, ConfirmationPolicy: binding.ConfirmationPolicy, DryRun: binding.DryRun,
+		Steps: steps,
+	}
+	plan.ToolCalls = toolCallsFromSteps(steps)
+	return target.detection, plan, nil
 }
 
 func validateArguments(binding CapabilityBinding, definition CapabilityDefinition, args []string) (map[string]string, *Error) {
@@ -383,7 +443,7 @@ func countRequired(schema []ArgumentDefinition) int {
 	return count
 }
 
-func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot, plain bool) ([]OperationStep, error) {
+func buildOperationSteps(binding CapabilityBinding, detection Detection, arguments map[string]string, workdir string, snapshot, plain, generate bool) ([]OperationStep, error) {
 	call := func(tool string, args ...string) ToolCall {
 		return ToolCall{ToolName: tool, Arguments: append([]string(nil), args...), WorkingDirectory: workdir}
 	}
@@ -403,9 +463,11 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 	case "generate-version":
 		variable := "FullSemVer"
 		description := "calculate project version"
-		if snapshot || plain {
+		if snapshot || plain || generate {
 			variable = "MajorMinorPatch"
-			if snapshot {
+			if generate {
+				description = "calculate legacy blueprint marker version"
+			} else if snapshot {
 				description = "calculate project snapshot version"
 			} else {
 				description = "calculate plain project version"
@@ -526,7 +588,7 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	if err != nil {
 		return Result{}, err
 	}
-	if plan.ConfirmationPolicy == "yes_for_noninteractive" && !r.Opts.Yes && !r.Opts.DryRun {
+	if (plan.ConfirmationPolicy == "yes_for_noninteractive" || r.Opts.Generate) && !r.Opts.Yes && !r.Opts.DryRun {
 		return Result{}, withDetection(&Error{Code: "project_confirmation_required", Command: "project", Capability: plan.Capability, Hint: "rerun with --yes", ExitStatus: 1, Cause: errors.New("destructive operation requires --yes")}, detection)
 	}
 	if r.Opts.DryRun && r.Opts.Engine != "auto" {
@@ -548,7 +610,10 @@ func (r *Runner) Run(ctx context.Context, capability string, args []string) (Res
 	// Version has an exact-tag fast path. It deliberately runs before any
 	// resolver work, including for evaluated dry-runs.
 	if plan.Capability == "version" {
-		tag := exactHeadTag(ctx, r.Opts.WorkDir)
+		tag := exactTag{}
+		if !r.Opts.Generate {
+			tag = exactHeadTag(ctx, r.Opts.WorkDir)
+		}
 		if r.Opts.Snapshot && tag.Found {
 			return Result{}, withDetection(snapshotTaggedHeadError(), detection)
 		}
@@ -848,6 +913,17 @@ func executeNative(plan OperationPlan) ([]string, error) {
 }
 
 func (r *Runner) runVersion(ctx context.Context, detection Detection, plan OperationPlan, result Result, tag exactTag) (Result, error) {
+	markerPath := ""
+	var markerTarget catalogMarkerTarget
+	if r.Opts.Generate {
+		var targetErr error
+		markerTarget, targetErr = legacyBlueprintMarkerTarget(r.Opts.WorkDir)
+		if targetErr != nil {
+			return Result{}, withDetection(targetErr, detection)
+		}
+		defer markerTarget.Close()
+		markerPath = markerTarget.path
+	}
 	version, execution, fromGitVersion, err := r.calculateVersion(ctx, plan, tag, detection.ProfileID)
 	if err != nil {
 		if fromGitVersion {
@@ -855,11 +931,33 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		}
 		return Result{}, withDetection(err, detection)
 	}
-	changes, buildErr := buildVersionChanges(r.Opts.WorkDir, detection.ProfileID, version)
-	if buildErr != nil {
-		return Result{}, withDetection(wrapProjectError("project_operation_failed", "build version file changes", buildErr), detection)
+	changes := []versionChange{}
+	if r.Opts.Generate {
+		if !majorMinorPatchPattern.MatchString(version) {
+			return Result{}, withDetection(projectError("project_operation_failed", "GitVersion did not return a MajorMinorPatch version for --generate"), detection)
+		}
+		markerVersion := "v" + strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V")
+		change, warning, buildErr := buildLegacyBlueprintMarkerChangeInTarget(markerTarget, markerVersion)
+		if buildErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build legacy blueprint marker change", buildErr), detection)
+		}
+		if warning != "" {
+			_, _ = fmt.Fprintln(r.Opts.Stderr, warning)
+		}
+		if change != nil {
+			changes = append(changes, *change)
+		}
+		result.GeneratedArtifacts = []string{markerPath}
+		result.Version = markerVersion
+	} else {
+		var buildErr error
+		changes, buildErr = buildVersionChanges(r.Opts.WorkDir, detection.ProfileID, version)
+		if buildErr != nil {
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build version file changes", buildErr), detection)
+		}
+		result.Version = version
 	}
-	result.Version, result.TagCreated = version, false
+	result.TagCreated = false
 	if r.Opts.DryRun {
 		preview := make([]FileChange, 0, len(changes))
 		for _, change := range changes {
@@ -883,20 +981,353 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		return result, nil
 	}
 	for _, change := range changes {
+		if r.Opts.Generate {
+			if writeErr := writeLegacyBlueprintMarkerAtomically(markerTarget, change.after); writeErr != nil {
+				return Result{}, withDetection(wrapProjectError("project_operation_failed", "write legacy blueprint marker", writeErr), detection)
+			}
+			continue
+		}
 		path, pathErr := safeProjectPath(r.Opts.WorkDir, filepath.FromSlash(change.Path))
 		if pathErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "resolve version output", pathErr), detection)
 		}
-		if writeErr := os.WriteFile(path, change.after, fileMode(path)); writeErr != nil {
+		if writeErr := writeProjectFileAtomically(path, change.after, fileMode(path)); writeErr != nil {
 			return Result{}, withDetection(wrapProjectError("project_operation_failed", "write version output", writeErr), detection)
 		}
 	}
 	result.Stdout, result.Stderr = execution.Stdout, execution.Stderr
-	result.GeneratedArtifacts = append([]string(nil), plan.GeneratedArtifacts...)
+	if !r.Opts.Generate {
+		result.GeneratedArtifacts = append([]string(nil), plan.GeneratedArtifacts...)
+	}
 	if !r.Opts.JSON {
-		_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
+		if r.Opts.Generate {
+			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated legacy blueprint marker %s in %s (tag_created=false)\n", result.Version, markerPath)
+		} else {
+			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
+		}
 	}
 	return result, nil
+}
+
+// legacyBlueprintMarkerPath accepts only repositories identified by the
+// repository-template catalog. A project implementation marker alone is not
+// sufficient: _VERSION controls blueprint upgrades and must not be created in
+// arbitrary repositories.
+type catalogMarkerTarget struct {
+	path      string
+	marker    string
+	mode      os.FileMode
+	detection Detection
+	layout    projectMarkerLayout
+}
+
+var closeProjectMarkerRoot = func(root *os.Root) error { return root.Close() }
+
+func (target catalogMarkerTarget) Close() {
+	if target.layout.root != nil {
+		_ = closeProjectMarkerRoot(target.layout.root)
+	}
+}
+
+func secureProjectMarkerRootSupported(goos string) bool {
+	return goos != "js" && goos != "plan9"
+}
+
+func legacyBlueprintMarkerPath(workdir string) (string, error) {
+	target, err := legacyBlueprintMarkerTarget(workdir)
+	if err != nil {
+		return "", err
+	}
+	defer target.Close()
+	return target.path, nil
+}
+
+type projectMarkerLayout struct {
+	path string
+	info os.FileInfo
+	root *os.Root
+}
+
+func (layout projectMarkerLayout) ensure() error {
+	rootInfo, err := layout.root.Stat(".")
+	if err != nil || !os.SameFile(layout.info, rootInfo) {
+		return errors.New("template layout changed during marker generation")
+	}
+	info, err := os.Lstat(layout.path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !os.SameFile(layout.info, info) {
+		return errors.New("template layout changed during marker generation")
+	}
+	return nil
+}
+
+func openProjectMarkerLayout(workdir, name string) (projectMarkerLayout, error) {
+	path, err := safeProjectPath(workdir, name)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return projectMarkerLayout{}, errors.New("must be a non-symlink directory")
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return projectMarkerLayout{}, err
+	}
+	layout := projectMarkerLayout{path: path, info: info, root: root}
+	if err := layout.ensure(); err != nil {
+		_ = closeProjectMarkerRoot(root)
+		return projectMarkerLayout{}, err
+	}
+	return layout, nil
+}
+
+func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
+	if !secureProjectMarkerRootSupported(runtime.GOOS) {
+		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate requires descriptor-rooted filesystem support on "+runtime.GOOS)
+	}
+	catalog, err := repospkg.LoadConfig("")
+	if err != nil {
+		return catalogMarkerTarget{}, wrapProjectError("project_version_marker_unsupported", "load repository template catalog", err)
+	}
+	abs, err := filepath.Abs(workdir)
+	if err != nil {
+		return catalogMarkerTarget{}, wrapProjectError("project_version_marker_unsupported", "resolve workdir", err)
+	}
+	type markerCandidate struct {
+		path     string
+		layout   string
+		template repospkg.Template
+		root     projectMarkerLayout
+		mode     os.FileMode
+	}
+	var candidates []markerCandidate
+	closeCandidates := func() {
+		for _, candidate := range candidates {
+			_ = closeProjectMarkerRoot(candidate.root.root)
+		}
+	}
+	for _, candidateLayout := range []struct {
+		root        string
+		versionFile string
+	}{
+		{root: ".cloudopsworks", versionFile: ".cloudopsworks/_VERSION"},
+		{root: ".github", versionFile: ".github/_VERSION"},
+	} {
+		layout, layoutErr := openProjectMarkerLayout(workdir, candidateLayout.root)
+		if errors.Is(layoutErr, os.ErrNotExist) {
+			continue
+		}
+		if layoutErr != nil {
+			closeCandidates()
+			return catalogMarkerTarget{}, wrapProjectError("project_version_marker_invalid", "inspect template layout", layoutErr)
+		}
+		keepLayout := false
+		func() {
+			defer func() {
+				if !keepLayout {
+					_ = closeProjectMarkerRoot(layout.root)
+				}
+			}()
+			var active []repospkg.Template
+			for _, template := range catalog.Templates {
+				markerInfo, markerStatErr := layout.root.Lstat(template.Marker)
+				if errors.Is(markerStatErr, os.ErrNotExist) {
+					continue
+				}
+				if markerStatErr != nil {
+					err = wrapProjectError("project_version_marker_invalid", "inspect template marker", markerStatErr)
+					return
+				}
+				if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
+					err = projectError("project_version_marker_invalid", "template marker must be a regular non-symlink file")
+					return
+				}
+				active = append(active, template)
+			}
+			if len(active) == 0 {
+				return
+			}
+			if len(active) != 1 || !active[0].Versioned {
+				err = projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+				return
+			}
+			markerInfo, markerStatErr := layout.root.Lstat("_VERSION")
+			mode := os.FileMode(0o644)
+			if markerStatErr == nil {
+				if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
+					err = projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
+					return
+				}
+				mode = markerInfo.Mode().Perm()
+			} else if !errors.Is(markerStatErr, os.ErrNotExist) {
+				err = wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", markerStatErr)
+				return
+			}
+			if ensureErr := layout.ensure(); ensureErr != nil {
+				err = wrapProjectError("project_version_marker_invalid", "inspect template layout", ensureErr)
+				return
+			}
+			candidates = append(candidates, markerCandidate{path: candidateLayout.versionFile, layout: candidateLayout.root, template: active[0], root: layout, mode: mode})
+			keepLayout = true
+		}()
+		if err != nil {
+			closeCandidates()
+			return catalogMarkerTarget{}, err
+		}
+	}
+	if len(candidates) == 1 {
+		candidate := candidates[0]
+		return catalogMarkerTarget{
+			path: candidate.path, marker: "_VERSION", mode: candidate.mode, layout: candidate.root,
+			detection: Detection{
+				WorkDir: abs, ProfileID: candidate.template.Name, DisplayName: candidate.template.Description,
+				Marker:  filepath.ToSlash(filepath.Join(candidate.layout, candidate.template.Marker)),
+				Markers: []string{candidate.template.Marker}, RegistryVersion: catalog.SchemaVersion,
+			},
+		}, nil
+	}
+	closeCandidates()
+	if len(candidates) > 1 {
+		return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is unavailable when multiple catalog-managed blueprint layouts are present")
+	}
+	return catalogMarkerTarget{}, projectError("project_version_marker_unsupported", "--generate is available only for an unambiguous catalog-managed versioned template repository")
+}
+
+type projectAtomicTempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+var createProjectAtomicTempFile = func(dir, pattern string) (projectAtomicTempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
+var replaceProjectAtomicFile = replacement.Replace
+
+func writeProjectFileAtomically(path string, data []byte, mode os.FileMode) error {
+	file, err := createProjectAtomicTempFile(filepath.Dir(path), ".tronador-version-*")
+	if err != nil {
+		return err
+	}
+	temporary := file.Name()
+	defer os.Remove(temporary)
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return replaceProjectAtomicFile(temporary, path)
+}
+
+func readProjectMarkerFile(root *os.Root, name string) ([]byte, error) {
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	linkInfo, err := root.Lstat(name)
+	if err != nil || linkInfo.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || !os.SameFile(info, linkInfo) {
+		return nil, errors.New("marker must be a regular non-symlink file")
+	}
+	return io.ReadAll(file)
+}
+
+func buildLegacyBlueprintMarkerChangeInTarget(target catalogMarkerTarget, version string) (*versionChange, string, error) {
+	if err := target.layout.ensure(); err != nil {
+		return nil, "", err
+	}
+	before, err := readProjectMarkerFile(target.layout.root, target.marker)
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return nil, "", err
+	}
+	if err := target.layout.ensure(); err != nil {
+		return nil, "", err
+	}
+	after := []byte(version + "\n")
+	if bytes.Equal(before, after) {
+		return nil, "", nil
+	}
+	warning := ""
+	if !missing && strings.TrimSpace(string(before)) != version {
+		warning = fmt.Sprintf("WARNING: --generate replaces blueprint marker %s from %q to %q; this marker controls repository-template upgrades.", target.path, strings.TrimSpace(string(before)), version)
+	}
+	op := "modify"
+	if missing {
+		op = "add"
+	}
+	return &versionChange{FileChange: FileChange{Path: filepath.ToSlash(target.path), Operation: op, Patch: unifiedPatch(filepath.ToSlash(target.path), before, after, missing)}, after: after}, warning, nil
+}
+
+var beforeProjectMarkerAtomicTempCreate = func() {}
+var replaceProjectMarkerAtomicFileInRoot = replacement.ReplaceInRoot
+var createProjectRootAtomicTempFile = func(root *os.Root) (string, projectAtomicTempFile, error) {
+	return newProjectRootAtomicTempFile(root)
+}
+
+func writeLegacyBlueprintMarkerAtomically(target catalogMarkerTarget, data []byte) error {
+	if err := target.layout.ensure(); err != nil {
+		return err
+	}
+	beforeProjectMarkerAtomicTempCreate()
+	name, file, err := createProjectRootAtomicTempFile(target.layout.root)
+	if err != nil {
+		return fmt.Errorf("create temporary marker: %w", err)
+	}
+	defer target.layout.root.Remove(name)
+	if err := target.layout.ensure(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Chmod(target.mode); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("prepare temporary marker: %w", err)
+	}
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("write temporary marker: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close temporary marker: %w", err)
+	}
+	if err := target.layout.ensure(); err != nil {
+		return err
+	}
+	if err := replaceProjectMarkerAtomicFileInRoot(target.layout.root, name, target.marker); err != nil {
+		return fmt.Errorf("replace marker atomically: %w", err)
+	}
+	return nil
+}
+
+func newProjectRootAtomicTempFile(root *os.Root) (string, *os.File, error) {
+	var random [12]byte
+	for range 100 {
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", nil, err
+		}
+		name := fmt.Sprintf(".tronador-marker-%x", random)
+		file, err := root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return name, file, err
+	}
+	return "", nil, errors.New("create unique temporary marker")
 }
 
 type exactTag struct {
@@ -923,6 +1354,17 @@ func plainUnsupportedError(capability string) *Error {
 		Hint:       "use --plain only with `tronador project version` in a Node or Python repository",
 		ExitStatus: 1,
 		Cause:      errors.New("--plain is supported only for Node and Python project version"),
+	}
+}
+
+func generateUnsupportedError(capability string) *Error {
+	return &Error{
+		Code:       "project_generate_unsupported",
+		Command:    "project",
+		Capability: capability,
+		Hint:       "use --generate only with `tronador project version` in a catalog-managed template-derived repository",
+		ExitStatus: 1,
+		Cause:      errors.New("--generate is supported only for project version"),
 	}
 }
 
@@ -1149,14 +1591,18 @@ func parseGitVersionFullOutput(output string) string {
 		return ""
 	}
 	var value struct {
-		FullSemVer string `json:"FullSemVer"`
-		SemVer     string `json:"SemVer"`
+		FullSemVer      string `json:"FullSemVer"`
+		SemVer          string `json:"SemVer"`
+		MajorMinorPatch string `json:"MajorMinorPatch"`
 	}
 	if json.Unmarshal([]byte(trimmed), &value) == nil {
 		if value.FullSemVer != "" {
 			return value.FullSemVer
 		}
-		return value.SemVer
+		if value.SemVer != "" {
+			return value.SemVer
+		}
+		return value.MajorMinorPatch
 	}
 	return strings.TrimSpace(strings.Split(trimmed, "\n")[0])
 }

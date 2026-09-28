@@ -1,6 +1,6 @@
 module tronador-cli
 
-go 1.26.3
+go 1.26.5
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.5
@@ -27,6 +27,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/tidwall/sjson v1.2.5
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.46.0
 )
 
 require (
@@ -81,7 +82,6 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect

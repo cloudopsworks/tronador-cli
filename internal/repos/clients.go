@@ -3,6 +3,7 @@ package repos
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -37,20 +38,20 @@ func (r *Runner) github() GitHubClient {
 
 func (r *Runner) cloneTemplateRepository(ctx context.Context, url string) error {
 	if r.Opts.DryRun {
-		return r.run(ctx, r.gitPath(), "clone", url, r.Config.TemplateDirectory)
+		return r.runTemplateAnalysis(ctx, r.Opts.WorkDir, r.gitPath(), "clone", url, r.templatePath())
 	}
-	if err := r.git().Clone(ctx, url, r.path(r.Config.TemplateDirectory)); err != nil {
+	if err := r.git().Clone(ctx, url, r.templatePath()); err != nil {
 		fmt.Fprintf(r.Opts.Stderr, "Native git clone failed, falling back to git: %v\n", err)
-		return r.run(ctx, r.gitPath(), "clone", url, r.Config.TemplateDirectory)
+		return r.run(ctx, r.gitPath(), "clone", url, r.templatePath())
 	}
 	return nil
 }
 
 func (r *Runner) checkoutTemplateRepository(ctx context.Context, ref string) (string, error) {
 	if r.Opts.DryRun {
-		return r.checkoutTemplateRepositoryFromShell(ctx, ref)
+		return r.checkoutTemplateRepositoryForAnalysis(ctx, ref)
 	}
-	hash, err := r.git().Checkout(ctx, r.path(r.Config.TemplateDirectory), ref)
+	hash, err := r.git().Checkout(ctx, r.templatePath(), ref)
 	if err == nil {
 		return hash, nil
 	}
@@ -59,7 +60,7 @@ func (r *Runner) checkoutTemplateRepository(ctx context.Context, ref string) (st
 }
 
 func (r *Runner) checkoutTemplateRepositoryFromShell(ctx context.Context, ref string) (string, error) {
-	templateDir := r.path(r.Config.TemplateDirectory)
+	templateDir := r.templatePath()
 	if err := r.runInDir(ctx, templateDir, r.gitPath(), "checkout", ref); err != nil {
 		return "", err
 	}
@@ -74,4 +75,26 @@ func (r *Runner) setDefaultRepository(ctx context.Context, owner, repo string) e
 	// gh repo set-default writes gh CLI state. Keep the shell call here for
 	// compatibility while the Git/GitHub read paths move to native clients.
 	return r.run(ctx, r.ghPath(), "repo", "set-default", fmt.Sprintf("%s/%s", owner, repo))
+}
+
+// runTemplateAnalysis executes only temporary-checkout operations in dry-run.
+func (r *Runner) runTemplateAnalysis(ctx context.Context, dir, name string, args ...string) error {
+	fmt.Fprintf(r.Opts.Stdout, "DRY-RUN (target analysis: cd %s && %s %s)\n", dir, name, strings.Join(args, " "))
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir, cmd.Stdout, cmd.Stderr = dir, r.Opts.Stdout, r.Opts.Stderr
+	return cmd.Run()
+}
+
+func (r *Runner) checkoutTemplateRepositoryForAnalysis(ctx context.Context, ref string) (string, error) {
+	dir := r.templatePath()
+	if err := r.runTemplateAnalysis(ctx, dir, r.gitPath(), "checkout", ref); err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, r.gitPath(), "rev-parse", ref)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
 }

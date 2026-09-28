@@ -24,6 +24,7 @@ var (
 	projectJSON           bool
 	projectSnapshot       bool
 	projectPlain          bool
+	projectGenerate       bool
 )
 
 var projectCmd = &cobra.Command{
@@ -62,6 +63,12 @@ for Node and Python projects. It applies even when HEAD is tagged. Use
 --snapshot to write x.y.z-SNAPSHOT from MajorMinorPatch for untagged Java
 projects.
 
+Use --generate to write the legacy blueprint upgrade marker as
+v<MajorMinorPatch> at .cloudopsworks/_VERSION (or .github/_VERSION for a
+legacy layout). It is intentionally limited to catalog-managed,
+template-derived repositories, requires --yes outside a dry-run, and never
+creates a Git tag, commit, or push.
+
 The version dry-run calculates GitVersion and previews only actual file
 changes; it never writes project files.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,6 +87,8 @@ func init() {
 	projectCmd.PersistentFlags().BoolVar(&projectJSON, "json", false, "Emit stable JSON output")
 	projectCmd.PersistentFlags().BoolVar(&projectPlain, "plain", false, "Generate an exact x.y.z version using GitVersion's MajorMinorPatch (Node and Python only)")
 	projectCmd.PersistentFlags().BoolVar(&projectSnapshot, "snapshot", false, "Generate x.y.z-SNAPSHOT using GitVersion's MajorMinorPatch (untagged Java only)")
+	projectVersionCmd.Flags().BoolVar(&projectGenerate, "generate", false, "Generate the guarded legacy blueprint _VERSION marker from MajorMinorPatch")
+	projectVersionCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm guarded legacy blueprint marker generation")
 	projectCmd.Flags().StringVar(&projectEngine, "engine", "tofu", "IaC engine: tofu (default), terraform, or auto")
 	projectCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm destructive operations")
 	projectCmd.AddCommand(projectVersionCmd)
@@ -101,11 +110,17 @@ func runProjectCommand(cmd *cobra.Command, args []string) error {
 	if err := validatePlainCapability(args[0], projectPlain); err != nil {
 		return emitProjectError(cmd, err)
 	}
+	if err := validateGenerateCapability(args[0], projectGenerate); err != nil {
+		return emitProjectError(cmd, err)
+	}
+	if projectGenerate && (projectSnapshot || projectPlain) {
+		return emitProjectError(cmd, projectErrorForCLI("project_argument_invalid", "--generate cannot be combined with --snapshot or --plain"))
+	}
 	runner, err := projectpkg.NewRunner(projectpkg.Options{
 		WorkDir: projectWorkDir, ToolsDir: projectToolsDir, ToolsConfig: projectToolsConfig,
 		NoInstallTools: projectNoInstallTools, AllowNetwork: projectAllowNetwork,
 		ToolVersions: versions, ToolPaths: paths, Engine: projectEngine, Yes: projectYes,
-		JSON: projectJSON, Snapshot: projectSnapshot, Plain: projectPlain,
+		JSON: projectJSON, Snapshot: projectSnapshot, Plain: projectPlain, Generate: projectGenerate,
 		DryRun: commandDryRun(cmd), Stdin: cmd.InOrStdin(), Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr(),
 	})
 	if err != nil {
@@ -225,6 +240,13 @@ func validateSnapshotCapability(capability string, snapshot bool) error {
 func validatePlainCapability(capability string, plain bool) error {
 	if plain && !strings.EqualFold(strings.TrimSpace(capability), "version") {
 		return projectErrorForCLI("project_plain_unsupported", "--plain is supported only for `tronador project version`")
+	}
+	return nil
+}
+
+func validateGenerateCapability(capability string, generate bool) error {
+	if generate && !strings.EqualFold(strings.TrimSpace(capability), "version") {
+		return projectErrorForCLI("project_generate_unsupported", "--generate is supported only for `tronador project version`")
 	}
 	return nil
 }
