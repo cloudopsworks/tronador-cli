@@ -168,6 +168,190 @@ func TestTagUsesQualifierAndPushesExactTag(t *testing.T) {
 	}
 }
 
+func TestTagPublishPushesExistingUnpublishedHEADTagInsteadOfRecalculating(t *testing.T) {
+	const tag = "v0.2.0-beta.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                            "main\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):   "commit-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/main"):              "commit-sha\trefs/heads/main\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+		key("git", "tag", "--points-at", "HEAD"):                          tag + "\n",
+		key("git", "rev-parse", "--verify", "refs/tags/"+tag):             "tag-object\n",
+		key("git", "ls-remote", "--refs", "origin", "refs/tags/"+tag):     "",
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.Tag(context.Background(), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tag {
+		t.Fatalf("tag = %q, want existing local tag %q", got, tag)
+	}
+	if !f.saw("git", "push", "origin", "refs/tags/"+tag+":refs/tags/"+tag) {
+		t.Fatalf("existing unpushed tag was not pushed: %#v", f.calls)
+	}
+	if f.sawPrefix("gitversion") || f.sawPrefix("git", "tag", "-a") {
+		t.Fatalf("publish recalculated or recreated an existing local tag: %#v", f.calls)
+	}
+}
+
+func TestTagPublishIsIdempotentForExistingPublishedHEADTag(t *testing.T) {
+	const tag = "v0.2.0-beta.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                            "main\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):   "commit-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/main"):              "commit-sha\trefs/heads/main\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+		key("git", "tag", "--points-at", "HEAD"):                          tag + "\n",
+		key("git", "rev-parse", "--verify", "refs/tags/"+tag):             "tag-object\n",
+		key("git", "ls-remote", "--refs", "origin", "refs/tags/"+tag):     "tag-object\trefs/tags/" + tag + "\n",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):              "commit-sha\n",
+		key("git", "ls-remote", "--tags", "origin"):                       "tag-object\trefs/tags/" + tag + "\ncommit-sha\trefs/tags/" + tag + "^{}\n",
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.Tag(context.Background(), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tag {
+		t.Fatalf("tag = %q, want existing tag %q", got, tag)
+	}
+	if f.sawPrefix("gitversion") || f.sawPrefix("git", "tag", "-a") || f.sawPrefix("git", "push") {
+		t.Fatalf("already-published tag was not treated as a no-op: %#v", f.calls)
+	}
+}
+
+func TestTagPublishIsIdempotentForRemoteOnlyAnnotatedTagAtHead(t *testing.T) {
+	const tag = "v0.2.0-beta.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                            "main\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):   "commit-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/main"):              "commit-sha\trefs/heads/main\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+		gitVersionKey("MajorMinorPatch"):                                  "0.2.0-beta.3\n",
+		key("git", "ls-remote", "--tags", "origin", "refs/tags/"+tag):     "tag-object\trefs/tags/" + tag + "\ncommit-sha\trefs/tags/" + tag + "^{}\n",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):              "commit-sha\n",
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := w.Tag(context.Background(), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tag {
+		t.Fatalf("tag = %q, want remote tag %q", got, tag)
+	}
+	if f.sawPrefix("git", "tag", "-a") || f.sawPrefix("git", "push") {
+		t.Fatalf("remote-only tag was recreated or pushed: %#v", f.calls)
+	}
+}
+
+func TestTagDoesNotCreateCandidateWhenRemoteSameNameTargetsElsewhere(t *testing.T) {
+	const tag = "v0.2.0-beta.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                            "main\n",
+		key("git", "rev-parse", "--verify", "refs/heads/main^{commit}"):   "head-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/main"):              "head-sha\trefs/heads/main\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"): "refs/remotes/origin/main\n",
+		gitVersionKey("MajorMinorPatch"):                                  "0.2.0-beta.3\n",
+		key("git", "ls-remote", "--tags", "origin", "refs/tags/"+tag):     "tag-object\trefs/tags/" + tag + "\nother-sha\trefs/tags/" + tag + "^{}\n",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):              "head-sha\n",
+	}}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.Tag(context.Background(), "", true); err == nil {
+		t.Fatal("expected conflicting remote tag to fail")
+	}
+	if f.sawPrefix("git", "tag", "-a") || f.sawPrefix("git", "push") {
+		t.Fatalf("conflicting remote tag caused mutation: %#v", f.calls)
+	}
+}
+
+func TestTagRejectsDifferentVersionOnSameCommitButAllowsDeploymentQualifier(t *testing.T) {
+	for _, tc := range []struct {
+		name, existing, calculated string
+		wantErr                    bool
+	}{
+		{name: "different patch version rejected", existing: "v1.2.3", calculated: "1.2.4", wantErr: true},
+		{name: "different prerelease version rejected", existing: "v1.2.3-beta.3", calculated: "1.2.3-beta.4", wantErr: true},
+		{name: "same version with deploy qualifier allowed", existing: "v1.2.3-beta.3+deploy-test", calculated: "1.2.3-beta.3"},
+		{name: "different deploy qualifiers allowed", existing: "v1.2.3+deploy-one", calculated: "1.2.3+deploy-two"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := normalizeVersion(tc.calculated)
+			f := &fakeRunner{replies: map[string]string{
+				key("git", "branch", "--show-current"):                               "feature/a\n",
+				key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "commit-sha\n",
+				key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "commit-sha\trefs/heads/feature/a\n",
+				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
+				key("git", "tag", "--points-at", "HEAD"):                             tc.existing + "\n",
+				gitVersionKey("SemVer"):                                              tc.calculated + "\n",
+				key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "commit-sha\n",
+			}}
+			f.errs = map[string]error{
+				key("git", "rev-parse", "--verify", "refs/tags/"+candidate+"^{commit}"): fmt.Errorf("tag missing"),
+			}
+			w, err := NewWorkflows(WorkflowOptions{Runner: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = w.Tag(context.Background(), "", false)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "different version") {
+					t.Fatalf("Tag error = %v, want different version", err)
+				}
+				if f.sawPrefix("git", "tag", "-a") {
+					t.Fatalf("tag was created after numeric version conflict: %#v", f.calls)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !f.saw("git", "tag", "-a", candidate, "HEAD", "-m", "chore: Version Tagging: "+candidate) {
+				t.Fatalf("qualified tag was not created: %#v", f.calls)
+			}
+		})
+	}
+}
+
+func TestTagRejectsRemoteDifferentVersionOnSameCommit(t *testing.T) {
+	const tag = "v1.2.3"
+	f := &fakeRunner{replies: map[string]string{
+		key("git", "branch", "--show-current"):                               "feature/a\n",
+		key("git", "rev-parse", "--verify", "refs/heads/feature/a^{commit}"): "commit-sha\n",
+		key("git", "ls-remote", "origin", "refs/heads/feature/a"):            "commit-sha\trefs/heads/feature/a\n",
+		key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):    "refs/remotes/origin/main\n",
+		gitVersionKey("SemVer"):                                              "1.2.4\n",
+		key("git", "tag", "--points-at", "HEAD"):                             "",
+		key("git", "rev-parse", "--verify", "HEAD^{commit}"):                 "commit-sha\n",
+		key("git", "ls-remote", "--tags", "origin"):                          "commit-sha\trefs/tags/" + tag + "\n",
+	}}
+	f.errs = map[string]error{
+		key("git", "rev-parse", "--verify", "refs/tags/v1.2.4^{commit}"): fmt.Errorf("tag missing"),
+	}
+	w, err := NewWorkflows(WorkflowOptions{Runner: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = w.Tag(context.Background(), "", false); err == nil || !strings.Contains(err.Error(), "remote version tag") {
+		t.Fatalf("Tag error = %v, want remote numeric version conflict", err)
+	}
+	if f.sawPrefix("git", "tag", "-a") {
+		t.Fatalf("tag created despite remote numeric version conflict: %#v", f.calls)
+	}
+}
+
 func TestTagUsesRepositoryGitVersionConfig(t *testing.T) {
 	f := &fakeRunner{replies: map[string]string{
 		key("git", "branch", "--show-current"):                               "feature/a\n",
