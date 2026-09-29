@@ -63,11 +63,12 @@ for Node and Python projects. It applies even when HEAD is tagged. Use
 --snapshot to write x.y.z-SNAPSHOT from MajorMinorPatch for untagged Java
 projects.
 
-Use --generate to write the legacy blueprint upgrade marker as
-v<MajorMinorPatch> at .cloudopsworks/_VERSION (or .github/_VERSION for a
-legacy layout). It is intentionally limited to catalog-managed,
-template-derived repositories, requires --yes outside a dry-run, and never
-creates a Git tag, commit, or push.
+Use --generate to write the guarded upgrade marker as v<MajorMinorPatch> at
+.cloudopsworks/_VERSION (or .github/_VERSION for a supported legacy template
+layout). It is intentionally limited to catalog-managed templates and
+explicitly registered private source markers, including
+.cloudopsworks/.blueprint and .cloudopsworks/.skills. It requires --yes outside
+a dry-run and never creates a Git tag, commit, or push.
 
 The version dry-run calculates GitVersion and previews only actual file
 changes; it never writes project files.`,
@@ -87,8 +88,8 @@ func init() {
 	projectCmd.PersistentFlags().BoolVar(&projectJSON, "json", false, "Emit stable JSON output")
 	projectCmd.PersistentFlags().BoolVar(&projectPlain, "plain", false, "Generate an exact x.y.z version using GitVersion's MajorMinorPatch (Node and Python only)")
 	projectCmd.PersistentFlags().BoolVar(&projectSnapshot, "snapshot", false, "Generate x.y.z-SNAPSHOT using GitVersion's MajorMinorPatch (untagged Java only)")
-	projectVersionCmd.Flags().BoolVar(&projectGenerate, "generate", false, "Generate the guarded legacy blueprint _VERSION marker from MajorMinorPatch")
-	projectVersionCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm guarded legacy blueprint marker generation")
+	projectVersionCmd.Flags().BoolVar(&projectGenerate, "generate", false, "Generate the guarded _VERSION upgrade marker from MajorMinorPatch")
+	projectVersionCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm guarded _VERSION marker generation")
 	projectCmd.Flags().StringVar(&projectEngine, "engine", "tofu", "IaC engine: tofu (default), terraform, or auto")
 	projectCmd.Flags().BoolVar(&projectYes, "yes", false, "Confirm destructive operations")
 	projectCmd.AddCommand(projectVersionCmd)

@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -239,5 +242,293 @@ func TestVersionsTagDryRunDoesNotRequireRepositoryOrMutate(t *testing.T) {
 func TestVersionsMainBranchOverrideIsAvailableToWorkflowCommands(t *testing.T) {
 	if versionsCmd.PersistentFlags().Lookup("main-branch") == nil {
 		t.Fatal("versions command lacks --main-branch")
+	}
+}
+
+func TestVersionsPurgeStopsBeforeActionWhenLegacyWayOfWorkIsAmbiguous(t *testing.T) {
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		command := exec.Command("git", args...)
+		command.Dir = dir
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.test")
+	runGit("config", "user.name", "Test")
+	config := filepath.Join(dir, ".cloudopsworks")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"gitversion_gitflow.yaml":    "mode: duplicate\n",
+		"gitversion_githubflow.yaml": "mode: duplicate\n",
+		"gitversion_trunkbased.yaml": "mode: trunk\n",
+		"gitversion.yaml":            "mode: duplicate\n",
+	} {
+		if err := os.WriteFile(filepath.Join(config, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit("add", ".cloudopsworks")
+	runGit("commit", "-m", "ambiguous legacy selectors")
+
+	oldWorkDir, oldGitPath, oldMain := versionsWorkDir, versionsGitPath, versionsMainBranch
+	versionsWorkDir, versionsGitPath, versionsMainBranch = dir, "git", ""
+	t.Cleanup(func() {
+		versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMain
+	})
+	actionCalled := false
+	command := versionsPurgeAction("purge", "purge", "purge", cobra.NoArgs, func(context.Context, *versions.Workflows, []string) error {
+		actionCalled = true
+		return nil
+	})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "matched 2 checked-in selectors") {
+		t.Fatalf("purge detection error = %v", err)
+	}
+	if actionCalled {
+		t.Fatal("purge action ran after ambiguous WayOfWork detection")
+	}
+}
+
+func TestVersionsPurgeStopsBeforeActionWhenLegacySelectorIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	cliGit(t, dir, "init")
+	cliGit(t, dir, "config", "user.email", "test@example.test")
+	cliGit(t, dir, "config", "user.name", "Test")
+	config := filepath.Join(dir, ".cloudopsworks")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"gitversion_gitflow.yaml":    "mode: gitflow\n",
+		"gitversion_trunkbased.yaml": "mode: trunk\n",
+		"gitversion.yaml":            "mode: githubflow\n",
+	} {
+		if err := os.WriteFile(filepath.Join(config, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cliGit(t, dir, "add", ".cloudopsworks")
+	cliGit(t, dir, "commit", "-m", "missing legacy selector")
+
+	oldWorkDir, oldGitPath, oldMain := versionsWorkDir, versionsGitPath, versionsMainBranch
+	versionsWorkDir, versionsGitPath, versionsMainBranch = dir, "git", ""
+	t.Cleanup(func() {
+		versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMain
+	})
+	actionCalled := false
+	command := versionsPurgeAction("purge", "purge", "purge", cobra.NoArgs, func(context.Context, *versions.Workflows, []string) error {
+		actionCalled = true
+		return nil
+	})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "gitversion_githubflow.yaml") {
+		t.Fatalf("purge missing-selector error = %v", err)
+	}
+	if actionCalled {
+		t.Fatal("purge action ran after missing selector detection")
+	}
+}
+
+func TestVersionsPurgeStopsBeforeActionForValidAndMalformedHeaders(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		active string
+	}{
+		{
+			name:   "valid-before-malformed",
+			active: "# Agents: WayOfWork=githubflow\n# Agents: WayOfWork=gitflow # trailing junk\nmode: active\n",
+		},
+		{
+			name:   "malformed-before-valid",
+			active: "# Agents: WayOfWork=gitflow # trailing junk\n# Agents: WayOfWork=githubflow\nmode: active\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cliGit(t, dir, "init")
+			cliGit(t, dir, "config", "user.email", "test@example.test")
+			cliGit(t, dir, "config", "user.name", "Test")
+			config := filepath.Join(dir, ".cloudopsworks")
+			if err := os.MkdirAll(config, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{
+				"gitversion_gitflow.yaml":    "mode: gitflow\n",
+				"gitversion_githubflow.yaml": "mode: githubflow\n",
+				"gitversion_trunkbased.yaml": "mode: trunk\n",
+				"gitversion.yaml":            test.active,
+			} {
+				if err := os.WriteFile(filepath.Join(config, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cliGit(t, dir, "add", ".cloudopsworks")
+			cliGit(t, dir, "commit", "-m", "mixed WayOfWork headers")
+
+			oldWorkDir, oldGitPath, oldMain := versionsWorkDir, versionsGitPath, versionsMainBranch
+			versionsWorkDir, versionsGitPath, versionsMainBranch = dir, "git", ""
+			t.Cleanup(func() {
+				versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMain
+			})
+			actionCalled := false
+			command := versionsPurgeAction("purge", "purge", "purge", cobra.NoArgs, func(context.Context, *versions.Workflows, []string) error {
+				actionCalled = true
+				return nil
+			})
+			if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "malformed WayOfWork header") {
+				t.Fatalf("purge mixed-header detection error = %v", err)
+			}
+			if actionCalled {
+				t.Fatal("purge action ran after malformed extra WayOfWork header")
+			}
+		})
+	}
+}
+
+func TestVersionsPurgeStopsBeforeActionForStagedConfigCancelledInWorktree(t *testing.T) {
+	dir := t.TempDir()
+	cliGit(t, dir, "init")
+	cliGit(t, dir, "config", "user.email", "test@example.test")
+	cliGit(t, dir, "config", "user.name", "Test")
+	config := filepath.Join(dir, ".cloudopsworks")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	active := "# Agents: WayOfWork=githubflow\nmode: active\n"
+	for name, content := range map[string]string{
+		"gitversion_gitflow.yaml":    "mode: gitflow\n",
+		"gitversion_githubflow.yaml": "mode: githubflow\n",
+		"gitversion_trunkbased.yaml": "mode: trunk\n",
+		"gitversion.yaml":            active,
+	} {
+		if err := os.WriteFile(filepath.Join(config, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cliGit(t, dir, "add", ".cloudopsworks")
+	cliGit(t, dir, "commit", "-m", "add workflow metadata")
+	activePath := filepath.Join(config, "gitversion.yaml")
+	if err := os.WriteFile(activePath, []byte("# Agents: WayOfWork=trunkbased\nmode: staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, dir, "add", ".cloudopsworks/gitversion.yaml")
+	if err := os.WriteFile(activePath, []byte(active), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldWorkDir, oldGitPath, oldMain := versionsWorkDir, versionsGitPath, versionsMainBranch
+	versionsWorkDir, versionsGitPath, versionsMainBranch = dir, "git", ""
+	t.Cleanup(func() {
+		versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMain
+	})
+	actionCalled := false
+	command := versionsPurgeAction("purge", "purge", "purge", cobra.NoArgs, func(context.Context, *versions.Workflows, []string) error {
+		actionCalled = true
+		return nil
+	})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "gitversion.yaml has staged changes relative to HEAD") {
+		t.Fatalf("purge staged-config detection error = %v", err)
+	}
+	if actionCalled {
+		t.Fatal("purge action ran after staged config was cancelled in the worktree")
+	}
+}
+
+func cliGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = dir
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+	return string(output)
+}
+
+func setupCLIHeaderlessPurgeRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	cliGit(t, root, "init", "--bare", remote)
+	repo := filepath.Join(root, "repo")
+	cliGit(t, root, "clone", remote, repo)
+	cliGit(t, repo, "config", "user.email", "test@example.test")
+	cliGit(t, repo, "config", "user.name", "Test")
+	cliGit(t, repo, "checkout", "-b", "master")
+	config := filepath.Join(repo, ".cloudopsworks")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	selectors := map[string]string{
+		"gitversion_gitflow.yaml":    "mode: ContinuousDelivery\nlegacy-selector: gitflow\n",
+		"gitversion_githubflow.yaml": "mode: ContinuousDelivery\nlegacy-selector: githubflow\n",
+		"gitversion_trunkbased.yaml": "mode: ContinuousDelivery\nlegacy-selector: trunkbased\n",
+	}
+	for name, content := range selectors {
+		if err := os.WriteFile(filepath.Join(config, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(config, "gitversion.yaml"), []byte(selectors["gitversion_githubflow.yaml"]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, repo, "add", ".cloudopsworks")
+	cliGit(t, repo, "commit", "-m", "add headerless GitHubFlow config")
+	cliGit(t, repo, "push", "-u", "origin", "master")
+	cliGit(t, remote, "symbolic-ref", "HEAD", "refs/heads/master")
+	cliGit(t, repo, "remote", "set-head", "origin", "master")
+	cliGit(t, repo, "checkout", "-b", "feature/stale")
+	if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("merged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, repo, "add", "feature.txt")
+	cliGit(t, repo, "commit", "-m", "add merged feature")
+	cliGit(t, repo, "push", "-u", "origin", "feature/stale")
+	cliGit(t, repo, "checkout", "--no-guess", "master")
+	cliGit(t, repo, "merge", "--no-ff", "feature/stale", "-m", "merge feature")
+	cliGit(t, repo, "push", "origin", "master")
+	cliGit(t, repo, "checkout", "--no-guess", "feature/stale")
+	return repo
+}
+
+func TestVersionsFeaturePurgeCLIHandlesHeaderlessGitHubFlowOnMaster(t *testing.T) {
+	for _, override := range []bool{false, true} {
+		name := "implicit-primary"
+		if override {
+			name = "main-branch-master"
+		}
+		t.Run(name, func(t *testing.T) {
+			repo := setupCLIHeaderlessPurgeRepo(t)
+			oldWorkDir, oldGitPath, oldMain := versionsWorkDir, versionsGitPath, versionsMainBranch
+			versionsWorkDir, versionsGitPath, versionsMainBranch = repo, "git", ""
+			t.Cleanup(func() {
+				versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMain
+			})
+
+			command := &cobra.Command{Use: "versions"}
+			command.PersistentFlags().StringVar(&versionsMainBranch, "main-branch", "", "primary branch")
+			command.AddCommand(newVersionsFeatureCommand())
+			args := []string{"feature", "purge", "stale"}
+			if override {
+				args = append(args, "--main-branch", "master")
+			}
+			command.SetArgs(args)
+			if err := command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if current := strings.TrimSpace(cliGit(t, repo, "branch", "--show-current")); current != "master" {
+				t.Fatalf("current branch = %q, want master", current)
+			}
+			for _, ref := range []string{"refs/heads/feature/stale", "refs/remotes/origin/feature/stale"} {
+				check := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
+				check.Dir = repo
+				if err := check.Run(); err == nil {
+					t.Fatalf("purged ref remains: %s", ref)
+				}
+			}
+		})
 	}
 }

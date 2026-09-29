@@ -27,9 +27,16 @@ it reports the selected action without changing configuration, fetching,
 checking out, merging, creating branches or tags, pushing, deleting, or opening
 a pull request.
 
-The command reads the `# Agents: WayOfWork=<workflow>` header in
-`.cloudopsworks/gitversion.yaml`. A missing or legacy header is treated as
-GitFlow for compatibility. Branching behavior is then workflow-sensitive:
+The command first reads the `# Agents: WayOfWork=<workflow>` header in
+`.cloudopsworks/gitversion.yaml`. For a headerless legacy config, it can also
+detect the workflow when that file byte-matches exactly one unchanged selector
+checked into `HEAD` (`gitversion_gitflow.yaml`, `gitversion_githubflow.yaml`, or
+`gitversion_trunkbased.yaml`). Non-purge commands retain the historical
+GitFlow fallback when neither method is reliable. Destructive `purge` commands
+do not: the active config itself must also be unchanged from `HEAD`, and an
+ambiguous match, no match, modified/untracked selector, malformed header, or
+duplicate header stops before fetch, checkout, or deletion.
+Branching behavior is then workflow-sensitive:
 
 | Way of work | Feature/release base | `develop` | Support branches |
 | --- | --- | --- | --- |
@@ -248,8 +255,8 @@ remote-parity guard as a finish.
 
 ## Related project-version marker generation
 
-`versions` never writes a blueprint upgrade marker. The separate command below
-exists only for the legacy template marker:
+`versions` never writes a repository upgrade marker. Use the separate guarded
+project command:
 
 ```bash
 tronador project version --generate --yes
@@ -257,12 +264,16 @@ tronador project version --generate --dry-run
 ```
 
 `--generate` calculates GitVersion's `MajorMinorPatch` and writes
-`vX.Y.Z` to `.cloudopsworks/_VERSION` (or the supported legacy
+`vX.Y.Z` to `.cloudopsworks/_VERSION` (or a supported legacy
 `.github/_VERSION`). It is deliberately restricted to one unambiguous,
-catalog-managed versioned template layout; an ordinary project marker is not
-sufficient. A missing marker may be created atomically only after that layout
-and its active regular template marker have been verified. Symlinked or
-non-regular layouts/markers, or multiple active legacy layouts, are rejected.
+catalog-managed versioned template layout or an explicitly registered private
+source marker. Private `.cloudopsworks/.blueprint` and
+`.cloudopsworks/.skills` markers are eligible without becoming public catalog
+templates; `.github/.skills` is not eligible. An ordinary project marker,
+`_VERSION`, or `.cloudopsworks` directory is not sufficient. A missing version
+marker may be created atomically only after the layout and its active regular
+eligibility marker have been verified. Symlinked or non-regular
+layouts/markers, conflicting markers, or multiple active layouts are rejected.
 Outside a dry-run it requires `--yes`, warns before replacing an existing
 marker because the marker controls template upgrades, and never creates a Git
 tag, commit, or push. It cannot be combined with `--plain` or `--snapshot`.

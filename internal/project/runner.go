@@ -262,8 +262,8 @@ func capabilityFlags(binding CapabilityBinding) []FlagDefinition {
 	}
 	if binding.Operation == "generate-version" {
 		flags = append(flags,
-			FlagDefinition{Name: "generate", Type: "bool", Description: "generate the guarded legacy blueprint _VERSION marker for a catalog-managed template-derived repository", Default: "false"},
-			FlagDefinition{Name: "yes", Type: "bool", Description: "confirm legacy blueprint marker generation outside a dry-run", Default: "false"},
+			FlagDefinition{Name: "generate", Type: "bool", Description: "generate the guarded _VERSION marker for a catalog-managed template or explicitly registered private source repository", Default: "false"},
+			FlagDefinition{Name: "yes", Type: "bool", Description: "confirm guarded _VERSION marker generation outside a dry-run", Default: "false"},
 		)
 	}
 	if binding.Executor == ExecutorNative && binding.ConfirmationPolicy == "yes_for_noninteractive" {
@@ -466,7 +466,7 @@ func buildOperationSteps(binding CapabilityBinding, detection Detection, argumen
 		if snapshot || plain || generate {
 			variable = "MajorMinorPatch"
 			if generate {
-				description = "calculate legacy blueprint marker version"
+				description = "calculate guarded upgrade marker version"
 			} else if snapshot {
 				description = "calculate project snapshot version"
 			} else {
@@ -939,7 +939,7 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 		markerVersion := "v" + strings.TrimPrefix(strings.TrimPrefix(version, "v"), "V")
 		change, warning, buildErr := buildLegacyBlueprintMarkerChangeInTarget(markerTarget, markerVersion)
 		if buildErr != nil {
-			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build legacy blueprint marker change", buildErr), detection)
+			return Result{}, withDetection(wrapProjectError("project_operation_failed", "build guarded upgrade marker change", buildErr), detection)
 		}
 		if warning != "" {
 			_, _ = fmt.Fprintln(r.Opts.Stderr, warning)
@@ -983,7 +983,7 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 	for _, change := range changes {
 		if r.Opts.Generate {
 			if writeErr := writeLegacyBlueprintMarkerAtomically(markerTarget, change.after); writeErr != nil {
-				return Result{}, withDetection(wrapProjectError("project_operation_failed", "write legacy blueprint marker", writeErr), detection)
+				return Result{}, withDetection(wrapProjectError("project_operation_failed", "write guarded upgrade marker", writeErr), detection)
 			}
 			continue
 		}
@@ -1001,7 +1001,7 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 	}
 	if !r.Opts.JSON {
 		if r.Opts.Generate {
-			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated legacy blueprint marker %s in %s (tag_created=false)\n", result.Version, markerPath)
+			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated guarded upgrade marker %s in %s (tag_created=false)\n", result.Version, markerPath)
 		} else {
 			_, _ = fmt.Fprintf(r.Opts.Stdout, "Generated version %s in VERSION (tag_created=false)\n", version)
 		}
@@ -1010,9 +1010,9 @@ func (r *Runner) runVersion(ctx context.Context, detection Detection, plan Opera
 }
 
 // legacyBlueprintMarkerPath accepts versioned repository-template catalog
-// markers and the private base blueprint marker. A project implementation
-// marker alone is not sufficient: _VERSION controls blueprint upgrades and
-// must not be created in arbitrary repositories.
+// markers and explicitly registered private source markers. A project
+// implementation marker alone is not sufficient: _VERSION controls upgrades
+// and must not be created in arbitrary repositories.
 type catalogMarkerTarget struct {
 	path      string
 	marker    string
@@ -1104,12 +1104,24 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 		mode     os.FileMode
 	}
 	var candidates []markerCandidate
-	// The base blueprint repository is not a pullable template, so keep this
-	// marker local to guarded version generation instead of the public catalog.
-	markerTemplates := append([]repospkg.Template(nil), catalog.Templates...)
-	markerTemplates = append(markerTemplates, repospkg.Template{
-		Name: "blueprint", Description: "Base blueprint repository", Marker: ".blueprint", Versioned: true,
-	})
+	type generationMarker struct {
+		template repospkg.Template
+		layout   string
+	}
+	markerTemplates := make([]generationMarker, 0, len(catalog.Templates)+2)
+	for _, template := range catalog.Templates {
+		markerTemplates = append(markerTemplates, generationMarker{template: template})
+	}
+	// These source repositories are not pullable templates. Keep their markers
+	// local to guarded version generation instead of expanding the public catalog.
+	markerTemplates = append(markerTemplates,
+		generationMarker{template: repospkg.Template{
+			Name: "blueprint", Description: "Base blueprint repository", Marker: ".blueprint", Versioned: true,
+		}},
+		generationMarker{template: repospkg.Template{
+			Name: "skills", Description: "Skills source repository", Marker: ".skills", Versioned: true,
+		}, layout: ".cloudopsworks"},
+	)
 	closeCandidates := func() {
 		for _, candidate := range candidates {
 			_ = closeProjectMarkerRoot(candidate.root.root)
@@ -1138,7 +1150,11 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 				}
 			}()
 			var active []repospkg.Template
-			for _, template := range markerTemplates {
+			for _, markerTemplate := range markerTemplates {
+				if markerTemplate.layout != "" && markerTemplate.layout != candidateLayout.root {
+					continue
+				}
+				template := markerTemplate.template
 				markerInfo, markerStatErr := layout.root.Lstat(template.Marker)
 				if errors.Is(markerStatErr, os.ErrNotExist) {
 					continue
@@ -1164,12 +1180,12 @@ func legacyBlueprintMarkerTarget(workdir string) (catalogMarkerTarget, error) {
 			mode := os.FileMode(0o644)
 			if markerStatErr == nil {
 				if markerInfo.Mode()&os.ModeSymlink != 0 || !markerInfo.Mode().IsRegular() {
-					err = projectError("project_version_marker_invalid", "legacy blueprint marker must be a regular file")
+					err = projectError("project_version_marker_invalid", "guarded upgrade marker must be a regular file")
 					return
 				}
 				mode = markerInfo.Mode().Perm()
 			} else if !errors.Is(markerStatErr, os.ErrNotExist) {
-				err = wrapProjectError("project_version_marker_invalid", "inspect legacy blueprint marker", markerStatErr)
+				err = wrapProjectError("project_version_marker_invalid", "inspect guarded upgrade marker", markerStatErr)
 				return
 			}
 			if ensureErr := layout.ensure(); ensureErr != nil {
@@ -1271,7 +1287,7 @@ func buildLegacyBlueprintMarkerChangeInTarget(target catalogMarkerTarget, versio
 	}
 	warning := ""
 	if !missing && strings.TrimSpace(string(before)) != version {
-		warning = fmt.Sprintf("WARNING: --generate replaces blueprint marker %s from %q to %q; this marker controls repository-template upgrades.", target.path, strings.TrimSpace(string(before)), version)
+		warning = fmt.Sprintf("WARNING: --generate replaces guarded upgrade marker %s from %q to %q; this marker controls repository-template upgrades.", target.path, strings.TrimSpace(string(before)), version)
 	}
 	op := "modify"
 	if missing {

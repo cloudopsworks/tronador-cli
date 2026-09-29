@@ -128,7 +128,7 @@ func versionsWayOfWork() (versions.WayOfWork, error) {
 	return "", nil
 }
 
-func newVersionsWorkflow(cmd *cobra.Command) (*versions.Workflows, error) {
+func newVersionsWorkflow(cmd *cobra.Command, requireReliableWayOfWork bool) (*versions.Workflows, error) {
 	runner, err := versions.NewRunner(versions.Options{
 		WorkDir:    versionsWorkDir,
 		GitPath:    versionsGitPath,
@@ -141,14 +141,19 @@ func newVersionsWorkflow(cmd *cobra.Command) (*versions.Workflows, error) {
 	if err != nil {
 		return nil, err
 	}
-	wow, err := runner.CurrentWayOfWork()
+	var wow versions.WayOfWork
+	if requireReliableWayOfWork {
+		wow, err = runner.CurrentWayOfWorkForPurge(cmd.Context())
+	} else {
+		wow, err = runner.CurrentWayOfWork()
+	}
 	if err != nil {
 		return nil, err
 	}
 	return runner.Workflow(wow)
 }
 
-func versionsAction(use, short, long string, args cobra.PositionalArgs, action func(context.Context, *versions.Workflows, []string) error) *cobra.Command {
+func versionsWorkflowAction(use, short, long string, args cobra.PositionalArgs, requireReliableWayOfWork bool, action func(context.Context, *versions.Workflows, []string) error) *cobra.Command {
 	return &cobra.Command{
 		Use:          use,
 		Short:        short,
@@ -160,13 +165,21 @@ func versionsAction(use, short, long string, args cobra.PositionalArgs, action f
 				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would run versions %s\n", use)
 				return nil
 			}
-			workflow, err := newVersionsWorkflow(cmd)
+			workflow, err := newVersionsWorkflow(cmd, requireReliableWayOfWork)
 			if err != nil {
 				return err
 			}
 			return action(context.Background(), workflow, args)
 		},
 	}
+}
+
+func versionsAction(use, short, long string, args cobra.PositionalArgs, action func(context.Context, *versions.Workflows, []string) error) *cobra.Command {
+	return versionsWorkflowAction(use, short, long, args, false, action)
+}
+
+func versionsPurgeAction(use, short, long string, args cobra.PositionalArgs, action func(context.Context, *versions.Workflows, []string) error) *cobra.Command {
+	return versionsWorkflowAction(use, short, long, args, true, action)
 }
 
 func newVersionsFeatureCommand() *cobra.Command {
@@ -189,7 +202,7 @@ finish, and purge infer the feature name from feature/* when omitted.`,
 		versionsAction("finish [name]", "Create the feature finish pull request", "Create a guarded feature pull request to develop for GitFlow or main otherwise.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.FeatureFinish(ctx, optionalArg(args))
 		}),
-		versionsAction("purge [name]", "Delete a feature branch locally and remotely", "Delete feature/<name>; when active it first checks out the appropriate base branch.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
+		versionsPurgeAction("purge [name]", "Delete a feature branch locally and remotely", "Delete feature/<name>; when active it first checks out the appropriate base branch. Destructive purge requires an explicit or uniquely detected WayOfWork.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.FeaturePurge(ctx, optionalArg(args))
 		}),
 	)
@@ -214,7 +227,7 @@ and tag work, then atomically publishes the target, tag, and source deletion.`,
 		newVersionsFinishAction("finish", "Finish the current hotfix", "Finish the current hotfix via pull request, or use --local for journaled atomic remote publication.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
 			return workflow.HotfixFinish(ctx, "", local)
 		}),
-		versionsAction("purge [number]", "Delete a hotfix branch locally and remotely", "Delete hotfix/v<number>; infer it from the current hotfix branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
+		versionsPurgeAction("purge [number]", "Delete a hotfix branch locally and remotely", "Delete hotfix/v<number>; infer it from the current hotfix branch when omitted. Destructive purge requires an explicit or uniquely detected WayOfWork.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.HotfixPurge(ctx, optionalArg(args))
 		}),
 	)
@@ -250,7 +263,7 @@ target, the tag, and source deletion.`,
 		newVersionsFinishAction("finish", "Finish the current release", "Finish the current release via pull request, or use --local for journaled atomic remote publication.", func(ctx context.Context, workflow *versions.Workflows, local bool) error {
 			return workflow.ReleaseFinish(ctx, "", local)
 		}),
-		versionsAction("purge [name]", "Delete a release branch locally and remotely", "Delete release/vX.Y.Z; infer it from the current release branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
+		versionsPurgeAction("purge [name]", "Delete a release branch locally and remotely", "Delete release/vX.Y.Z; infer it from the current release branch when omitted. Destructive purge requires an explicit or uniquely detected WayOfWork.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.ReleasePurge(ctx, optionalArg(args))
 		}),
 	)
@@ -271,7 +284,7 @@ the installed GitVersion configuration declares WayOfWork=gitflow.`,
 		versionsAction("publish [tag]", "Publish a support branch", "Publish support/vX.Y.Z; infer the tag from the current support branch when omitted (GitFlow only).", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.SupportPublish(ctx, optionalArg(args))
 		}),
-		versionsAction("purge [tag]", "Delete a support branch locally and remotely", "Delete support/vX.Y.Z; infer the tag from the current support branch when omitted (GitFlow only).", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
+		versionsPurgeAction("purge [tag]", "Delete a support branch locally and remotely", "Delete support/vX.Y.Z; infer the tag from the current support branch when omitted (GitFlow only). Destructive purge requires an explicit or uniquely detected WayOfWork.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
 			return workflow.SupportPurge(ctx, optionalArg(args))
 		}),
 	)
@@ -299,7 +312,7 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would run versions tag\n")
 				return nil
 			}
-			workflow, err := newVersionsWorkflow(cmd)
+			workflow, err := newVersionsWorkflow(cmd, false)
 			if err != nil {
 				return err
 			}
