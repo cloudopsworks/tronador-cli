@@ -484,12 +484,31 @@ func (w *Workflows) mergeContinue(ctx context.Context) error {
 // It is intentionally separate from Init so callers can execute actions after
 // configuration selection without re-reading mutable YAML.
 func (r *Runner) Workflow(wow WayOfWork) (*Workflows, error) {
-	return NewWorkflows(WorkflowOptions{Dir: r.workDir, WayOfWork: string(wow), MainBranch: r.mainBranch, Runner: runnerCommand{dir: r.workDir, gitPath: r.gitPath, dryRun: r.dryRun}})
+	command := runnerCommand{dir: r.workDir, gitPath: r.gitPath, dryRun: r.dryRun}
+	if !r.dryRun {
+		command.tools = newCommandToolResolver(commandToolResolverOptions{
+			workDir:        r.workDir,
+			toolsDir:       r.toolsDir,
+			toolsConfig:    r.toolsConfig,
+			noInstallTools: r.noInstallTools,
+			allowNetwork:   r.allowNetwork,
+			versions:       r.toolVersions,
+			paths:          r.toolPaths,
+			stderr:         r.stderr,
+		})
+	}
+	return NewWorkflows(WorkflowOptions{
+		Dir:        r.workDir,
+		WayOfWork:  string(wow),
+		MainBranch: r.mainBranch,
+		Runner:     command,
+	})
 }
 
 type runnerCommand struct {
 	dir, gitPath string
 	dryRun       bool
+	tools        *commandToolResolver
 }
 
 func (r runnerCommand) Run(ctx context.Context, name string, args ...string) (string, error) {
@@ -498,6 +517,12 @@ func (r runnerCommand) Run(ctx context.Context, name string, args ...string) (st
 	}
 	if name == "git" {
 		name = r.gitPath
+	} else if r.tools != nil && provisionedVersionsTool(name) {
+		resolved, err := r.tools.resolve(ctx, name)
+		if err != nil {
+			return "", err
+		}
+		name = resolved
 	}
 	return ExecRunner{Dir: r.dir}.Run(ctx, name, args...)
 }

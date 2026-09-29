@@ -3,9 +3,13 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,6 +32,30 @@ func TestVersionsCommandIsRootNamespaceWithCompatibilityAliases(t *testing.T) {
 	for _, name := range []string{"gitflow", "githubflow", "trunkbased", "trunk"} {
 		if initCommand.Flags().Lookup(name) == nil {
 			t.Fatalf("init flag --%s missing", name)
+		}
+	}
+}
+
+func TestVersionsToolFlagsAreInheritedByAliasesAndSubcommands(t *testing.T) {
+	flags := []string{"tools-dir", "tools-config", "no-install-tools", "allow-network", "tool-version", "tool-path"}
+	for _, name := range flags {
+		if versionsCmd.PersistentFlags().Lookup(name) == nil {
+			t.Fatalf("versions lacks persistent --%s", name)
+		}
+	}
+	for _, path := range [][]string{
+		{"versions", "hotfix", "start"},
+		{"gf", "release", "finish"},
+		{"flow", "tag"},
+	} {
+		command, _, err := rootCmd.Find(path)
+		if err != nil {
+			t.Fatalf("find %s: %v", strings.Join(path, " "), err)
+		}
+		for _, name := range flags {
+			if command.InheritedFlags().Lookup(name) == nil {
+				t.Fatalf("%s does not inherit --%s", strings.Join(path, " "), name)
+			}
 		}
 	}
 }
@@ -227,6 +255,16 @@ func TestVersionsWorkflowDryRunNeverCallsAction(t *testing.T) {
 }
 
 func TestVersionsTagDryRunDoesNotRequireRepositoryOrMutate(t *testing.T) {
+	restoreVersionsToolOptions(t)
+	cache := filepath.Join(t.TempDir(), "missing-cache")
+	badConfig := filepath.Join(t.TempDir(), "invalid.json")
+	if err := os.WriteFile(badConfig, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	versionsToolsDir, versionsToolsConfig = cache, badConfig
+	versionsAllowNetwork = true
+	versionsToolVersions = []string{"malformed"}
+	versionsToolPaths = []string{"also-malformed"}
 	command := newVersionsTagCommand()
 	command.Flags().Bool("dry-run", true, "")
 	var output bytes.Buffer
@@ -236,6 +274,118 @@ func TestVersionsTagDryRunDoesNotRequireRepositoryOrMutate(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "dry-run: would run versions tag") {
 		t.Fatalf("dry-run output = %q", output.String())
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created tool cache: %v", err)
+	}
+}
+
+func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixtures")
+	}
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git unavailable")
+	}
+
+	t.Run("explicit path", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsNoInstallTools = true
+		versionsToolPaths = []string{"gitversion=" + writeCLITool(t, t.TempDir(), "gitversion", "1.2.3")}
+		stdout, _ := executeVersionsTagCommand(t)
+		if stdout != "v1.2.3\n" {
+			t.Fatalf("stdout = %q", stdout)
+		}
+	})
+
+	t.Run("PATH wins over configured version", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		bin := t.TempDir()
+		writeCLITool(t, bin, "gitversion", "2.3.4")
+		t.Setenv("PATH", bin)
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolVersions = []string{"gitversion=99.0.0"}
+		stdout, _ := executeVersionsTagCommand(t)
+		if stdout != "v2.3.4\n" {
+			t.Fatalf("stdout = %q", stdout)
+		}
+	})
+
+	t.Run("cache without network", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		cache := t.TempDir()
+		writeCLITool(t, cache, "gitversion", "3.4.5")
+		t.Setenv("PATH", t.TempDir())
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolsDir, versionsNoInstallTools = cache, true
+		stdout, _ := executeVersionsTagCommand(t)
+		if stdout != "v3.4.5\n" {
+			t.Fatalf("stdout = %q", stdout)
+		}
+	})
+
+	t.Run("missing tool is actionable and does not create cache", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		cache := filepath.Join(t.TempDir(), "missing-cache")
+		t.Setenv("PATH", t.TempDir())
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolsDir = cache
+		_, _, err := executeVersionsTagCommandError(t)
+		if err == nil || !strings.Contains(err.Error(), "--allow-network") || !strings.Contains(err.Error(), "gitversion") {
+			t.Fatalf("error = %v; want actionable GitVersion error", err)
+		}
+		if _, statErr := os.Stat(cache); !os.IsNotExist(statErr) {
+			t.Fatalf("missing-tool path created cache: %v", statErr)
+		}
+	})
+
+	t.Run("download uses configured version and keeps stdout clean", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		requested := make(chan string, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requested <- r.URL.Path
+			_, _ = w.Write([]byte("#!/bin/sh\nprintf '4.5.6\\n'\n"))
+		}))
+		defer server.Close()
+		downloadURL := server.URL + "/{version}/gitversion"
+		config := fmt.Sprintf(`{"tools":[{"name":"gitversion","executable":"gitversion","default_version":"1.0.0","url_template":%q,"format":"binary","platform_overrides":{%q:{"url_template":%q,"format":"binary"}}}]}`,
+			downloadURL, runtime.GOOS+"/"+runtime.GOARCH, downloadURL)
+		configPath := filepath.Join(t.TempDir(), "tools.json")
+		if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", t.TempDir())
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolsDir, versionsToolsConfig = filepath.Join(t.TempDir(), "cache"), configPath
+		versionsAllowNetwork = true
+		versionsToolVersions = []string{"gitversion=7.8.9"}
+		stdout, stderr := executeVersionsTagCommand(t)
+		if stdout != "v4.5.6\n" {
+			t.Fatalf("stdout = %q", stdout)
+		}
+		if path := <-requested; path != "/7.8.9/gitversion" {
+			t.Fatalf("request path = %q", path)
+		}
+		if !strings.Contains(stderr, "Installing gitversion 7.8.9") {
+			t.Fatalf("stderr = %q; want install diagnostic", stderr)
+		}
+	})
+}
+
+func TestVersionsWorkflowRejectsMalformedToolAssignments(t *testing.T) {
+	restoreVersionsToolOptions(t)
+	versionsWorkDir = t.TempDir()
+	versionsToolPaths = []string{"gitversion"}
+	command := &cobra.Command{Use: "test"}
+	if _, err := newVersionsWorkflow(command, false); err == nil || !strings.Contains(err.Error(), "--tool-path expects name=value") {
+		t.Fatalf("malformed assignment error = %v", err)
 	}
 }
 
@@ -531,4 +681,83 @@ func TestVersionsFeaturePurgeCLIHandlesHeaderlessGitHubFlowOnMaster(t *testing.T
 			}
 		})
 	}
+}
+
+func restoreVersionsToolOptions(t *testing.T) {
+	t.Helper()
+	oldWorkDir, oldGitPath, oldMainBranch := versionsWorkDir, versionsGitPath, versionsMainBranch
+	oldToolsDir, oldToolsConfig := versionsToolsDir, versionsToolsConfig
+	oldNoInstall, oldAllowNetwork := versionsNoInstallTools, versionsAllowNetwork
+	oldVersions := append([]string(nil), versionsToolVersions...)
+	oldPaths := append([]string(nil), versionsToolPaths...)
+	t.Setenv("HOME", t.TempDir())
+	t.Cleanup(func() {
+		versionsWorkDir, versionsGitPath, versionsMainBranch = oldWorkDir, oldGitPath, oldMainBranch
+		versionsToolsDir, versionsToolsConfig = oldToolsDir, oldToolsConfig
+		versionsNoInstallTools, versionsAllowNetwork = oldNoInstall, oldAllowNetwork
+		versionsToolVersions, versionsToolPaths = oldVersions, oldPaths
+	})
+	versionsToolsDir, versionsToolsConfig = "", ""
+	versionsNoInstallTools, versionsAllowNetwork = false, false
+	versionsToolVersions, versionsToolPaths = nil, nil
+}
+
+func setupVersionsTagRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	remote := filepath.Join(root, "remote.git")
+	repo := filepath.Join(root, "repo")
+	cliGit(t, root, "init", "--bare", remote)
+	cliGit(t, root, "init", repo)
+	cliGit(t, repo, "config", "user.email", "test@example.test")
+	cliGit(t, repo, "config", "user.name", "Test")
+	cliGit(t, repo, "checkout", "-b", "main")
+	configDir := filepath.Join(repo, ".cloudopsworks")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "gitversion.yaml"), []byte("# Agents: WayOfWork=githubflow\nmode: ContinuousDelivery\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cliGit(t, repo, "add", ".")
+	cliGit(t, repo, "commit", "-m", "initial")
+	cliGit(t, repo, "remote", "add", "origin", remote)
+	cliGit(t, repo, "push", "-u", "origin", "main")
+	cliGit(t, remote, "symbolic-ref", "HEAD", "refs/heads/main")
+	return repo
+}
+
+func writeCLITool(t *testing.T, dir, name, output string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' '"+output+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func executeVersionsTagCommand(t *testing.T) (string, string) {
+	t.Helper()
+	stdout, stderr, err := executeVersionsTagCommandError(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stdout, stderr
+}
+
+func executeVersionsTagCommandError(t *testing.T) (string, string, error) {
+	t.Helper()
+	command := newVersionsTagCommand()
+	var stdout, stderr bytes.Buffer
+	command.SetOut(&stdout)
+	command.SetErr(&stderr)
+	command.SetArgs(nil)
+	err := command.Execute()
+	return stdout.String(), stderr.String(), err
 }
