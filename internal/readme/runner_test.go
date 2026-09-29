@@ -11,6 +11,16 @@ import (
 	"testing"
 )
 
+func TestEmbeddedReadmeTemplateNamesBuildCommand(t *testing.T) {
+	data, err := defaultAssets.ReadFile(defaultTemplateAsset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Run `tronador readme build` to rebuild this file.") {
+		t.Fatal("generated README guidance must name the executable build command")
+	}
+}
+
 func TestInitCreatesReadmeYAMLFromEmbeddedAsset(t *testing.T) {
 	dir := t.TempDir()
 	runner, err := NewRunner(Options{WorkDir: dir, Stdout: io.Discard, Stderr: io.Discard})
