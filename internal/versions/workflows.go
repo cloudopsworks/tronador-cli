@@ -4,6 +4,7 @@
 package versions
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -523,14 +524,180 @@ func isWorkflowMutation(name string, args []string) bool {
 	return false
 }
 
-// CurrentWayOfWork reads the installed GitVersion config header. Missing or
-// legacy headers deliberately retain the historical GitFlow default.
+// CurrentWayOfWork reads the installed GitVersion config header. A headerless
+// legacy config may be identified by an exact, unique match to the checked-in
+// selector files. Unreliable legacy detection retains the historical GitFlow
+// default for non-purge commands.
 func (r *Runner) CurrentWayOfWork() (WayOfWork, error) {
 	data, err := os.ReadFile(filepath.Join(r.workDir, cloudOpsWorksDir, "gitversion.yaml"))
 	if err != nil {
 		return "", fmt.Errorf("read current gitversion config: %w", err)
 	}
+	if match := wowHeader.FindSubmatch(data); len(match) == 2 {
+		if wow, parseErr := ParseWayOfWork(string(match[1])); parseErr == nil {
+			return wow, nil
+		}
+	}
+	if wow, detectErr := r.detectLegacyWayOfWork(context.Background(), data); detectErr == nil {
+		return wow, nil
+	}
 	return currentWayOfWork(data), nil
+}
+
+// CurrentWayOfWorkForPurge resolves WayOfWork without the historical fallback.
+// Destructive purge must know which freshly fetched base proves merge ancestry,
+// so ambiguous or unmatched legacy configuration is rejected before a workflow
+// can fetch, check out, or delete a branch.
+func (r *Runner) CurrentWayOfWorkForPurge(ctx context.Context) (WayOfWork, error) {
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", err)
+	}
+	defer layout.root.Close()
+	data, _, err := readRegularFile(layout.root, "gitversion.yaml")
+	if err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: read current gitversion config: %w", err)
+	}
+	activePath := filepath.ToSlash(filepath.Join(cloudOpsWorksDir, "gitversion.yaml"))
+	if err := r.requirePathUnchangedFromHEAD(ctx, activePath); err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", err)
+	}
+	checkedInActive, err := r.readCheckedInFile(ctx, activePath)
+	if err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", err)
+	}
+	if !bytes.Equal(data, checkedInActive) {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: active config %s differs from its checked-in content", activePath)
+	}
+	declarations := wowDeclaration.FindAll(data, -1)
+	matches := wowHeader.FindAllSubmatch(data, -1)
+	if len(declarations) != len(matches) {
+		return "", errors.New("detect WayOfWork for destructive purge: malformed WayOfWork header")
+	}
+	if len(matches) > 1 {
+		return "", errors.New("detect WayOfWork for destructive purge: ambiguous WayOfWork headers")
+	}
+	if len(matches) == 1 {
+		wow, parseErr := ParseWayOfWork(string(matches[0][1]))
+		if parseErr != nil {
+			return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", parseErr)
+		}
+		return wow, nil
+	}
+	selectors, err := r.checkedInPurgeSelectors(ctx, layout)
+	if err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", err)
+	}
+	wow, err := matchLegacyWayOfWork(data, selectors)
+	if err != nil {
+		return "", fmt.Errorf("detect WayOfWork for destructive purge: %w", err)
+	}
+	return wow, nil
+}
+
+var wowDeclaration = regexp.MustCompile(`(?mi)^\s*#.*Agents.*WayOfWork.*$`)
+
+func (r *Runner) detectLegacyWayOfWork(ctx context.Context, data []byte) (WayOfWork, error) {
+	layout, err := r.validateCloudOpsWorksDir()
+	if err != nil {
+		return "", err
+	}
+	defer layout.root.Close()
+	return r.detectLegacyWayOfWorkInLayout(ctx, layout, data)
+}
+
+func (r *Runner) detectLegacyWayOfWorkInLayout(ctx context.Context, layout cloudOpsWorksLayout, data []byte) (WayOfWork, error) {
+	selectors, err := r.validateSelectorFiles(layout)
+	if err != nil {
+		return "", err
+	}
+	checkedInSelectors := make(map[WayOfWork][]byte, len(selectors))
+	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
+		name := wow.selectorFileName()
+		path := filepath.ToSlash(filepath.Join(cloudOpsWorksDir, name))
+		checkedIn, showErr := r.readCheckedInFile(ctx, path)
+		if showErr != nil {
+			return "", showErr
+		}
+		if !bytes.Equal(checkedIn, selectors[wow].data) {
+			return "", fmt.Errorf("selector %s differs from its checked-in content", path)
+		}
+		checkedInSelectors[wow] = checkedIn
+	}
+	return matchLegacyWayOfWork(data, checkedInSelectors)
+}
+
+func matchLegacyWayOfWork(data []byte, selectors map[WayOfWork][]byte) (WayOfWork, error) {
+	matches := make([]WayOfWork, 0, 1)
+	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
+		if bytes.Equal(data, selectors[wow]) {
+			matches = append(matches, wow)
+		}
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("headerless gitversion config matched %d checked-in selectors; expected exactly one", len(matches))
+	}
+	return matches[0], nil
+}
+
+func (r *Runner) checkedInPurgeSelectors(ctx context.Context, layout cloudOpsWorksLayout) (map[WayOfWork][]byte, error) {
+	selectors, err := r.validateSelectorFiles(layout)
+	if err != nil {
+		return nil, err
+	}
+	checkedInSelectors := make(map[WayOfWork][]byte, len(selectors))
+	for _, wow := range []WayOfWork{WayOfWorkGitFlow, WayOfWorkGitHubFlow, WayOfWorkTrunkBased} {
+		path := filepath.ToSlash(filepath.Join(cloudOpsWorksDir, wow.selectorFileName()))
+		if err := r.requirePathUnchangedFromHEAD(ctx, path); err != nil {
+			return nil, err
+		}
+		checkedIn, err := r.readCheckedInFile(ctx, path)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(checkedIn, selectors[wow].data) {
+			return nil, fmt.Errorf("selector %s differs from its checked-in content", path)
+		}
+		checkedInSelectors[wow] = checkedIn
+	}
+	return checkedInSelectors, nil
+}
+
+// requirePathUnchangedFromHEAD checks the index and worktree independently.
+// A net worktree-to-HEAD byte comparison is insufficient because a staged
+// change can be cancelled by restoring different worktree content.
+func (r *Runner) requirePathUnchangedFromHEAD(ctx context.Context, path string) error {
+	checks := []struct {
+		state string
+		args  []string
+	}{
+		{state: "staged", args: []string{"diff", "--cached", "--no-ext-diff", "--quiet", "--", path}},
+		{state: "worktree", args: []string{"diff", "--no-ext-diff", "--quiet", "--", path}},
+	}
+	for _, check := range checks {
+		command := exec.CommandContext(ctx, r.gitPath, check.args...)
+		command.Dir = r.workDir
+		output, err := command.CombinedOutput()
+		if err == nil {
+			continue
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return fmt.Errorf("%s has %s changes relative to HEAD", path, check.state)
+		}
+		return fmt.Errorf("check %s state for %s: %w: %s", check.state, path, err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func (r *Runner) readCheckedInFile(ctx context.Context, path string) ([]byte, error) {
+	command := exec.CommandContext(ctx, r.gitPath, "show", "HEAD:"+path)
+	command.Dir = r.workDir
+	data, err := command.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("read checked-in file %s: %w: %s", path, err, strings.TrimSpace(string(data)))
+	}
+	return data, nil
 }
 
 func (w *Workflows) deleteLocalBranch(ctx context.Context, branch string) error {

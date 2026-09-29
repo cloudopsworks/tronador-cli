@@ -89,7 +89,7 @@ func TestProjectVersionHelpDocumentsOnlyVersionOptions(t *testing.T) {
 		t.Fatalf("version help: %v", err)
 	}
 	help := output.String()
-	for _, want := range []string{"Generate and write the detected project's version.", "--plain", "Node and Python projects", "--snapshot", "Java", "--generate", "--yes", "template-derived", "MajorMinorPatch", "dry-run"} {
+	for _, want := range []string{"Generate and write the detected project's version.", "--plain", "Node and Python projects", "--snapshot", "Java", "--generate", "--yes", ".cloudopsworks/.skills", "MajorMinorPatch", "dry-run"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("version help missing %q:\n%s", want, help)
 		}
