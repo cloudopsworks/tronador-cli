@@ -3,7 +3,7 @@
   ** 
   ** This file was automatically generated. 
   ** 1) Make all changes to `README.yaml` 
-  ** 2) Run `tronador readme` to rebuild this file.
+  ** 2) Run `tronador readme build` to rebuild this file.
   -->
 {{- defineDatasource "config" .Env.README_YAML | regexp.Replace ".*" "" -}}
 {{- defineDatasource "includes" .Env.README_INCLUDES | regexp.Replace ".*" "" }}
