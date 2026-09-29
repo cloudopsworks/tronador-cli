@@ -38,6 +38,12 @@ type Options struct {
 	WorkDir         string
 	GitPath         string
 	MainBranch      string
+	ToolsDir        string
+	ToolsConfig     string
+	NoInstallTools  bool
+	AllowNetwork    bool
+	ToolVersions    map[string]string
+	ToolPaths       map[string]string
 	DryRun          bool
 	Stdin           io.Reader
 	Stdout          io.Writer
@@ -61,14 +67,20 @@ type InitResult struct {
 
 // Runner performs versions operations in one repository.
 type Runner struct {
-	workDir    string
-	gitPath    string
-	mainBranch string
-	dryRun     bool
-	stdin      io.Reader
-	stdout     io.Writer
-	stderr     io.Writer
-	selectWOW  func(io.Reader, io.Writer) (WayOfWork, error)
+	workDir        string
+	gitPath        string
+	mainBranch     string
+	toolsDir       string
+	toolsConfig    string
+	noInstallTools bool
+	allowNetwork   bool
+	toolVersions   map[string]string
+	toolPaths      map[string]string
+	dryRun         bool
+	stdin          io.Reader
+	stdout         io.Writer
+	stderr         io.Writer
+	selectWOW      func(io.Reader, io.Writer) (WayOfWork, error)
 }
 
 // NewRunner creates a configured versions runner.
@@ -105,7 +117,33 @@ func NewRunner(options Options) (*Runner, error) {
 	if selector == nil {
 		selector = SelectWayOfWork
 	}
-	return &Runner{workDir: absolute, gitPath: gitPath, mainBranch: mainBranch, dryRun: options.DryRun, stdin: stdin, stdout: stdout, stderr: stderr, selectWOW: selector}, nil
+	return &Runner{
+		workDir:        absolute,
+		gitPath:        gitPath,
+		mainBranch:     mainBranch,
+		toolsDir:       options.ToolsDir,
+		toolsConfig:    options.ToolsConfig,
+		noInstallTools: options.NoInstallTools,
+		allowNetwork:   options.AllowNetwork,
+		toolVersions:   cloneStringMap(options.ToolVersions),
+		toolPaths:      cloneStringMap(options.ToolPaths),
+		dryRun:         options.DryRun,
+		stdin:          stdin,
+		stdout:         stdout,
+		stderr:         stderr,
+		selectWOW:      selector,
+	}, nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	clone := make(map[string]string, len(values))
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
 }
 
 func (w WayOfWork) selectorFileName() string { return "gitversion_" + string(w) + ".yaml" }

@@ -3,8 +3,7 @@
   ** 
   ** This file was automatically generated. 
   ** 1) Make all changes to `README.yaml` 
-  ** 2) Run `make init` (you only need to do this once)
-  ** 3) Run`make readme` to rebuild this file. 
+  ** 2) Run `tronador readme build` to rebuild this file.
   -->
 [![README Header][readme_header_img]][readme_header_link]
 
@@ -167,6 +166,8 @@ and safety behavior.
 - `versions release` — start a patch, minor, or major release; publish or purge a named/current release, or finish the current release.
 - `versions support` — manage persistent maintenance branches in GitFlow only.
 - `versions tag [qualifier] --publish` — create the legacy GitVersion tag and optionally push it.
+
+GitVersion and `gh` use the same local-first tool provisioner as `project`: `--tool-path`, `PATH`, the existing `--tools-dir` cache, then an opt-in download. `--allow-network` permits only a missing-tool download; `--no-install-tools` remains an absolute veto, and `--tool-version name=version` selects a download version without overriding a usable local executable. Git remains controlled separately by `--git` and is never provisioned. GitVersion is resolved only for version-calculating hotfix/release starts and tags; `gh` is resolved only for pull-request finishes, never for local finishes or already-contained releases. Downloading `gh` does not authenticate it. CLI `--dry-run` does not resolve tools, load tool configuration, create a cache, or execute external commands.
 
 Finishes and tags require the named local branch to exactly match its `origin` branch. `--main-branch` must name a safe branch available at `origin`; `--dry-run` is mutation-free for all workflow actions. Purges prove the branch is merged before safe deletion. Local hotfix/release finishes use a schema-v4 journal: after local merge/tag work, they publish every required target, the exact annotated tag, and source deletion in one lease-protected atomic server push. Unsupported atomic remotes and prepublished/no-op state fail closed with the journal and source preserved; a retry after an unacknowledged transaction verifies remote target ancestry and exact tag identity before local cleanup. See [docs/versions-command.md](docs/versions-command.md) for workflow-sensitive bases, all flags, and safety guards.
 

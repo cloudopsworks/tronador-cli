@@ -27,6 +27,50 @@ it reports the selected action without changing configuration, fetching,
 checking out, merging, creating branches or tags, pushing, deleting, or opening
 a pull request.
 
+### GitVersion and GitHub CLI resolution
+
+`versions` resolves GitVersion and the GitHub CLI only when the selected
+operation reaches a call that needs that tool. Git is separate: `--git` keeps
+selecting it exactly as before, and Tronador never downloads Git.
+
+The inherited provisioning flags are available on `versions`, all aliases,
+and every subcommand:
+
+```text
+--tools-dir <directory>
+--tools-config <file>
+--no-install-tools
+--allow-network
+--tool-version <name=version>   # repeatable
+--tool-path <name=path>         # repeatable
+```
+
+For `gitversion` and `gh`, resolution is explicit path, then `PATH`, then an
+existing executable in the Tronador tools cache (`--tools-dir`, or
+`~/.cloudopsworks/tronador/` by default), and finally an opt-in download. A
+relative path supplied through `--tool-path` is resolved from the caller's
+current directory before command execution changes to `--workdir`; a bare
+executable name supplied through the flag is searched on `PATH`.
+`--tool-version` selects the version only if a download is necessary; it never
+replaces a usable explicit, `PATH`, or cached executable. Downloads require `--allow-network`.
+`--no-install-tools` prohibits them even when network permission is present.
+The `--allow-network` flag permits only missing-tool downloads—it is not an
+offline mode switch and does not suppress the workflow's normal Git or GitHub
+network operations.
+
+GitVersion is needed when `hotfix start`, `release start`, or `tag` must
+calculate a version. `tag --publish` can reuse an existing version tag at
+`HEAD` without GitVersion. The `gh` executable is needed by `feature finish`
+and non-local `hotfix finish` or `release finish` when they inspect or create
+pull requests. Local finishes do not use `gh`, and a release already contained
+in every applicable target can finish without a pull-request query. Installing
+`gh` does not authenticate it; configure GitHub CLI authentication separately.
+Git-only commands and `versions init` do not resolve either tool.
+
+CLI `--dry-run` returns before tool option parsing or resolution. It does not
+load `--tools-config`, create a cache, download or authenticate a tool, or
+execute Git, GitVersion, or `gh`.
+
 The command first reads the `# Agents: WayOfWork=<workflow>` header in
 `.cloudopsworks/gitversion.yaml`. For a headerless legacy config, it can also
 detect the workflow when that file byte-matches exactly one unchanged selector

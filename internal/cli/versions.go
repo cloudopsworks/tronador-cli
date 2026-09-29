@@ -10,13 +10,19 @@ import (
 )
 
 var (
-	versionsWorkDir    string
-	versionsGitPath    string
-	versionsMainBranch string
-	versionsGitFlow    bool
-	versionsGitHubFlow bool
-	versionsTrunkBased bool
-	versionsTrunk      bool
+	versionsWorkDir        string
+	versionsGitPath        string
+	versionsMainBranch     string
+	versionsToolsDir       string
+	versionsToolsConfig    string
+	versionsNoInstallTools bool
+	versionsAllowNetwork   bool
+	versionsToolVersions   []string
+	versionsToolPaths      []string
+	versionsGitFlow        bool
+	versionsGitHubFlow     bool
+	versionsTrunkBased     bool
+	versionsTrunk          bool
 )
 
 var versionsCmd = &cobra.Command{
@@ -39,6 +45,12 @@ func init() {
 	versionsCmd.PersistentFlags().StringVar(&versionsWorkDir, "workdir", ".", "Target repository directory")
 	versionsCmd.PersistentFlags().StringVar(&versionsGitPath, "git", "", "git executable path (defaults to PATH)")
 	versionsCmd.PersistentFlags().StringVar(&versionsMainBranch, "main-branch", "", "Primary branch override (defaults to origin HEAD, main, or master)")
+	versionsCmd.PersistentFlags().StringVar(&versionsToolsDir, "tools-dir", "", "Directory for provisioned Tronador tools")
+	versionsCmd.PersistentFlags().StringVar(&versionsToolsConfig, "tools-config", "", "Tool provisioner JSON override file")
+	versionsCmd.PersistentFlags().BoolVar(&versionsNoInstallTools, "no-install-tools", false, "Resolve tools only from explicit paths, PATH, or cache")
+	versionsCmd.PersistentFlags().BoolVar(&versionsAllowNetwork, "allow-network", false, "Permit missing GitVersion or gh to be provisioned")
+	versionsCmd.PersistentFlags().StringArrayVar(&versionsToolVersions, "tool-version", nil, "Select a download version as name=version")
+	versionsCmd.PersistentFlags().StringArrayVar(&versionsToolPaths, "tool-path", nil, "Use an explicit tool executable as name=path")
 	versionsCmd.AddCommand(
 		newVersionsInitCommand(),
 		newVersionsFeatureCommand(),
@@ -129,14 +141,28 @@ func versionsWayOfWork() (versions.WayOfWork, error) {
 }
 
 func newVersionsWorkflow(cmd *cobra.Command, requireReliableWayOfWork bool) (*versions.Workflows, error) {
+	toolVersions, err := parseAssignments(versionsToolVersions, "tool-version")
+	if err != nil {
+		return nil, err
+	}
+	toolPaths, err := parseAssignments(versionsToolPaths, "tool-path")
+	if err != nil {
+		return nil, err
+	}
 	runner, err := versions.NewRunner(versions.Options{
-		WorkDir:    versionsWorkDir,
-		GitPath:    versionsGitPath,
-		MainBranch: versionsMainBranch,
-		DryRun:     commandDryRun(cmd),
-		Stdin:      cmd.InOrStdin(),
-		Stdout:     cmd.OutOrStdout(),
-		Stderr:     cmd.ErrOrStderr(),
+		WorkDir:        versionsWorkDir,
+		GitPath:        versionsGitPath,
+		MainBranch:     versionsMainBranch,
+		ToolsDir:       versionsToolsDir,
+		ToolsConfig:    versionsToolsConfig,
+		NoInstallTools: versionsNoInstallTools,
+		AllowNetwork:   versionsAllowNetwork,
+		ToolVersions:   toolVersions,
+		ToolPaths:      toolPaths,
+		DryRun:         commandDryRun(cmd),
+		Stdin:          cmd.InOrStdin(),
+		Stdout:         cmd.OutOrStdout(),
+		Stderr:         cmd.ErrOrStderr(),
 	})
 	if err != nil {
 		return nil, err
