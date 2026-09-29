@@ -36,6 +36,7 @@ func applicationInitSteps(
 		)
 	case "dotnet":
 		steps = append(steps, majorVersion,
+			native("preflight-dotnet-init", "validate the .NET template layout before mutation", "preflight-dotnet-init", map[string]string{"project": project}),
 			native("rename-solution", "rename the .NET solution", "rename", map[string]string{"source": "HelloWorldApi.sln", "destination": project + ".sln"}),
 			native("rename-main-project", "rename the .NET application directory", "rename", map[string]string{"source": "HelloWorldApi", "destination": project}),
 			native("rename-test-project", "rename the .NET test directory", "rename", map[string]string{"source": "HelloWorldApi.Tests", "destination": project + ".Tests"}),
@@ -43,12 +44,12 @@ func applicationInitSteps(
 			native("rename-main-project-file", "rename the .NET application project file", "rename", map[string]string{"source": project + "/HelloWorldApi.csproj", "destination": project + "/" + project + ".csproj"}),
 			native("rename-test-project-file", "rename the .NET test project file", "rename", map[string]string{"source": project + ".Tests/HelloWorldApi.Tests.csproj", "destination": project + ".Tests/" + project + ".Tests.csproj"}),
 			native("rename-integration-project-file", "rename the .NET integration project file", "rename", map[string]string{"source": project + ".Tests.Integration/HelloWorldApi.Tests.Integration.csproj", "destination": project + ".Tests.Integration/" + project + ".Tests.Integration.csproj"}),
-			native("dotnet-project-path", "update the shared .NET project path", "update-metadata", map[string]string{"format": "yaml", "path": ".github/vars/inputs-global.yaml", "selector": "dotnet.project_path", "value": "{{project}}"}),
-			native("dotnet-assembly-name", "set the .NET assembly name", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyName", "value": "{{project}}"}),
-			native("dotnet-assembly-version", "set the .NET assembly version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyVersion", "value": "{{version}}"}),
-			native("dotnet-version", "set the .NET package version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/Version", "value": "{{version}}"}),
-			native("dotnet-test-reference", "update the .NET test project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests/" + project + ".Tests.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj"}),
-			native("dotnet-integration-reference", "update the .NET integration project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests.Integration/" + project + ".Tests.Integration.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj"}),
+			native("dotnet-project-path", "update the shared .NET project path", "update-metadata", map[string]string{"format": "yaml", "path": ".cloudopsworks/vars/inputs-global.yaml", "selector": "dotnet.project_path", "value": "{{project}}", "require-target": "true"}),
+			native("dotnet-assembly-name", "set the .NET assembly name", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyName", "value": "{{project}}", "require-target": "true"}),
+			native("dotnet-assembly-version", "set the .NET assembly version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/AssemblyVersion", "value": "{{version}}", "require-target": "true"}),
+			native("dotnet-version", "set the .NET package version", "update-metadata", map[string]string{"format": "xml", "path": project + "/" + project + ".csproj", "selector": "Project/PropertyGroup/Version", "value": "{{version}}", "require-target": "true"}),
+			native("dotnet-test-reference", "update the .NET test project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests/" + project + ".Tests.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj", "require-target": "true"}),
+			native("dotnet-integration-reference", "update the .NET integration project reference", "update-metadata", map[string]string{"format": "xml", "path": project + ".Tests.Integration/" + project + ".Tests.Integration.csproj", "selector": "Project/ItemGroup[1]/ProjectReference", "attribute": "Include", "value": "../{{project}}/{{project}}.csproj", "require-target": "true"}),
 			native("rewrite-solution", "rewrite solution project names", "replace-text", map[string]string{"path": project + ".sln", "old": "HelloWorldApi", "new": project}),
 		)
 	case "flutter":
@@ -312,9 +313,11 @@ func parseStepCapture(parser, output string) (string, error) {
 
 func executeNativeAction(workdir, action string, params map[string]string) error {
 	switch action {
+	case "preflight-dotnet-init":
+		return preflightDotnetInit(workdir, params["project"])
 	case "update-metadata":
 		return updateMetadataFile(workdir, metadataUpdate{
-			Format: params["format"], Path: params["path"], Selector: params["selector"], Attribute: params["attribute"], Value: params["value"],
+			Format: params["format"], Path: params["path"], Selector: params["selector"], Attribute: params["attribute"], Value: params["value"], RequireTarget: params["require-target"] == "true",
 		})
 	case "remove-file":
 		path, err := safeProjectPath(workdir, params["path"])
@@ -352,6 +355,125 @@ func executeNativeAction(workdir, action string, params map[string]string) error
 	default:
 		return fmt.Errorf("unknown native action %q", action)
 	}
+}
+
+type dotnetInitPath struct {
+	path string
+	dir  bool
+}
+
+// preflightDotnetInit validates the complete legacy scaffold before the first
+// rename. This prevents an obsolete or incomplete template layout from being
+// left half-renamed when a later input is missing.
+func preflightDotnetInit(workdir, project string) error {
+	required := []dotnetInitPath{
+		{path: "HelloWorldApi.sln"},
+		{path: "HelloWorldApi", dir: true},
+		{path: "HelloWorldApi/HelloWorldApi.csproj"},
+		{path: "HelloWorldApi.Tests", dir: true},
+		{path: "HelloWorldApi.Tests/HelloWorldApi.Tests.csproj"},
+		{path: "HelloWorldApi.Tests.Integration", dir: true},
+		{path: "HelloWorldApi.Tests.Integration/HelloWorldApi.Tests.Integration.csproj"},
+		{path: ".cloudopsworks/vars/inputs-global.yaml"},
+	}
+	for _, item := range required {
+		path, err := safeProjectPath(workdir, item.path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("required .NET init path %q: %w", item.path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (item.dir && !info.IsDir()) || (!item.dir && !info.Mode().IsRegular()) {
+			return fmt.Errorf("required .NET init path %q has an unexpected type", item.path)
+		}
+	}
+	solutionPath, err := safeProjectPath(workdir, "HelloWorldApi.sln")
+	if err != nil {
+		return err
+	}
+	solution, err := os.ReadFile(solutionPath)
+	if err != nil {
+		return fmt.Errorf("read required .NET solution: %w", err)
+	}
+	projectLines := []string{}
+	for _, line := range strings.Split(string(solution), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Project(") && strings.Contains(line, ".csproj") {
+			projectLines = append(projectLines, line)
+		}
+	}
+	if len(projectLines) != 3 {
+		return fmt.Errorf("required .NET solution contains %d C# project declarations; expected exactly three", len(projectLines))
+	}
+	for _, projectEntry := range []string{
+		`= "HelloWorldApi", "HelloWorldApi\HelloWorldApi.csproj",`,
+		`= "HelloWorldApi.Tests", "HelloWorldApi.Tests\HelloWorldApi.Tests.csproj",`,
+		`= "HelloWorldApi.Tests.Integration", "HelloWorldApi.Tests.Integration\HelloWorldApi.Tests.Integration.csproj",`,
+	} {
+		matches := 0
+		for _, line := range projectLines {
+			if strings.Contains(line, projectEntry) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return fmt.Errorf("required .NET solution project entry %q matched %d times; expected exactly one", projectEntry, matches)
+		}
+	}
+
+	targets := []string{
+		project + ".sln", project, project + ".Tests", project + ".Tests.Integration",
+		"HelloWorldApi/" + project + ".csproj",
+		"HelloWorldApi.Tests/" + project + ".Tests.csproj",
+		"HelloWorldApi.Tests.Integration/" + project + ".Tests.Integration.csproj",
+	}
+	for _, relative := range targets {
+		path, err := safeProjectPath(workdir, relative)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf(".NET init target %q already exists", relative)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect .NET init target %q: %w", relative, err)
+		}
+	}
+
+	metadata := map[string][]metadataUpdate{
+		".cloudopsworks/vars/inputs-global.yaml": {
+			{Format: "yaml", Selector: "dotnet.project_path", Value: project, RequireTarget: true},
+		},
+		"HelloWorldApi/HelloWorldApi.csproj": {
+			{Format: "xml", Selector: "Project/PropertyGroup/AssemblyName", Value: project, RequireTarget: true},
+			{Format: "xml", Selector: "Project/PropertyGroup/AssemblyVersion", Value: "0.0.0", RequireTarget: true},
+			{Format: "xml", Selector: "Project/PropertyGroup/Version", Value: "0.0.0", RequireTarget: true},
+		},
+		"HelloWorldApi.Tests/HelloWorldApi.Tests.csproj": {
+			{Format: "xml", Selector: "Project/ItemGroup[1]/ProjectReference", Attribute: "Include", Value: "../" + project + "/" + project + ".csproj", RequireTarget: true},
+		},
+		"HelloWorldApi.Tests.Integration/HelloWorldApi.Tests.Integration.csproj": {
+			{Format: "xml", Selector: "Project/ItemGroup[1]/ProjectReference", Attribute: "Include", Value: "../" + project + "/" + project + ".csproj", RequireTarget: true},
+		},
+	}
+	for relative, updates := range metadata {
+		path, err := safeProjectPath(workdir, relative)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, update := range updates {
+			data, err = transformMetadata(data, update)
+			if err != nil {
+				return fmt.Errorf("validate .NET init metadata %q: %w", relative, err)
+			}
+		}
+	}
+	return nil
 }
 
 func safeProjectPath(workdir, relative string) (string, error) {

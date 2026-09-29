@@ -1453,7 +1453,10 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 }
 
 func buildVersionChanges(workdir, profile, version string) ([]versionChange, error) {
-	updates := profileMetadataUpdates(workdir, profile, strings.TrimPrefix(version, "v"))
+	updates, err := profileMetadataUpdates(workdir, profile, strings.TrimPrefix(version, "v"))
+	if err != nil {
+		return nil, err
+	}
 	// VERSION is mandatory, while profile metadata is optional.
 	updates = append([]metadataUpdate{{Path: "VERSION"}}, updates...)
 	byPath := map[string][]metadataUpdate{}
@@ -1477,6 +1480,11 @@ func buildVersionChanges(workdir, profile, version string) ([]versionChange, err
 			return nil, err
 		}
 		if missing && relative != "VERSION" {
+			for _, update := range byPath[relative] {
+				if update.RequireTarget {
+					return nil, fmt.Errorf("required project metadata file %q does not exist", relative)
+				}
+			}
 			continue
 		}
 		after := append([]byte(nil), before...)
@@ -1503,28 +1511,45 @@ func buildVersionChanges(workdir, profile, version string) ([]versionChange, err
 	return changes, nil
 }
 
-func profileMetadataUpdates(workdir, profile, version string) []metadataUpdate {
+func profileMetadataUpdates(workdir, profile, version string) ([]metadataUpdate, error) {
 	switch profile {
 	case "docker", "node":
-		return []metadataUpdate{{Format: "json", Path: "package.json", Selector: "version", Value: version, IgnoreMissing: true}}
+		return []metadataUpdate{{Format: "json", Path: "package.json", Selector: "version", Value: version, IgnoreMissing: true}}, nil
 	case "flutter":
-		return []metadataUpdate{{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true}}
+		return []metadataUpdate{{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true}}, nil
 	case "java":
-		return []metadataUpdate{{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true}}
+		return []metadataUpdate{{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true}}, nil
 	case "python":
-		return []metadataUpdate{{Format: "toml", Path: "pyproject.toml", Selector: "[project]", Attribute: "version", Value: version, IgnoreMissing: true}}
+		return []metadataUpdate{{Format: "toml", Path: "pyproject.toml", Selector: "[project]", Attribute: "version", Value: version, IgnoreMissing: true}}, nil
 	case "rust":
-		return []metadataUpdate{{Format: "toml", Path: "Cargo.toml", Selector: "[package]", Attribute: "version", Value: version, IgnoreMissing: true}}
+		return []metadataUpdate{{Format: "toml", Path: "Cargo.toml", Selector: "[package]", Attribute: "version", Value: version, IgnoreMissing: true}}, nil
 	case "dotnet":
-		matches, _ := filepath.Glob(filepath.Join(workdir, "*.csproj"))
-		result := make([]metadataUpdate, 0, len(matches)*2)
-		for _, p := range matches {
-			rel, _ := filepath.Rel(workdir, p)
-			result = append(result, metadataUpdate{Format: "xml", Path: rel, Selector: "Project/PropertyGroup/Version", Value: version, IgnoreMissing: true}, metadataUpdate{Format: "xml", Path: rel, Selector: "Project/Version", Value: version, IgnoreMissing: true})
+		projectFiles, err := filepath.Glob(filepath.Join(workdir, "*.sln"))
+		if err != nil {
+			return nil, fmt.Errorf("find .NET solution: %w", err)
 		}
-		return result
+		if len(projectFiles) != 1 {
+			return nil, fmt.Errorf("expected exactly one root .NET solution, found %d", len(projectFiles))
+		}
+		solutionInfo, err := os.Lstat(projectFiles[0])
+		if err != nil {
+			return nil, fmt.Errorf("inspect .NET solution: %w", err)
+		}
+		if solutionInfo.Mode()&os.ModeSymlink != 0 || !solutionInfo.Mode().IsRegular() {
+			return nil, fmt.Errorf("root .NET solution %q must be a regular non-symlink file", filepath.Base(projectFiles[0]))
+		}
+		name := strings.TrimSuffix(filepath.Base(projectFiles[0]), filepath.Ext(projectFiles[0]))
+		relative := filepath.Join(name, name+".csproj")
+		assemblyVersion := strings.TrimPrefix(majorMinorPatchPrefix.FindString(version), "v")
+		if assemblyVersion == "" {
+			return nil, fmt.Errorf("derive .NET AssemblyVersion from %q", version)
+		}
+		return []metadataUpdate{
+			{Format: "xml", Path: relative, Selector: "Project/PropertyGroup/Version", Value: version, RequireTarget: true},
+			{Format: "xml", Path: relative, Selector: "Project/PropertyGroup/AssemblyVersion", Value: assemblyVersion, RequireTarget: true},
+		}, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func parseGitVersionOutput(output string) string {
