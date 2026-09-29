@@ -639,7 +639,6 @@ func TestVersionUpdatesProfileMetadata(t *testing.T) {
 		after   string
 	}{
 		{profile: "docker", name: "package.json", before: "{\n  \"version\": \"0.1.0\"\n}\n", after: "{\n  \"version\": \"2.4.6\"\n}\n"},
-		{profile: "dotnet", name: "app.csproj", before: "<Project>\n  <Version>0.1.0</Version>\n</Project>\n", after: "<Project>\n  <Version>2.4.6</Version>\n</Project>\n"},
 		{profile: "flutter", name: "pubspec.yaml", before: "name: app\nversion: 0.1.0\n", after: "name: app\nversion: 2.4.6\n"},
 		{profile: "java", name: "pom.xml", before: "<project>\n  <parent><version>9.9.9</version></parent>\n  <version>0.1.0</version>\n  <dependencies><dependency><version>8.8.8</version></dependency></dependencies>\n</project>\n", after: "<project>\n  <parent><version>9.9.9</version></parent>\n  <version>2.4.6</version>\n  <dependencies><dependency><version>8.8.8</version></dependency></dependencies>\n</project>\n"},
 		{profile: "node", name: "package.json", before: "{\n  \"version\": \"0.1.0\",\n  \"name\": \"app\"\n}\n", after: "{\n  \"version\": \"2.4.6\",\n  \"name\": \"app\"\n}\n"},
@@ -887,7 +886,7 @@ func TestApplicationInitUsesEachTemplatePipeline(t *testing.T) {
 	cases := map[string][]string{
 		"androidsdk": {"repository-owner"},
 		"docker":     {"repository-owner", "gitversion-major", "package-name", "package-version"},
-		"dotnet":     {"repository-owner", "gitversion-major", "rename-solution", "rename-main-project", "rename-test-project", "rename-integration-project", "rename-main-project-file", "rename-test-project-file", "rename-integration-project-file", "dotnet-project-path", "dotnet-assembly-name", "dotnet-assembly-version", "dotnet-version", "dotnet-test-reference", "dotnet-integration-reference", "rewrite-solution"},
+		"dotnet":     {"repository-owner", "gitversion-major", "preflight-dotnet-init", "rename-solution", "rename-main-project", "rename-test-project", "rename-integration-project", "rename-main-project-file", "rename-test-project-file", "rename-integration-project-file", "dotnet-project-path", "dotnet-assembly-name", "dotnet-assembly-version", "dotnet-version", "dotnet-test-reference", "dotnet-integration-reference", "rewrite-solution"},
 		"flutter":    {"repository-owner", "gitversion-full", "flutter-name", "flutter-version"},
 		"go":         {"repository-owner", "remove-go-module", "go-mod-init", "go-mod-tidy", "rewrite-go-imports"},
 		"java":       {"repository-owner", "gitversion-major", "maven-artifact", "maven-version"},
@@ -956,6 +955,236 @@ func TestApplicationInitExecutesCapturedValuesAndNativeSteps(t *testing.T) {
 	}
 	if len(result.Steps) != 4 || len(result.Calls) != 2 {
 		t.Fatalf("result pipeline = %+v", result)
+	}
+}
+
+func TestDotnetInitUsesModernConfigAndPreflightsBeforeMutation(t *testing.T) {
+	t.Run("repository-shaped scaffold", func(t *testing.T) {
+		workdir := dotnetTemplateFixture(t)
+		runner := dotnetRunner(t, workdir, "2.4.6\n")
+		if _, err := runner.Run(context.Background(), "init", nil); err != nil {
+			t.Fatal(err)
+		}
+
+		project := "PaymentsApi"
+		for _, relative := range []string{
+			project + ".sln",
+			project + "/" + project + ".csproj",
+			project + ".Tests/" + project + ".Tests.csproj",
+			project + ".Tests.Integration/" + project + ".Tests.Integration.csproj",
+		} {
+			if _, err := os.Stat(filepath.Join(workdir, relative)); err != nil {
+				t.Fatalf("initialized path %s: %v", relative, err)
+			}
+		}
+		global := string(mustRead(t, filepath.Join(workdir, ".cloudopsworks", "vars", "inputs-global.yaml")))
+		if !strings.Contains(global, "project_path: PaymentsApi") {
+			t.Fatalf("modern global config was not updated: %q", global)
+		}
+		mainProject := string(mustRead(t, filepath.Join(workdir, project, project+".csproj")))
+		for _, want := range []string{"<AssemblyName>PaymentsApi</AssemblyName>", "<AssemblyVersion>2.4.6</AssemblyVersion>", "<Version>2.4.6</Version>"} {
+			if !strings.Contains(mainProject, want) {
+				t.Fatalf("main project missing %q: %s", want, mainProject)
+			}
+		}
+	})
+
+	t.Run("missing config leaves legacy layout untouched", func(t *testing.T) {
+		workdir := dotnetTemplateFixture(t)
+		if err := os.Remove(filepath.Join(workdir, ".cloudopsworks", "vars", "inputs-global.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		runner := dotnetRunner(t, workdir, "2.4.6\n")
+		if _, err := runner.Run(context.Background(), "init", nil); err == nil || codeOf(err) != "project_operation_failed" {
+			t.Fatalf("init error = %v", err)
+		}
+		for _, relative := range []string{"HelloWorldApi.sln", "HelloWorldApi", "HelloWorldApi.Tests", "HelloWorldApi.Tests.Integration"} {
+			if _, err := os.Stat(filepath.Join(workdir, relative)); err != nil {
+				t.Fatalf("legacy source %s was mutated: %v", relative, err)
+			}
+		}
+		for _, relative := range []string{"PaymentsApi.sln", "PaymentsApi", "PaymentsApi.Tests", "PaymentsApi.Tests.Integration"} {
+			if _, err := os.Stat(filepath.Join(workdir, relative)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("target %s exists after failed preflight: %v", relative, err)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name    string
+		path    string
+		old     string
+		replace string
+	}{
+		{name: "missing config selector", path: ".cloudopsworks/vars/inputs-global.yaml", old: "project_path: HelloWorldApi", replace: "other: HelloWorldApi"},
+		{name: "duplicate config selector", path: ".cloudopsworks/vars/inputs-global.yaml", old: "project_path: HelloWorldApi", replace: "project_path: HelloWorldApi\n  project_path: OtherApi"},
+		{name: "missing assembly name", path: "HelloWorldApi/HelloWorldApi.csproj", old: "<AssemblyName>HelloWorldApi</AssemblyName>", replace: ""},
+		{name: "missing version", path: "HelloWorldApi/HelloWorldApi.csproj", old: "<Version>1.0.1</Version>", replace: ""},
+		{name: "missing assembly version", path: "HelloWorldApi/HelloWorldApi.csproj", old: "<AssemblyVersion>1.0.0</AssemblyVersion>", replace: ""},
+		{name: "missing test project reference", path: "HelloWorldApi.Tests/HelloWorldApi.Tests.csproj", old: "<ProjectReference Include=\"../HelloWorldApi/HelloWorldApi.csproj\"></ProjectReference>", replace: ""},
+		{name: "duplicate test project reference", path: "HelloWorldApi.Tests/HelloWorldApi.Tests.csproj", old: "<ProjectReference Include=\"../HelloWorldApi/HelloWorldApi.csproj\"></ProjectReference>", replace: "<ProjectReference Include=\"../HelloWorldApi/HelloWorldApi.csproj\"></ProjectReference><ProjectReference Include=\"../Other/Other.csproj\"></ProjectReference>"},
+		{name: "stale solution with misleading comment", path: "HelloWorldApi.sln", old: `= "HelloWorldApi", "HelloWorldApi\HelloWorldApi.csproj",`, replace: "= \"StaleTemplate\", \"StaleTemplate\\StaleTemplate.csproj\",\n# = \"HelloWorldApi\", \"HelloWorldApi\\HelloWorldApi.csproj\","},
+	} {
+		t.Run(tc.name+" leaves legacy layout untouched", func(t *testing.T) {
+			workdir := dotnetTemplateFixture(t)
+			path := filepath.Join(workdir, filepath.FromSlash(tc.path))
+			before := string(mustRead(t, path))
+			if !strings.Contains(before, tc.old) {
+				t.Fatalf("fixture %s does not contain %q", tc.path, tc.old)
+			}
+			if err := os.WriteFile(path, []byte(strings.Replace(before, tc.old, tc.replace, 1)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			legacyFiles := map[string][]byte{}
+			for _, relative := range []string{
+				"HelloWorldApi.sln",
+				"HelloWorldApi/HelloWorldApi.csproj",
+				"HelloWorldApi.Tests/HelloWorldApi.Tests.csproj",
+				"HelloWorldApi.Tests.Integration/HelloWorldApi.Tests.Integration.csproj",
+				".cloudopsworks/vars/inputs-global.yaml",
+			} {
+				legacyFiles[relative] = mustRead(t, filepath.Join(workdir, filepath.FromSlash(relative)))
+			}
+
+			runner := dotnetRunner(t, workdir, "2.4.6\n")
+			if _, err := runner.Run(context.Background(), "init", nil); err == nil || codeOf(err) != "project_operation_failed" {
+				t.Fatalf("init error = %v", err)
+			}
+			for relative, want := range legacyFiles {
+				if got := mustRead(t, filepath.Join(workdir, filepath.FromSlash(relative))); !bytes.Equal(got, want) {
+					t.Fatalf("legacy file %s was mutated", relative)
+				}
+			}
+			for _, relative := range []string{"PaymentsApi.sln", "PaymentsApi", "PaymentsApi.Tests", "PaymentsApi.Tests.Integration"} {
+				if _, err := os.Stat(filepath.Join(workdir, relative)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("target %s exists after failed preflight: %v", relative, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDotnetVersionUpdatesNestedMainProjectWithMakeParity(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		gitVersion      string
+		tag             string
+		wantVersion     string
+		wantAssembly    string
+		wantVersionFile string
+	}{
+		{name: "untagged full semver", gitVersion: `{"FullSemVer":"2.4.6-beta.3+17","MajorMinorPatch":"2.4.6"}`, wantVersion: "2.4.6-beta.3-17", wantAssembly: "2.4.6", wantVersionFile: "2.4.6-beta.3-17\n"},
+		{name: "tagged prerelease", gitVersion: `{"FullSemVer":"9.9.9","MajorMinorPatch":"9.9.9"}`, tag: "v3.1.4-beta.2+deploy-prod", wantVersion: "3.1.4-beta.2", wantAssembly: "3.1.4", wantVersionFile: "3.1.4-beta.2\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := initializedDotnetFixture(t)
+			if tc.tag != "" {
+				initializeGitRepository(t, workdir)
+				runGit(t, workdir, "tag", tc.tag)
+			}
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(_ context.Context, _ ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: tc.gitVersion}, nil
+				},
+			})
+			if _, err := runner.Run(context.Background(), "version", nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(mustRead(t, filepath.Join(workdir, "VERSION"))); got != tc.wantVersionFile {
+				t.Fatalf("VERSION = %q, want %q", got, tc.wantVersionFile)
+			}
+			project := string(mustRead(t, filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj")))
+			for _, want := range []string{"<Version>" + tc.wantVersion + "</Version>", "<AssemblyVersion>" + tc.wantAssembly + "</AssemblyVersion>"} {
+				if !strings.Contains(project, want) {
+					t.Fatalf("nested main project missing %q: %s", want, project)
+				}
+			}
+		})
+	}
+}
+
+func TestDotnetVersionRequiresNestedProjectMetadataBeforeWritingVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*testing.T, string)
+	}{
+		{
+			name: "missing nested project",
+			mutate: func(t *testing.T, workdir string) {
+				if err := os.Remove(filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "missing version selector",
+			mutate: func(t *testing.T, workdir string) {
+				replaceFileText(t, filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj"), "<Version>1.0.1</Version>", "")
+			},
+		},
+		{
+			name: "missing assembly version selector",
+			mutate: func(t *testing.T, workdir string) {
+				replaceFileText(t, filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj"), "<AssemblyVersion>1.0.0</AssemblyVersion>", "")
+			},
+		},
+		{
+			name: "duplicate version selector",
+			mutate: func(t *testing.T, workdir string) {
+				replaceFileText(t, filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj"), "<Version>1.0.1</Version>", "<Version>1.0.1</Version><Version>7.7.7</Version>")
+			},
+		},
+		{
+			name: "root solution is not a regular file",
+			mutate: func(t *testing.T, workdir string) {
+				path := filepath.Join(workdir, "PaymentsApi.sln")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workdir := initializedDotnetFixture(t)
+			tc.mutate(t, workdir)
+			projectPath := filepath.Join(workdir, "PaymentsApi", "PaymentsApi.csproj")
+			projectBefore, projectErr := os.ReadFile(projectPath)
+			runner := mustRunner(t, Options{
+				WorkDir: workdir, ToolPaths: map[string]string{"gitversion": executable(t, "gitversion")}, NoInstallTools: true,
+				ExecuteTool: func(_ context.Context, _ ToolCall) (ToolExecution, error) {
+					return ToolExecution{Stdout: `{"FullSemVer":"2.4.6-beta.3+17","MajorMinorPatch":"2.4.6"}`}, nil
+				},
+			})
+			if _, err := runner.Run(context.Background(), "version", nil); err == nil || codeOf(err) != "project_operation_failed" {
+				t.Fatalf("version error = %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(workdir, "VERSION")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("VERSION was written after failed preflight: %v", err)
+			}
+			projectAfter, afterErr := os.ReadFile(projectPath)
+			if !errors.Is(projectErr, os.ErrNotExist) {
+				if afterErr != nil || !bytes.Equal(projectAfter, projectBefore) {
+					t.Fatalf("nested project was mutated: beforeErr=%v afterErr=%v", projectErr, afterErr)
+				}
+			} else if !errors.Is(afterErr, os.ErrNotExist) {
+				t.Fatalf("missing nested project was created: %v", afterErr)
+			}
+		})
+	}
+}
+
+func replaceFileText(t *testing.T, path, old, replacement string) {
+	t.Helper()
+	contents := string(mustRead(t, path))
+	if !strings.Contains(contents, old) {
+		t.Fatalf("fixture %s does not contain %q", path, old)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(contents, old, replacement, 1)), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1265,6 +1494,78 @@ func fixture(t *testing.T, marker string) string {
 		t.Fatal(err)
 	}
 	return workdir
+}
+
+func dotnetTemplateFixture(t *testing.T) string {
+	t.Helper()
+	workdir := filepath.Join(t.TempDir(), "payments-api")
+	for _, dir := range []string{
+		filepath.Join(workdir, ".cloudopsworks", "vars"),
+		filepath.Join(workdir, "HelloWorldApi"),
+		filepath.Join(workdir, "HelloWorldApi.Tests"),
+		filepath.Join(workdir, "HelloWorldApi.Tests.Integration"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		".cloudopsworks/.dotnet":                 "",
+		".cloudopsworks/vars/inputs-global.yaml": "dotnet:\n  project_path: HelloWorldApi\n",
+		"HelloWorldApi.sln": "Microsoft Visual Studio Solution File, Format Version 12.00\n" +
+			"Project(\"{TYPE}\") = \"HelloWorldApi\", \"HelloWorldApi\\HelloWorldApi.csproj\", \"{MAIN}\"\nEndProject\n" +
+			"Project(\"{TYPE}\") = \"HelloWorldApi.Tests\", \"HelloWorldApi.Tests\\HelloWorldApi.Tests.csproj\", \"{TEST}\"\nEndProject\n" +
+			"Project(\"{TYPE}\") = \"HelloWorldApi.Tests.Integration\", \"HelloWorldApi.Tests.Integration\\HelloWorldApi.Tests.Integration.csproj\", \"{INTEGRATION}\"\nEndProject\n",
+		"HelloWorldApi/HelloWorldApi.csproj":                                     "<Project><PropertyGroup><AssemblyName>HelloWorldApi</AssemblyName><Version>1.0.1</Version><AssemblyVersion>1.0.0</AssemblyVersion></PropertyGroup></Project>\n",
+		"HelloWorldApi.Tests/HelloWorldApi.Tests.csproj":                         "<Project><ItemGroup></ItemGroup><ItemGroup><ProjectReference Include=\"../HelloWorldApi/HelloWorldApi.csproj\"></ProjectReference></ItemGroup></Project>\n",
+		"HelloWorldApi.Tests.Integration/HelloWorldApi.Tests.Integration.csproj": "<Project><ItemGroup></ItemGroup><ItemGroup><ProjectReference Include=\"../HelloWorldApi/HelloWorldApi.csproj\"></ProjectReference></ItemGroup></Project>\n",
+	}
+	for relative, contents := range files {
+		path := filepath.Join(workdir, filepath.FromSlash(relative))
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return workdir
+}
+
+func initializedDotnetFixture(t *testing.T) string {
+	t.Helper()
+	workdir := filepath.Join(t.TempDir(), "payments-api")
+	if err := os.MkdirAll(filepath.Join(workdir, ".cloudopsworks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workdir, "PaymentsApi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for relative, contents := range map[string]string{
+		".cloudopsworks/.dotnet":         "",
+		"PaymentsApi.sln":                "Project = PaymentsApi\n",
+		"PaymentsApi/PaymentsApi.csproj": "<Project><PropertyGroup><AssemblyName>PaymentsApi</AssemblyName><Version>1.0.1</Version><AssemblyVersion>1.0.0</AssemblyVersion></PropertyGroup></Project>\n",
+	} {
+		if err := os.WriteFile(filepath.Join(workdir, filepath.FromSlash(relative)), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return workdir
+}
+
+func dotnetRunner(t *testing.T, workdir, gitVersion string) *Runner {
+	t.Helper()
+	return mustRunner(t, Options{
+		WorkDir: workdir, AllowNetwork: true, NoInstallTools: true,
+		ToolPaths: map[string]string{"gh": executable(t, "gh"), "gitversion": executable(t, "gitversion")},
+		ExecuteTool: func(_ context.Context, call ToolCall) (ToolExecution, error) {
+			switch call.ToolName {
+			case "gh":
+				return ToolExecution{Stdout: "cloudopsworks\n"}, nil
+			case "gitversion":
+				return ToolExecution{Stdout: gitVersion}, nil
+			default:
+				return ToolExecution{}, nil
+			}
+		},
+	})
 }
 
 func markerForProfile(t *testing.T, profileID string) string {

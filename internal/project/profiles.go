@@ -159,7 +159,7 @@ func applicationInitBinding(profile string) CapabilityBinding {
 	case "docker", "node":
 		artifacts = []string{"package.json"}
 	case "dotnet":
-		artifacts = []string{"*.sln", "*.csproj", ".github/vars/inputs-global.yaml"}
+		artifacts = []string{"*.sln", "*/*.csproj", ".cloudopsworks/vars/inputs-global.yaml"}
 	case "flutter":
 		artifacts = []string{"pubspec.yaml"}
 	case "java":
@@ -193,7 +193,7 @@ func applicationVersionBinding(profile string) CapabilityBinding {
 	case "docker", "node":
 		artifacts = append(artifacts, "package.json")
 	case "dotnet":
-		artifacts = append(artifacts, "*.csproj")
+		artifacts = append(artifacts, "*/*.csproj")
 	case "flutter":
 		artifacts = append(artifacts, "pubspec.yaml")
 	case "java":

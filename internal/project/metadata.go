@@ -25,6 +25,7 @@ type metadataUpdate struct {
 	Attribute     string
 	Value         string
 	IgnoreMissing bool
+	RequireTarget bool
 }
 
 func updateMetadataFile(workdir string, update metadataUpdate) error {
@@ -53,6 +54,11 @@ func updateMetadataFile(workdir string, update metadataUpdate) error {
 // transformMetadata applies one scoped metadata edit without touching disk.
 // Version previews use this same transformer as the live operation.
 func transformMetadata(data []byte, update metadataUpdate) ([]byte, error) {
+	if update.RequireTarget {
+		if err := validateMetadataTarget(data, update); err != nil {
+			return nil, err
+		}
+	}
 	switch strings.ToLower(update.Format) {
 	case "json":
 		return updateJSON(data, update.Selector, update.Value)
@@ -65,6 +71,136 @@ func transformMetadata(data []byte, update metadataUpdate) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported metadata format %q", update.Format)
 	}
+}
+
+func validateMetadataTarget(data []byte, update metadataUpdate) error {
+	switch strings.ToLower(update.Format) {
+	case "yaml", "yml":
+		parts := splitMetadataPath(update.Selector, ".")
+		if len(parts) == 0 {
+			return fmt.Errorf("YAML metadata selector is empty")
+		}
+		var document yamlv3.Node
+		if err := yamlv3.NewDecoder(bytes.NewReader(data)).Decode(&document); err != nil {
+			return err
+		}
+		target, found, err := findYAMLPath(&document, parts)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("required YAML metadata selector %q was not found", update.Selector)
+		}
+		if target.Kind != yamlv3.ScalarNode || target.Kind == yamlv3.AliasNode {
+			return fmt.Errorf("required YAML metadata selector %q is not a scalar", update.Selector)
+		}
+		return nil
+	case "xml":
+		return validateXMLTarget(data, update.Selector, update.Attribute)
+	default:
+		return nil
+	}
+}
+
+func findYAMLPath(document *yamlv3.Node, parts []string) (*yamlv3.Node, bool, error) {
+	if document.Kind != yamlv3.DocumentNode || len(document.Content) == 0 {
+		return nil, false, fmt.Errorf("YAML document has no root node")
+	}
+	node := document.Content[0]
+	for i, part := range parts {
+		if node.Kind != yamlv3.MappingNode {
+			return nil, false, fmt.Errorf("YAML path %q crosses a non-mapping node", strings.Join(parts[:i], "."))
+		}
+		var value *yamlv3.Node
+		matches := 0
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			if node.Content[index].Value == part {
+				matches++
+				value = node.Content[index+1]
+			}
+		}
+		if matches > 1 {
+			return nil, false, fmt.Errorf("required YAML metadata selector %q has duplicate key %q", strings.Join(parts, "."), part)
+		}
+		if value == nil {
+			return nil, false, nil
+		}
+		if i == len(parts)-1 {
+			return value, true, nil
+		}
+		node = value
+	}
+	return nil, false, nil
+}
+
+func validateXMLTarget(data []byte, selector, attribute string) error {
+	path, err := parseXMLPath(selector)
+	if err != nil {
+		return err
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	stack := make([]xmlFrame, 0, len(path))
+	childIndexes := make([]map[string]int, 0, len(path))
+	targetDepth := -1
+	matchCount := 0
+	attributeMatchCount := 0
+	targetHasChild := false
+	for {
+		token, tokenErr := decoder.RawToken()
+		if tokenErr != nil {
+			if tokenErr == io.EOF {
+				break
+			}
+			return tokenErr
+		}
+		switch current := token.(type) {
+		case xml.StartElement:
+			if targetDepth >= 0 && len(stack) == targetDepth {
+				targetHasChild = true
+			}
+			if len(childIndexes) == 0 {
+				childIndexes = append(childIndexes, map[string]int{})
+			}
+			parent := childIndexes[len(childIndexes)-1]
+			index := parent[current.Name.Local]
+			parent[current.Name.Local] = index + 1
+			frame := xmlFrame{name: current.Name.Local, index: index}
+			candidate := append(append([]xmlFrame(nil), stack...), frame)
+			if xmlPathMatches(candidate, path) {
+				matchCount++
+				targetDepth = len(candidate)
+				if attribute != "" {
+					for _, item := range current.Attr {
+						if item.Name.Local == attribute {
+							attributeMatchCount++
+							break
+						}
+					}
+				}
+			}
+			stack = append(stack, frame)
+			childIndexes = append(childIndexes, map[string]int{})
+		case xml.EndElement:
+			if len(stack) == 0 || stack[len(stack)-1].name != current.Name.Local {
+				return fmt.Errorf("XML end element %q has no matching start element", current.Name.Local)
+			}
+			stack = stack[:len(stack)-1]
+			childIndexes = childIndexes[:len(childIndexes)-1]
+			if len(stack) < targetDepth {
+				targetDepth = -1
+			}
+		}
+	}
+	if matchCount != 1 {
+		return fmt.Errorf("required XML metadata selector %q matched %d elements; expected exactly one", selector, matchCount)
+	}
+	if attribute != "" && attributeMatchCount != 1 {
+		return fmt.Errorf("required XML metadata attribute %q on selector %q was not found", attribute, selector)
+	}
+	if attribute == "" && targetHasChild {
+		return fmt.Errorf("required XML metadata selector %q is not a text element", selector)
+	}
+	return nil
 }
 
 func updateJSON(data []byte, selector, value string) ([]byte, error) {
