@@ -20,6 +20,32 @@ type fakeRunner struct {
 }
 
 func key(n string, a ...string) string { return n + " " + strings.Join(a, " ") }
+
+type actionOutputRunner struct{}
+
+func (actionOutputRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+	if name == "git" && len(args) > 0 && args[0] == "checkout" {
+		return "Switched to a new branch 'feature/demo'\n", nil
+	}
+	return "probe output\n", nil
+}
+
+func TestWorkflowsCaptureOnlyHumanUsefulActionOutput(t *testing.T) {
+	w, err := NewWorkflows(WorkflowOptions{Runner: actionOutputRunner{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.git(context.Background(), "show-ref", "--verify", "refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.git(context.Background(), "checkout", "-b", "feature/demo"); err != nil {
+		t.Fatal(err)
+	}
+	results := w.ActionResults()
+	if len(results) != 1 || results[0].Tool != "Git" || results[0].Output != "Switched to a new branch 'feature/demo'" {
+		t.Fatalf("ActionResults() = %#v", results)
+	}
+}
 func gitVersionKey(variable string) string {
 	return key("gitversion", "-config", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"), "-showvariable", variable)
 }
