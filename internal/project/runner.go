@@ -1434,7 +1434,14 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 	if execution.ExitStatus != 0 {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: execution.ExitStatus, Cause: fmt.Errorf("gitversion exited with status %d", execution.ExitStatus)}
 	}
-	version := versionFromGitVersionOutput(execution.Stdout)
+	var version string
+	if profile == "java" {
+		// Keep the original SemVer for VERSION and the command result. Maven's
+		// qualifier normalization is applied only when writing pom.xml.
+		version = versionFromGitVersionSemVer(execution.Stdout)
+	} else {
+		version = versionFromGitVersionOutput(execution.Stdout)
+	}
 	if tag.Found && !r.Opts.Plain {
 		version = tag.Normalized
 	} else if r.Opts.Snapshot {
@@ -1443,10 +1450,13 @@ func (r *Runner) calculateVersion(ctx context.Context, plan OperationPlan, tag e
 	if r.Opts.Plain && !majorMinorPatchPattern.MatchString(version) {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("GitVersion did not return a MajorMinorPatch version")}
 	}
+	validVersion := semanticVersionPattern
 	if profile == "java" {
-		version = normalizeJavaVersion(version)
+		// GitVersion can retain underscores in branch-derived prerelease/build
+		// identifiers; keep them in VERSION and normalize only the Maven value.
+		validVersion = javaSourceVersionPattern
 	}
-	if version == "" || !semanticVersionPattern.MatchString(version) {
+	if version == "" || !validVersion.MatchString(version) {
 		return "", execution, true, &Error{Code: "project_operation_failed", Command: "project", Capability: "version", Stdout: execution.Stdout, Stderr: execution.Stderr, ExitStatus: 1, Cause: fmt.Errorf("version source returned an invalid semantic version")}
 	}
 	return version, execution, true, nil
@@ -1518,7 +1528,7 @@ func profileMetadataUpdates(workdir, profile, version string) ([]metadataUpdate,
 	case "flutter":
 		return []metadataUpdate{{Format: "yaml", Path: "pubspec.yaml", Selector: "version", Value: version, IgnoreMissing: true}}, nil
 	case "java":
-		return []metadataUpdate{{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: version, IgnoreMissing: true}}, nil
+		return []metadataUpdate{{Format: "xml", Path: "pom.xml", Selector: "project/version", Value: normalizeJavaVersion(version), IgnoreMissing: true}}, nil
 	case "python":
 		return []metadataUpdate{{Format: "toml", Path: "pyproject.toml", Selector: "[project]", Attribute: "version", Value: version, IgnoreMissing: true}}, nil
 	case "rust":
@@ -1594,16 +1604,16 @@ func versionFromExactHeadTag(ctx context.Context, workdir string) string {
 }
 
 var (
-	majorMinorPatchPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
-	majorMinorPatchPrefix  = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+`)
-	semanticVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
-	deployMetadataPattern  = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
-	javaQualifierReplacer  = strings.NewReplacer(".", "-", "_", "-", "+", "-")
+	majorMinorPatchPattern   = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	majorMinorPatchPrefix    = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+`)
+	semanticVersionPattern   = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	javaSourceVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z._-]+)?(?:\+[0-9A-Za-z._-]+)?$`)
+	deployMetadataPattern    = regexp.MustCompile(`\+deploy-[0-9A-Za-z.-]+$`)
+	javaQualifierReplacer    = strings.NewReplacer(".", "-", "_", "-", "+", "-")
 )
 
-// normalizeJavaVersion renders a Maven-compatible qualifier. The numeric
-// Major.Minor.Patch prefix remains unchanged; every qualifier and build
-// separator is a hyphen so dots and underscores cannot reach pom.xml.
+// normalizeJavaVersion renders a Maven-compatible qualifier for pom.xml. The
+// generated VERSION file and command result retain the original SemVer.
 func normalizeJavaVersion(version string) string {
 	core := majorMinorPatchPrefix.FindString(version)
 	if core == "" || len(core) == len(version) {
@@ -1628,8 +1638,12 @@ func normalizeVersionTag(tag string) string {
 // the template Makefile: build metadata is changed from a SemVer '+' separator
 // to a '-' separator for VERSION and package-manager compatibility.
 func versionFromGitVersionOutput(output string) string {
-	version := strings.TrimPrefix(strings.TrimPrefix(parseGitVersionFullOutput(output), "v"), "V")
+	version := versionFromGitVersionSemVer(output)
 	return strings.ReplaceAll(version, "+", "-")
+}
+
+func versionFromGitVersionSemVer(output string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(parseGitVersionFullOutput(output), "v"), "V")
 }
 
 func parseGitVersionFullOutput(output string) string {
