@@ -56,9 +56,11 @@ tag-management workflows.
 
 `tronador project version` writes `VERSION` and the detected profile's metadata when it
 exists. Its default policy writes the tag at `HEAD`; when `HEAD` is untagged, it writes
-GitVersion's `FullSemVer` with `+` translated to `-`. Java additionally changes qualifier
-and build separators after `x.y.z` to hyphens: for example,
-`x.y.z-feature.branch_name.1+build_2` becomes `x.y.z-feature-branch-name-1-build-2`.
+GitVersion's `FullSemVer` with `+` translated to `-` for non-Java profiles. Java keeps
+the selected SemVer unchanged in `VERSION`; only the Maven `pom.xml` version converts
+qualifier and build separators after `x.y.z` to hyphens. For example,
+`x.y.z-feature.branch_name.1+build_2` remains unchanged in `VERSION`, while
+`pom.xml` receives `x.y.z-feature-branch-name-1-build-2`.
 
 | Command | Supported profiles | Result |
 | --- | --- | --- |

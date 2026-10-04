@@ -376,6 +376,10 @@ only, an untagged `HEAD` may use `--snapshot` to generate `x.y.z-SNAPSHOT` from
 GitVersion's `MajorMinorPatch`. Each flag is unavailable for other capabilities and
 profiles; `--snapshot` is also unavailable for tagged `HEAD`s.
 
+The Java profile preserves the selected SemVer in the generated `VERSION` file and
+result; Maven-specific qualifier normalization (dots, underscores, and build separators
+rendered as hyphens) applies only to the `pom.xml` version field.
+
 The implementation must not invoke `git tag`, `git push`, branch checkout for
 tag management, Make, or any release workflow. A tagged working tree may
 affect GitVersion's calculated input, but that behavior is reported as an
