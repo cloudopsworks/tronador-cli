@@ -257,21 +257,24 @@ func TestVersionUsesExactHeadTagAndGitVersionConfig(t *testing.T) {
 
 func TestJavaVersionNormalizesQualifierSeparators(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		tag    string
-		output string
-		want   string
+		name     string
+		tag      string
+		output   string
+		wantFile string
+		wantPom  string
 	}{
 		{
-			name:   "GitVersion output",
-			output: `{"FullSemVer":"2.4.6-feature.branch_name.7+build_meta.9"}`,
-			want:   "2.4.6-feature-branch-name-7-build-meta-9",
+			name:     "GitVersion output",
+			output:   `{"FullSemVer":"2.4.6-feature.branch_name.7+build_meta.9"}`,
+			wantFile: "2.4.6-feature.branch_name.7+build_meta.9",
+			wantPom:  "2.4.6-feature-branch-name-7-build-meta-9",
 		},
 		{
-			name:   "exact tag",
-			tag:    "v2.4.6-feature.branch_name.7+build_meta.9",
-			output: `{"FullSemVer":"9.9.9"}`,
-			want:   "2.4.6-feature-branch-name-7-build-meta-9",
+			name:     "exact tag",
+			tag:      "v2.4.6-feature.branch_name.7+build_meta.9",
+			output:   `{"FullSemVer":"9.9.9"}`,
+			wantFile: "2.4.6-feature.branch_name.7+build_meta.9",
+			wantPom:  "2.4.6-feature-branch-name-7-build-meta-9",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,10 +298,10 @@ func TestJavaVersionNormalizesQualifierSeparators(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Version != tc.want || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.want+"\n" {
+			if result.Version != tc.wantFile || string(mustRead(t, filepath.Join(workdir, "VERSION"))) != tc.wantFile+"\n" {
 				t.Fatalf("version result = %+v", result)
 			}
-			if got, want := string(mustRead(t, pomPath)), "<project>\n  <version>"+tc.want+"</version>\n</project>\n"; got != want {
+			if got, want := string(mustRead(t, pomPath)), "<project>\n  <version>"+tc.wantPom+"</version>\n</project>\n"; got != want {
 				t.Fatalf("pom.xml = %q, want %q", got, want)
 			}
 		})
