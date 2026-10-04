@@ -249,8 +249,23 @@ func TestVersionsWorkflowDryRunNeverCallsAction(t *testing.T) {
 	if called {
 		t.Fatal("workflow action was called in dry-run")
 	}
-	if !strings.Contains(output.String(), "dry-run: would run versions mutate") {
+	if !strings.Contains(output.String(), "Dry-run plan for versions mutate (no changes made):") || !strings.Contains(output.String(), "1. Run the mutate workflow") {
 		t.Fatalf("dry-run output = %q", output.String())
+	}
+}
+
+func TestVersionsDryRunPlanIncludesSubcommandAndResolvedArguments(t *testing.T) {
+	command, _, err := rootCmd.Find([]string{"versions", "feature", "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := versionsActionPlan(command, command.Use, []string{"demo"})
+	var output bytes.Buffer
+	writeVersionsPlan(&output, versionsCommandLabel(command, command.Use), plan)
+	for _, want := range []string{"Dry-run plan for versions feature start (no changes made):", "1. Select the feature base branch", "3. Create and check out feature/demo"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("dry-run plan missing %q:\n%s", want, output.String())
+		}
 	}
 }
 
@@ -272,7 +287,7 @@ func TestVersionsTagDryRunDoesNotRequireRepositoryOrMutate(t *testing.T) {
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "dry-run: would run versions tag") {
+	if !strings.Contains(output.String(), "Dry-run plan for versions tag (no changes made):") || !strings.Contains(output.String(), "Create the annotated tag locally") {
 		t.Fatalf("dry-run output = %q", output.String())
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {

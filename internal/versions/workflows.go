@@ -43,6 +43,20 @@ type Workflows struct {
 	dir, wow, remote, main string
 	mainConfigured         bool
 	run                    CommandRunner
+	results                []ActionResult
+}
+
+// ActionResult is useful output returned by a mutating Git/GitHub command.
+// Workflow methods retain their error-only API while the CLI can still show
+// the user the result produced by the underlying tool.
+type ActionResult struct {
+	Tool   string
+	Output string
+}
+
+// ActionResults returns the non-empty output from successful action commands.
+func (w *Workflows) ActionResults() []ActionResult {
+	return append([]ActionResult(nil), w.results...)
 }
 
 func (w *Workflows) gitVersion(ctx context.Context, variable string) (string, error) {
@@ -122,10 +136,38 @@ func normalizeWOW(v string) string {
 	return v
 }
 func (w *Workflows) git(ctx context.Context, args ...string) (string, error) {
-	return w.run.Run(ctx, "git", args...)
+	out, err := w.run.Run(ctx, "git", args...)
+	if err == nil && isResultCommand("git", args) && strings.TrimSpace(out) != "" {
+		w.results = append(w.results, ActionResult{Tool: "Git", Output: strings.TrimSpace(out)})
+	}
+	return out, err
 }
 func (w *Workflows) gh(ctx context.Context, args ...string) (string, error) {
-	return w.run.Run(ctx, "gh", args...)
+	out, err := w.run.Run(ctx, "gh", args...)
+	if err == nil && isResultCommand("gh", args) && strings.TrimSpace(out) != "" {
+		w.results = append(w.results, ActionResult{Tool: "GitHub CLI", Output: strings.TrimSpace(out)})
+	}
+	return out, err
+}
+
+func isResultCommand(tool string, args []string) bool {
+	if tool == "gh" {
+		return len(args) >= 2 && args[0] == "pr" && args[1] == "create"
+	}
+	if tool != "git" || len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "checkout", "switch", "push", "merge", "tag":
+		return true
+	case "branch":
+		for _, arg := range args[1:] {
+			if arg == "-d" || arg == "-D" || arg == "-m" {
+				return true
+			}
+		}
+	}
+	return false
 }
 func (w *Workflows) hasDevelop() bool { return w.wow == "gitflow" }
 

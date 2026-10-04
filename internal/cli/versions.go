@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"tronador-cli/internal/versions"
 
@@ -95,7 +96,14 @@ Workflows: --gitflow, --githubflow, --trunkbased (or --trunk).`,
 				return err
 			}
 			if commandDryRun(cmd) {
-				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would select %s\n", result.WayOfWork)
+				writeVersionsPlan(cmd.OutOrStdout(), "versions init", []string{
+					fmt.Sprintf("Validate the checked-in GitVersion workflow configurations and select %s.", result.WayOfWork),
+					"Update .cloudopsworks/gitversion.yaml to the selected workflow configuration.",
+					"Update cloudopsworks-ci.yaml GitFlow setting when applicable.",
+				})
+				if result.WayOfWork == versions.WayOfWorkGitFlow {
+					fmt.Fprintln(cmd.OutOrStdout(), "  4. Verify the primary branch is clean and matches origin, then create and push develop if needed.")
+				}
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "selected WayOfWork=%s\n", result.WayOfWork)
 			}
@@ -188,14 +196,18 @@ func versionsWorkflowAction(use, short, long string, args cobra.PositionalArgs, 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
-				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would run versions %s\n", use)
+				writeVersionsPlan(cmd.OutOrStdout(), versionsCommandLabel(cmd, use), versionsActionPlan(cmd, use, args))
 				return nil
 			}
 			workflow, err := newVersionsWorkflow(cmd, requireReliableWayOfWork)
 			if err != nil {
 				return err
 			}
-			return action(context.Background(), workflow, args)
+			if err := action(context.Background(), workflow, args); err != nil {
+				return err
+			}
+			writeVersionsActionResult(cmd.OutOrStdout(), versionsCommandLabel(cmd, use), workflow.ActionResults())
+			return nil
 		},
 	}
 }
@@ -335,7 +347,15 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
-				fmt.Fprintf(cmd.OutOrStdout(), "dry-run: would run versions tag\n")
+				steps := []string{"Calculate the GitVersion tag for the current commit."}
+				if qualifier := optionalArg(args); qualifier != "" {
+					steps[0] = fmt.Sprintf("Calculate the GitVersion tag and apply deployment qualifier %q.", qualifier)
+				}
+				steps = append(steps, "Create the annotated tag locally if it does not already exist on this commit.")
+				if publish {
+					steps = append(steps, "Push the selected tag to origin unless it is already published.")
+				}
+				writeVersionsPlan(cmd.OutOrStdout(), "versions tag", steps)
 				return nil
 			}
 			workflow, err := newVersionsWorkflow(cmd, false)
@@ -352,6 +372,94 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 	}
 	command.Flags().BoolVar(&publish, "publish", false, "Push the tag to origin after creating or finding it")
 	return command
+}
+
+func writeVersionsPlan(out interface{ Write([]byte) (int, error) }, action string, steps []string) {
+	fmt.Fprintf(out, "Dry-run plan for %s (no changes made):\n", action)
+	for i, step := range steps {
+		fmt.Fprintf(out, "  %d. %s\n", i+1, step)
+	}
+}
+
+func versionsActionPlan(cmd *cobra.Command, use string, args []string) []string {
+	name := optionalArg(args)
+	if name == "" {
+		name = "the current branch"
+	}
+	action := strings.TrimPrefix(versionsCommandLabel(cmd, use), "versions ")
+	steps := []string{}
+	switch action {
+	case "feature start":
+		steps = []string{"Select the feature base branch (develop for GitFlow; otherwise the primary branch).", "Check out the feature base branch.", fmt.Sprintf("Create and check out feature/%s from that base.", name)}
+	case "feature publish":
+		steps = []string{fmt.Sprintf("Resolve the feature branch from %s.", name), "Check out that branch.", "Push it to origin and set its upstream tracking branch."}
+	case "feature finish":
+		steps = []string{fmt.Sprintf("Resolve feature branch %s and its workflow-specific target.", name), "Verify the local branch matches its origin branch.", "Create a pull request with the GitHub CLI."}
+	case "feature purge":
+		steps = []string{fmt.Sprintf("Resolve feature branch %s and its valid merge target.", name), "Fetch origin and verify branch parity and merge safety.", "Check out the base if the feature is active, then delete the local and remote feature branch."}
+	case "hotfix start":
+		steps = []string{"Fetch origin and select a synchronized primary or support-line base.", "Calculate the next patch version with GitVersion when no version was supplied.", "Check out the base and create hotfix/vX.Y.Z."}
+	case "hotfix publish":
+		steps = []string{"Resolve the current hotfix branch.", "Check out that branch.", "Push it to origin and set its upstream tracking branch."}
+	case "hotfix finish":
+		if local, _ := cmd.Flags().GetBool("local"); local {
+			steps = []string{"Resolve or resume the current hotfix finish.", "Validate and record the local finish in the workflow journal.", "Merge/tag locally, then atomically publish required refs and remove the source branch."}
+		} else {
+			steps = []string{"Resolve the current hotfix branch and primary target.", "Verify the branch matches origin.", "Create a pull request with the GitHub CLI."}
+		}
+	case "hotfix purge":
+		steps = []string{fmt.Sprintf("Resolve hotfix branch %s.", name), "Fetch origin and verify branch parity and merge safety.", "Check out a safe base if necessary, then delete the local and remote hotfix branch."}
+	case "release start":
+		kind := "minor"
+		for _, flag := range []string{"patch", "minor", "major"} {
+			if enabled, _ := cmd.Flags().GetBool(flag); enabled {
+				kind = flag
+			}
+		}
+		steps = []string{fmt.Sprintf("Select and synchronize the release base branch (GitFlow uses develop; bump: %s).", kind), "Calculate the next release version with GitVersion.", "Create and check out release/vX.Y.Z from the base."}
+	case "release publish":
+		steps = []string{fmt.Sprintf("Resolve release branch %s.", name), "Check out that branch.", "Push it to origin and set its upstream tracking branch."}
+	case "release finish":
+		if local, _ := cmd.Flags().GetBool("local"); local {
+			steps = []string{"Resolve or resume the current release finish.", "Validate and record the local finish in the workflow journal.", "Merge/tag locally, then atomically publish all required targets and remove the source branch."}
+		} else {
+			steps = []string{"Resolve the current release branch and workflow targets.", "Fetch origin and verify source parity and target ancestry.", "Create pull requests for any targets that do not already contain the release."}
+		}
+	case "release purge":
+		steps = []string{fmt.Sprintf("Resolve release branch %s.", name), "Fetch origin and verify branch parity and merge safety.", "Check out a safe base if necessary, then delete the local and remote release branch."}
+	case "support start":
+		steps = []string{fmt.Sprintf("Verify support tag %s exists.", name), "Create and check out support/vX.Y.Z from that tag (GitFlow only)."}
+	case "support publish":
+		steps = []string{fmt.Sprintf("Resolve support branch for tag %s.", name), "Check out that branch.", "Push it to origin and set its upstream tracking branch."}
+	case "support purge":
+		steps = []string{fmt.Sprintf("Resolve support branch for tag %s.", name), "Fetch origin and verify branch parity and merge safety.", "Check out a safe base if necessary, then delete the local and remote support branch."}
+	default:
+		steps = []string{fmt.Sprintf("Run the %s workflow with the supplied arguments and options.", strings.TrimSpace(use))}
+	}
+	return steps
+}
+
+func versionsCommandLabel(cmd *cobra.Command, use string) string {
+	fields := strings.Fields(cmd.CommandPath())
+	for i, field := range fields {
+		if field == "versions" && i+1 < len(fields) {
+			return "versions " + strings.Join(fields[i+1:], " ")
+		}
+	}
+	return "versions " + strings.TrimSpace(use)
+}
+
+func writeVersionsActionResult(out interface{ Write([]byte) (int, error) }, action string, results []versions.ActionResult) {
+	fmt.Fprintf(out, "Completed %s successfully.\n", action)
+	if len(results) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "Tool results:")
+	for _, result := range results {
+		for _, line := range strings.Split(result.Output, "\n") {
+			fmt.Fprintf(out, "  %s: %s\n", result.Tool, line)
+		}
+	}
 }
 
 // newVersionsFinishAction creates a no-positional-argument finish command with
