@@ -1,5 +1,7 @@
 # Versions command
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador versions` manages a repository's branching workflow and its
 GitVersion configuration. It is the CLI replacement for the supported
 GitFlow-oriented Make targets; it does **not** generate an application's

@@ -1,5 +1,7 @@
 # README and docs commands
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador readme` and `tronador docs` port the Tronador `readme/*` and
 `docs/*` Makefile targets into the release binary while keeping template assets
 runtime-configurable.

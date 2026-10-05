@@ -1,0 +1,65 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+:root {
+  --cow-blue: #2563eb;
+  --cow-navy: #0f172a;
+  --cow-text-muted: #64748b;
+  --cow-border: #e2e8f0;
+  --cow-surface: #f8fafc;
+}
+
+body {
+  color: var(--cow-navy);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.page-header {
+  background-color: var(--cow-navy);
+  background-image: linear-gradient(120deg, var(--cow-navy), var(--cow-blue));
+}
+
+.page-header .project-tagline {
+  max-width: 48rem;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.main-content {
+  max-width: 68rem;
+}
+
+.main-content a {
+  color: var(--cow-blue);
+}
+
+.main-content a:hover,
+.main-content a:focus {
+  color: #1d4ed8;
+}
+
+.main-content h2 {
+  margin-top: 2.25rem;
+}
+
+.main-content table {
+  display: table;
+  width: 100%;
+}
+
+.main-content th,
+.main-content td {
+  border-color: var(--cow-border);
+}
+
+.main-content tr:nth-child(even) {
+  background: var(--cow-surface);
+}
+
+@media screen and (max-width: 42em) {
+  .main-content {
+    padding: 2rem 1rem;
+  }
+}

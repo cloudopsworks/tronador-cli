@@ -1,5 +1,7 @@
 # Command reference
 
+[Documentation home](index.md)
+
 This page indexes the public `tronador` command surface and links to the
 command-specific guides.
 

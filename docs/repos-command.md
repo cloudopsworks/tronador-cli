@@ -1,5 +1,7 @@
 # `repos` command architecture
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador repos` ports the public Tronador `make repos/*` targets into Cobra
 commands. The command is intentionally configuration-driven so future repository
 layouts can be added by editing JSON instead of branching the CLI dispatcher.

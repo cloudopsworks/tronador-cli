@@ -1,0 +1,34 @@
+title: Tronador CLI Documentation
+description: Installation, command references, and maintainer guides for Tronador CLI.
+url: http://tronador.cloudopsworks.co
+baseurl: ""
+repository: cloudopsworks/tronador-cli
+
+theme: jekyll-theme-cayman
+show_downloads: false
+
+markdown: kramdown
+sass:
+  style: compressed
+  sourcemap: never
+relative_links:
+  enabled: true
+  collections: false
+
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+defaults:
+  - scope:
+      path: "*.md"
+      type: pages
+    values:
+      layout: default
+      permalink: /:basename.html
+
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock

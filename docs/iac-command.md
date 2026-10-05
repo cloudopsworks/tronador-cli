@@ -1,5 +1,7 @@
 # `iac` command
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador iac` contains infrastructure-as-code helpers for CloudOps Works
 workspaces. IaC commands are guarded by a workspace marker: the selected
 `--workdir` must contain `.cloudopsworks/.iac`.

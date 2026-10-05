@@ -1,5 +1,7 @@
 # Project command
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador project` detects the implementation from a regular marker file under
 `.cloudopsworks/` and runs a logical capability without dispatching through a
 Makefile.

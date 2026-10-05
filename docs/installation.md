@@ -1,5 +1,7 @@
 # Installing `tronador-cli`
 
+[Documentation home](index.md)
+
 The supported installation sources are published GitHub Release artifacts from
 `cloudopsworks/tronador-cli`. Installers never build from source.
 

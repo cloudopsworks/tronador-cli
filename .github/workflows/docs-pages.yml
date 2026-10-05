@@ -1,0 +1,45 @@
+name: Documentation Pages
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "docs/**"
+      - "Gemfile"
+      - "Gemfile.lock"
+      - "scripts/build-docs-site.sh"
+      - ".github/workflows/docs-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-pages-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby and install locked dependencies
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Build Jekyll site
+        run: ./scripts/build-docs-site.sh
+
+      - name: Publish generated site to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./docs-pages
+          cname: tronador.cloudopsworks.co
+          commit_message: "docs: publish site from ${{ github.sha }}"

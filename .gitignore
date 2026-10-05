@@ -17,6 +17,7 @@ test-results/
 *.dylib
 VERSION
 dist/
+docs-pages/
 .gocache*/
 .gomodcache*/
 

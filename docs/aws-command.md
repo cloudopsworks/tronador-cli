@@ -1,5 +1,7 @@
 # `aws` command
 
+[Documentation home](index.md) · [Command reference](commands.md)
+
 `tronador aws` groups AWS resource automation commands for tagging,
 secrets copying, default VPC cleanup, and security remediation.
 
