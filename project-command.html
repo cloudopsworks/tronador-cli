@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/project-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/project-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/project-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="project-command">Project command</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador project</code> detects the implementation from a regular marker file under
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/</code> and runs a logical capability without dispatching through a
+Makefile.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador project detect
+tronador project capabilities
+tronador project init
+tronador project init aws       <span class="c"># Terraform module provider</span>
+tronador project version
+tronador project lint
+tronador project format
+tronador project clean <span class="nt">--yes</span>    <span class="c"># Terragrunt only</span>
+</code></pre></div></div>
+
+<p>The command is namespace-free: do not write <code class="language-plaintext highlighter-rouge">project go init</code> or
+<code class="language-plaintext highlighter-rouge">project terraform-module lint</code>. Use <code class="language-plaintext highlighter-rouge">project capabilities</code> to see the valid
+capabilities for the detected marker.</p>
+
+<h2 id="detection">Detection</h2>
+
+<p>Only <code class="language-plaintext highlighter-rouge">&lt;workdir&gt;/.cloudopsworks/</code> is inspected. The supported markers are
+<code class="language-plaintext highlighter-rouge">.android</code>, <code class="language-plaintext highlighter-rouge">.docker</code>, <code class="language-plaintext highlighter-rouge">.dotnet</code>, <code class="language-plaintext highlighter-rouge">.fluttermobile</code>, <code class="language-plaintext highlighter-rouge">.golang</code>, <code class="language-plaintext highlighter-rouge">.java</code>,
+<code class="language-plaintext highlighter-rouge">.node</code>, <code class="language-plaintext highlighter-rouge">.python</code>, <code class="language-plaintext highlighter-rouge">.rust</code>, <code class="language-plaintext highlighter-rouge">.terraform-module</code>, <code class="language-plaintext highlighter-rouge">.iac</code>, and <code class="language-plaintext highlighter-rouge">.xcode</code>.
+Markers must be regular files. Unknown files are ignored; no marker or markers
+from different implementations produce structured errors.</p>
+
+<p>Use <code class="language-plaintext highlighter-rouge">--workdir</code> to target another repository and <code class="language-plaintext highlighter-rouge">--json</code> for stable machine-
+readable output:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador project detect <span class="nt">--workdir</span> ../service <span class="nt">--json</span>
+tronador project capabilities <span class="nt">--workdir</span> ../service <span class="nt">--json</span>
+</code></pre></div></div>
+
+<h2 id="tools-and-safety">Tools and safety</h2>
+
+<p>Tool-backed capabilities resolve only their declared tools through the shared
+Tronador catalog: PATH, the provisioned cache, then direct provisioning. A
+download requires <code class="language-plaintext highlighter-rouge">--allow-network</code>; <code class="language-plaintext highlighter-rouge">--no-install-tools</code> disables installation.
+Use <code class="language-plaintext highlighter-rouge">--tools-dir</code>, <code class="language-plaintext highlighter-rouge">--tools-config</code>, <code class="language-plaintext highlighter-rouge">--tool-version name=version</code>, and
+<code class="language-plaintext highlighter-rouge">--tool-path name=path</code> to control resolution. Terraform/OpenTofu lint and
+format operations use OpenTofu by default and accept
+<code class="language-plaintext highlighter-rouge">--engine terraform|tofu|auto</code>; <code class="language-plaintext highlighter-rouge">auto</code> prefers OpenTofu when only one
+candidate is available and fails when both are available.
+Initialization does not resolve an IaC engine.</p>
+
+<p>Every mutating capability except <code class="language-plaintext highlighter-rouge">project version</code> supports the global <code class="language-plaintext highlighter-rouge">--dry-run</code>
+operation plan without tool resolution. Destructive Terragrunt cleanup requires <code class="language-plaintext highlighter-rouge">--yes</code>.
+Tool calls use typed argument arrays and never invoke Make, shell bootstrap scripts, or
+tag-management workflows.</p>
+
+<h2 id="version-generation">Version generation</h2>
+
+<p><code class="language-plaintext highlighter-rouge">tronador project version</code> writes <code class="language-plaintext highlighter-rouge">VERSION</code> and the detected profile’s metadata when it
+exists. Its default policy writes the tag at <code class="language-plaintext highlighter-rouge">HEAD</code>; when <code class="language-plaintext highlighter-rouge">HEAD</code> is untagged, it writes
+GitVersion’s <code class="language-plaintext highlighter-rouge">FullSemVer</code> with <code class="language-plaintext highlighter-rouge">+</code> translated to <code class="language-plaintext highlighter-rouge">-</code> for non-Java profiles. Java keeps
+the selected SemVer unchanged in <code class="language-plaintext highlighter-rouge">VERSION</code>; only the Maven <code class="language-plaintext highlighter-rouge">pom.xml</code> version converts
+qualifier and build separators after <code class="language-plaintext highlighter-rouge">x.y.z</code> to hyphens. For example,
+<code class="language-plaintext highlighter-rouge">x.y.z-feature.branch_name.1+build_2</code> remains unchanged in <code class="language-plaintext highlighter-rouge">VERSION</code>, while
+<code class="language-plaintext highlighter-rouge">pom.xml</code> receives <code class="language-plaintext highlighter-rouge">x.y.z-feature-branch-name-1-build-2</code>.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Command</th>
+      <th>Supported profiles</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">tronador project version</code></td>
+      <td>All application profiles</td>
+      <td>Default version policy described above.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">tronador project version --plain</code></td>
+      <td>Node and Python only</td>
+      <td>Uses GitVersion’s <code class="language-plaintext highlighter-rouge">MajorMinorPatch</code> and writes exactly <code class="language-plaintext highlighter-rouge">x.y.z</code>, including when <code class="language-plaintext highlighter-rouge">HEAD</code> is tagged.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">tronador project version --snapshot</code></td>
+      <td>Untagged Java only</td>
+      <td>Uses GitVersion’s <code class="language-plaintext highlighter-rouge">MajorMinorPatch</code> and writes <code class="language-plaintext highlighter-rouge">x.y.z-SNAPSHOT</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">tronador project version --generate --yes</code></td>
+      <td>Catalog-managed versioned templates and explicitly registered private source repositories</td>
+      <td>Writes the guarded upgrade marker as <code class="language-plaintext highlighter-rouge">vX.Y.Z</code>; it does not tag, commit, or push.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The profile-specific flags are rejected for every other capability or profile. Use
+<code class="language-plaintext highlighter-rouge">tronador project version --help</code> for the executable’s version-specific usage and flags.</p>
+
+<p><code class="language-plaintext highlighter-rouge">project version --dry-run</code> is the evaluated-preview exception: it always calculates
+GitVersion (using a repo-local configuration when present) but never changes project
+files. It prints deterministic unified file patches (or `No file changes for version</p>
+<version>.`) and JSON exposes only actual `file_changes`; unchanged and optional missing
+metadata files are omitted. GitVersion provisioning is allowed only to a tools directory
+outside the workdir, and successful preview suppresses provisioner/tool progress.
+
+### Guarded upgrade marker generation
+
+`tronador project version --generate` is intentionally separate from normal
+application versioning. It calculates GitVersion's `MajorMinorPatch` and writes
+the `vX.Y.Z` upgrade marker at `.cloudopsworks/_VERSION`, or the supported
+legacy `.github/_VERSION` location for catalog templates and the base blueprint.
+The marker controls repository upgrades, so Tronador accepts this operation
+only for a catalog-managed versioned template or an explicitly registered
+private source marker with one unambiguous active layout. Private
+`.cloudopsworks/.blueprint` and `.cloudopsworks/.skills` markers are eligible;
+`.skills` is not accepted under `.github` and is not added to the public
+template catalog. A `.cloudopsworks` directory, `_VERSION`, or ordinary
+implementation marker by itself is not enough. The version marker may be
+missing and is created atomically only after the selected layout and active
+regular eligibility marker are verified. Symlinked or non-regular
+layouts/markers, conflicting eligibility markers, and multiple active layouts
+are rejected.
+
+Outside a dry-run, `--generate` requires `--yes`; it warns before replacing a
+different marker value and never creates a Git tag, commit, or push. It cannot
+be combined with `--plain` or `--snapshot`. A dry-run shows the prospective
+marker patch and does not require confirmation.
+
+## Initialization mappings
+
+Initialization reproduces the body of the referenced template target as an
+ordered typed plan. It never dispatches `make init`, nor does it infer an
+engine subcommand from the word `init`.
+
+- Application markers execute their template's `code/init` steps: repository
+  owner/version captures, native JSON/YAML/XML/TOML metadata edits, .NET
+  renames, Go module commands, and template-specific source rewrites. These
+  structured-file mutations run in Go and do not require the external `yq`
+  executable.
+- Terraform modules remove `provider.temp.tf`, then run Boilerplate with the
+  validated provider variable. They do not run `terraform init` or `tofu init`.
+- Terragrunt projects run Boilerplate with the existing `.inputs` var files,
+  derive `iac_project` from the workdir basename, and then run
+  `terragrunt hcl format --exclude-dir .cloudopsworks`. They do not run
+  `terragrunt init`.
+
+Non-version dry-run output exposes each native and tool step, including its ordered
+arguments, so callers can inspect the polymorphic pipeline before mutation. Version
+dry-run instead emits only its actual file delta.
+
+### Native metadata updates
+
+Application initialization and versioning use format-aware Go libraries:
+
+- JSON uses a path-scoped update, preserving unrelated keys.
+- YAML uses `yaml.Node` traversal for dotted selectors.
+- XML uses token-based path matching, including attributes and sibling indexes.
+- TOML uses the `go-toml` parser AST to replace values in the selected table
+  without rewriting unrelated tables, comments, or formatting.
+
+The Java version selector is the exact `/project/version` element. Parent,
+dependency, plugin, and other nested Maven versions are not changed.
+</version>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/readme-docs-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/readme-docs-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/readme-docs-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="readme-and-docs-commands">README and docs commands</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador readme</code> and <code class="language-plaintext highlighter-rouge">tronador docs</code> port the Tronador <code class="language-plaintext highlighter-rouge">readme/*</code> and
+<code class="language-plaintext highlighter-rouge">docs/*</code> Makefile targets into the release binary while keeping template assets
+runtime-configurable.</p>
+
+<h2 id="tronador-readme"><code class="language-plaintext highlighter-rouge">tronador readme</code></h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador readme build
+tronador readme build terraform
+tronador readme init
+tronador readme lint
+tronador readme deps
+</code></pre></div></div>
+
+<p>Common flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--workdir</code></td>
+      <td>Target repository directory.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--readme-file</code>, <code class="language-plaintext highlighter-rouge">--output</code></td>
+      <td>README output file, default <code class="language-plaintext highlighter-rouge">README.md</code> or <code class="language-plaintext highlighter-rouge">README_FILE</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--readme-yaml</code></td>
+      <td>README data YAML file, default <code class="language-plaintext highlighter-rouge">README.yaml</code> or <code class="language-plaintext highlighter-rouge">README_YAML</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--template-file</code></td>
+      <td>gomplate template override.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--template-yaml</code></td>
+      <td>initialization YAML template override.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--includes-uri</code></td>
+      <td>gomplate include datasource URI.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--gomplate</code></td>
+      <td>gomplate executable path.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--gomplate-version</code></td>
+      <td>gomplate version to download on demand, overriding the configured default/version env vars.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--make</code></td>
+      <td><code class="language-plaintext highlighter-rouge">make</code>/<code class="language-plaintext highlighter-rouge">gmake</code> executable used for README include targets.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--tools-dir</code></td>
+      <td>User tool cache/install directory, default <code class="language-plaintext highlighter-rouge">~/.cloudopsworks/tronador</code> or <code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_DIR</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--tools-config</code></td>
+      <td>Tool provisioner JSON override file, default <code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_CONFIG</code> / <code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_CONFIG_PATH</code> plus project/user overrides.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--no-install-gomplate</code></td>
+      <td>Fail instead of downloading gomplate when it is missing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><code class="language-plaintext highlighter-rouge">readme build</code> parses the top-level <code class="language-plaintext highlighter-rouge">README.yaml.include</code> list and prepares each
+entry before invoking gomplate. Entries are trimmed, deduplicated, processed in
+source order, and restricted to relative paths inside <code class="language-plaintext highlighter-rouge">--workdir</code>.</p>
+
+<p>The default include gate has these strategies:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Include entry</th>
+      <th>Action</th>
+      <th>Failure behavior</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">docs/terraform.md</code></td>
+      <td>Validate Terraform/OpenTofu module detection and run the same <code class="language-plaintext highlighter-rouge">terraform-docs</code> generator as <code class="language-plaintext highlighter-rouge">readme build terraform</code>.</td>
+      <td>Fails the build because the configured generated dependency is required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">docs/targets.md</code></td>
+      <td>Execute <code class="language-plaintext highlighter-rouge">make docs/targets.md</code> from <code class="language-plaintext highlighter-rouge">--workdir</code>.</td>
+      <td>Fails the build because the built-in target is required.</td>
+    </tr>
+    <tr>
+      <td>Any other entry</td>
+      <td>Execute Make with the entry unchanged as its target.</td>
+      <td>A Make failure is non-fatal: emit a warning and create the requested file containing only a Markdown warning comment.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Custom integrations can construct <code class="language-plaintext highlighter-rouge">readme.NewIncludeGate</code>, register exact
+entries with <code class="language-plaintext highlighter-rouge">IncludeGate.Register</code>, and pass it through
+<code class="language-plaintext highlighter-rouge">readme.Options.IncludeGate</code>. <code class="language-plaintext highlighter-rouge">readme.DefaultIncludeGate</code> returns the built-in
+registry so callers can extend it without replacing the default strategies.</p>
+
+<p>Use <code class="language-plaintext highlighter-rouge">readme build terraform</code> to generate only <code class="language-plaintext highlighter-rouge">docs/terraform.md</code> without
+requiring <code class="language-plaintext highlighter-rouge">README.yaml</code> or gomplate. <code class="language-plaintext highlighter-rouge">readme build tf</code> and <code class="language-plaintext highlighter-rouge">readme build tofu</code>
+are aliases for the same engine-neutral documentation operation.</p>
+
+<p>Terraform build flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--terraform-docs</code></td>
+      <td><code class="language-plaintext highlighter-rouge">terraform-docs</code> executable path.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--terraform-docs-version</code></td>
+      <td>Version to download on demand.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--terraform-output</code></td>
+      <td>Output path, default <code class="language-plaintext highlighter-rouge">docs/terraform.md</code> or <code class="language-plaintext highlighter-rouge">TERRAFORM_DOCS_OUTPUT</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--terraform-docs-format</code></td>
+      <td>Output format, default <code class="language-plaintext highlighter-rouge">md</code> or <code class="language-plaintext highlighter-rouge">TERRAFORM_DOCS_FORMAT</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--no-install-terraform-docs</code></td>
+      <td>Fail instead of downloading <code class="language-plaintext highlighter-rouge">terraform-docs</code> when it is missing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><code class="language-plaintext highlighter-rouge">readme lint</code> performs the same include preparation before comparing the
+temporary README with the committed file. <code class="language-plaintext highlighter-rouge">readme init</code> creates
+<code class="language-plaintext highlighter-rouge">README.yaml</code> only when it is missing.</p>
+
+<h3 id="on-demand-tool-provisioning">On-demand tool provisioning</h3>
+
+<p>README build/lint/deps resolve each required tool (<code class="language-plaintext highlighter-rouge">gomplate</code> and, when the
+Terraform include strategy runs, <code class="language-plaintext highlighter-rouge">terraform-docs</code>) in this order:</p>
+
+<ol>
+  <li>explicit executable flag or matching environment variable</li>
+  <li><code class="language-plaintext highlighter-rouge">PATH</code></li>
+  <li>the user tool directory, default <code class="language-plaintext highlighter-rouge">~/.cloudopsworks/tronador/</code></li>
+  <li>direct on-demand download of the requested version from the upstream GitHub
+release into <code class="language-plaintext highlighter-rouge">~/.cloudopsworks/tronador</code></li>
+</ol>
+
+<p>Provisioning is per-tool and on-demand: the CLI downloads only the missing tool
+needed by the command being executed. It does not clone or use
+<code class="language-plaintext highlighter-rouge">tronador-packages</code>. Set <code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_INSTALL=false</code>,
+<code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_SKIP_INSTALL=true</code>, or pass the tool-specific
+<code class="language-plaintext highlighter-rouge">--no-install-gomplate</code> / <code class="language-plaintext highlighter-rouge">--no-install-terraform-docs</code> flag to require a
+preinstalled executable.</p>
+
+<p>Tool metadata is JSON-driven. The binary ships an embedded <code class="language-plaintext highlighter-rouge">tools.json</code> with
+entries for:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">gomplate</code></li>
+  <li><code class="language-plaintext highlighter-rouge">terraform-docs</code></li>
+  <li><code class="language-plaintext highlighter-rouge">gh</code></li>
+  <li><code class="language-plaintext highlighter-rouge">boilerplate</code></li>
+  <li><code class="language-plaintext highlighter-rouge">gitversion</code></li>
+  <li><code class="language-plaintext highlighter-rouge">yq</code></li>
+</ul>
+
+<p>Runtime overrides are merged field-by-field by tool name in this order:</p>
+
+<ol>
+  <li>embedded defaults</li>
+  <li>user <code class="language-plaintext highlighter-rouge">~/.cloudopsworks/tronador/tools.json</code></li>
+  <li>project <code class="language-plaintext highlighter-rouge">.cloudopsworks/tronador/tools.json</code></li>
+  <li>project <code class="language-plaintext highlighter-rouge">.tronador/tools.json</code></li>
+  <li><code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_CONFIG</code> / <code class="language-plaintext highlighter-rouge">TRONADOR_TOOLS_CONFIG_PATH</code></li>
+  <li>explicit <code class="language-plaintext highlighter-rouge">--tools-config</code></li>
+</ol>
+
+<p>Empty or omitted fields inherit lower-precedence values. Platform overrides are
+also merged by key, with OS-wide keys such as <code class="language-plaintext highlighter-rouge">darwin</code> or <code class="language-plaintext highlighter-rouge">linux</code> applied before
+exact keys such as <code class="language-plaintext highlighter-rouge">darwin/arm64</code>.</p>
+
+<p>Supported JSON fields per tool:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yq"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"executable"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yq"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"default_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4.47.2"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"version_env_vars"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"TRONADOR_YQ_VERSION"</span><span class="p">,</span><span class="w"> </span><span class="s2">"YQ_VERSION"</span><span class="p">],</span><span class="w">
+  </span><span class="nl">"url_template"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"format"</span><span class="p">:</span><span class="w"> </span><span class="s2">"binary"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"binary_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"yq"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"archive_binary_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"*/bin/yq"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"checksum_sha256"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"platform_overrides"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">format</code> supports <code class="language-plaintext highlighter-rouge">binary</code>, <code class="language-plaintext highlighter-rouge">zip</code>, and <code class="language-plaintext highlighter-rouge">tar.gz</code>. Checksums are optional and are
+validated only when <code class="language-plaintext highlighter-rouge">checksum_sha256</code> is configured.</p>
+
+<h2 id="runtime-readme-assets">Runtime README assets</h2>
+
+<p>README generator assets are resolved in this order:</p>
+
+<ol>
+  <li>explicit flags (<code class="language-plaintext highlighter-rouge">--template-file</code>, <code class="language-plaintext highlighter-rouge">--template-yaml</code>)</li>
+  <li>environment (<code class="language-plaintext highlighter-rouge">README_TEMPLATE_FILE</code>, <code class="language-plaintext highlighter-rouge">README_TEMPLATE_YAML</code>)</li>
+  <li>project-local <code class="language-plaintext highlighter-rouge">.tronador/readme/*</code></li>
+  <li>project-local <code class="language-plaintext highlighter-rouge">.cloudopsworks/readme/*</code></li>
+  <li>user config, for example <code class="language-plaintext highlighter-rouge">~/.config/tronador/readme/*</code></li>
+  <li>GitHub sync cache</li>
+  <li>shared install paths</li>
+  <li>embedded fallback assets</li>
+</ol>
+
+<p>Template asset refresh is explicit. Use asset commands when you want to manage
+the runtime templates:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Show the active asset source for each file</span>
+tronador readme assets path
+
+<span class="c"># Copy embedded fallback assets into editable project-local files</span>
+tronador readme assets init <span class="nt">--workdir</span> <span class="nb">.</span>
+
+<span class="c"># Sync canonical assets from GitHub into the local cache</span>
+tronador readme assets <span class="nb">sync</span>
+
+<span class="c"># Sync a pinned release/ref and copy it into the project override directory</span>
+tronador readme assets <span class="nb">sync</span> <span class="nt">--version</span> vX.Y.Z <span class="nt">--project</span> <span class="nt">--workdir</span> <span class="nb">.</span>
+
+<span class="c"># Inspect or clear the cache</span>
+tronador readme assets cache <span class="nb">ls
+</span>tronador readme assets cache clean
+</code></pre></div></div>
+
+<p>By default, sync downloads from <code class="language-plaintext highlighter-rouge">cloudopsworks/tronador</code> at <code class="language-plaintext highlighter-rouge">master</code> under the
+<code class="language-plaintext highlighter-rouge">templates/</code> path. Use <code class="language-plaintext highlighter-rouge">--repo</code>, <code class="language-plaintext highlighter-rouge">--ref</code>, <code class="language-plaintext highlighter-rouge">--version</code>, <code class="language-plaintext highlighter-rouge">--base-path</code>, or
+<code class="language-plaintext highlighter-rouge">--manifest-path</code> for alternate sources. When a manifest is provided, SHA-256
+checksums are verified before assets are stored.</p>
+
+<h2 id="tronador-docs"><code class="language-plaintext highlighter-rouge">tronador docs</code></h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador docs init
+tronador docs targets
+tronador docs terraform
+tronador docs copyright-add <span class="nt">--software-description</span> <span class="s2">"My service"</span>
+</code></pre></div></div>
+
+<p>Common flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--workdir</code></td>
+      <td>Target repository directory.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--docs-dir</code></td>
+      <td>Documentation output directory, default <code class="language-plaintext highlighter-rouge">docs</code> or <code class="language-plaintext highlighter-rouge">DOCS_DIR</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="docs-targets"><code class="language-plaintext highlighter-rouge">docs targets</code></h3>
+
+<p>Generates <code class="language-plaintext highlighter-rouge">docs/targets.md</code> from Make help output, stripping ANSI color codes and
+wrapping the result in a Markdown code block.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador docs targets <span class="nt">--workdir</span> <span class="nb">.</span>
+tronador docs targets <span class="nt">--workdir</span> <span class="nb">.</span> <span class="nt">--all</span>
+tronador docs targets <span class="nt">--make</span> gmake <span class="nt">--help-target</span> <span class="nb">help</span>/all
+</code></pre></div></div>
+
+<h3 id="docs-terraform"><code class="language-plaintext highlighter-rouge">docs terraform</code></h3>
+
+<p>Runs <code class="language-plaintext highlighter-rouge">terraform-docs md .</code> from <code class="language-plaintext highlighter-rouge">--workdir</code> and writes <code class="language-plaintext highlighter-rouge">docs/terraform.md</code>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador docs terraform <span class="nt">--workdir</span> ./modules/vpc
+tronador docs terraform <span class="nt">--terraform-docs</span> /usr/local/bin/terraform-docs
+</code></pre></div></div>
+
+<h3 id="docs-copyright-add"><code class="language-plaintext highlighter-rouge">docs copyright-add</code></h3>
+
+<p>Runs the configured copyright-header command. <code class="language-plaintext highlighter-rouge">--software-description</code> (or
+<code class="language-plaintext highlighter-rouge">COPYRIGHT_SOFTWARE_DESCRIPTION</code>) is required. Use global <code class="language-plaintext highlighter-rouge">--dry-run</code> to preview
+before mutating source files.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador docs copyright-add <span class="se">\</span>
+  <span class="nt">--software-description</span> <span class="s2">"Repository automation CLI"</span> <span class="se">\</span>
+  <span class="nt">--dry-run</span>
+</code></pre></div></div>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

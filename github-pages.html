@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/github-pages.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/github-pages.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/github-pages.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="build-and-publish-these-docs">Build and publish these docs</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p>The Markdown guides in <code class="language-plaintext highlighter-rouge">docs/</code> are the source for the Tronador CLI
+documentation site. Jekyll renders them with the GitHub Pages Cayman theme into
+<code class="language-plaintext highlighter-rouge">docs-pages/</code>. The theme’s blue/slate palette and system-font styling follow the
+current Cloud Ops Works website at <a href="https://cloudopsworks.co">cloudopsworks.co</a>
+and the <a href="https://github.com/cloudopsworks/main-website"><code class="language-plaintext highlighter-rouge">cloudopsworks/main-website</code></a>
+design tokens (<code class="language-plaintext highlighter-rouge">#2563eb</code> blue, <code class="language-plaintext highlighter-rouge">#0f172a</code> slate, and <code class="language-plaintext highlighter-rouge">#f8fafc</code> surfaces).</p>
+
+<h2 id="maintain-the-source-docs">Maintain the source docs</h2>
+
+<p>Keep the command pages linked from <a href="/commands.html"><code class="language-plaintext highlighter-rouge">commands.md</code></a> and update them
+when public CLI behavior changes. Use Tronador’s <code class="language-plaintext highlighter-rouge">docs init</code> command when
+starting docs in a new worktree; <code class="language-plaintext highlighter-rouge">docs targets</code> is only for repositories that
+want the Makefile target list generated from <code class="language-plaintext highlighter-rouge">make help</code>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>go run <span class="nb">.</span> docs init <span class="nt">--workdir</span> <span class="nb">.</span>
+</code></pre></div></div>
+
+<h2 id="build-locally">Build locally</h2>
+
+<p>Install Ruby and Bundler, then install the locked Jekyll, Cayman theme, and
+GitHub Pages-compatible plugin dependencies and build the site:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bundle <span class="nb">install</span>
+./scripts/build-docs-site.sh
+</code></pre></div></div>
+
+<p>The generated static site is written to <code class="language-plaintext highlighter-rouge">docs-pages/</code>. To preview it locally
+without the GitHub Pages project prefix:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./scripts/build-docs-site.sh <span class="nt">--baseurl</span> <span class="s2">""</span>
+bundle <span class="nb">exec </span>jekyll serve <span class="se">\</span>
+  <span class="nt">--source</span> docs <span class="se">\</span>
+  <span class="nt">--destination</span> docs-pages <span class="se">\</span>
+  <span class="nt">--config</span> docs/_config.yml <span class="se">\</span>
+  <span class="nt">--baseurl</span> <span class="s2">""</span>
+</code></pre></div></div>
+
+<p>Then open <a href="http://127.0.0.1:4000/">http://127.0.0.1:4000/</a>. The source config leaves <code class="language-plaintext highlighter-rouge">baseurl</code> empty
+because the Pages site uses the repository’s configured custom domain.</p>
+
+<h2 id="publish">Publish</h2>
+
+<p>The <code class="language-plaintext highlighter-rouge">Documentation Pages</code> workflow rebuilds the site and publishes the output
+to the <code class="language-plaintext highlighter-rouge">gh-pages</code> branch whenever documentation or its build configuration is
+merged into <code class="language-plaintext highlighter-rouge">master</code>. It can also be started manually from the Actions tab.
+GitHub Pages must use the <code class="language-plaintext highlighter-rouge">gh-pages</code> branch and <code class="language-plaintext highlighter-rouge">/ (root)</code> as its publishing
+source; the published branch contains generated static files, not the Markdown
+source.</p>
+
+<p>After a successful workflow run, the site is available at
+<a href="http://tronador.cloudopsworks.co/">http://tronador.cloudopsworks.co/</a>. Check the workflow run and the Pages URL
+after publication; a successful local Jekyll build alone does not prove that
+the remote Pages configuration is active.</p>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

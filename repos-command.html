@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/repos-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/repos-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/repos-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="repos-command-architecture"><code class="language-plaintext highlighter-rouge">repos</code> command architecture</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador repos</code> ports the public Tronador <code class="language-plaintext highlighter-rouge">make repos/*</code> targets into Cobra
+commands. The command is intentionally configuration-driven so future repository
+layouts can be added by editing JSON instead of branching the CLI dispatcher.</p>
+
+<h2 id="configuration">Configuration</h2>
+
+<p>The embedded default lives at <code class="language-plaintext highlighter-rouge">internal/repos/default_config.json</code> and can be
+overridden with:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador repos <span class="nt">--config</span> path/to/repos-config.json ...
+</code></pre></div></div>
+
+<p>The JSON catalog contains:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">templates[]</code>: marker file, GitHub template repository, upgrade flags,
+boilerplate paths, and the migration key for each supported repository type.</li>
+  <li><code class="language-plaintext highlighter-rouge">migrationPlans[]</code>: declarative file operations keyed by version. The default
+config includes <code class="language-plaintext highlighter-rouge">510</code> plus reserved <code class="language-plaintext highlighter-rouge">511</code> and <code class="language-plaintext highlighter-rouge">512</code> slots for future upgrade
+paths.</li>
+</ul>
+
+<p>The default catalog includes the in-progress
+<code class="language-plaintext highlighter-rouge">cloudopsworks/argocd-project-template</code>. Repositories are detected through
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/.argocd</code>; the template participates in versioned upgrades but
+does not enable CICD footer or boilerplate handling. Its root <code class="language-plaintext highlighter-rouge">Makefile</code> is
+template-owned and is copied during upgrades.</p>
+
+<h2 id="command-mapping">Command mapping</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Make target</th>
+      <th>CLI equivalent</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/avail</code>, <code class="language-plaintext highlighter-rouge">repos/available</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos available</code> (<code class="language-plaintext highlighter-rouge">avail</code> alias; <code class="language-plaintext highlighter-rouge">repo available</code> also works)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/template/init</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos template init</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/template/&lt;kind&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos template &lt;kind&gt;</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/clean/template</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos clean template</code> (<code class="language-plaintext highlighter-rouge">repos template clean</code> also works)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/clean</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos clean</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/cicd/update</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos cicd update</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/upgrade</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos upgrade</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/upgrade/&lt;version&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos upgrade &lt;version&gt;</code>; <code class="language-plaintext highlighter-rouge">major</code> resolves the latest same-major tag and <code class="language-plaintext highlighter-rouge">master</code> uses the template master branch tip</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/recover</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos recover</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/push</code></td>
+      <td><code class="language-plaintext highlighter-rouge">tronador repos push</code></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/migrate/510</code></td>
+      <td>Internal workflow step only; not exposed as a public CLI command</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">repos/migrate/&lt;kind&gt;/510</code></td>
+      <td>Internal workflow step only; not exposed as a public CLI command</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><code class="language-plaintext highlighter-rouge">repos push</code> validates that every caller-staged path is upgrade-owned, then commits
+that existing index only. It does not discover or stage working-tree content.
+<code class="language-plaintext highlighter-rouge">repos upgrade</code> uses its own isolated exact-effect commit transaction.</p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador repos upgrade</code> is the only public upgrade command. With no
+argument, it mirrors the Makefile <code class="language-plaintext highlighter-rouge">repos/upgrade</code> target: initialize the detected
+template checkout, query tags through the native GitHub API adapter (with <code class="language-plaintext highlighter-rouge">gh</code> fallback), select the latest tag in the current
+major/minor line, fetch that tag, evaluate the template layout, apply the upgrade
+stack, update CICD metadata, and commit the result.</p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador repos upgrade &lt;version&gt;</code> mirrors the Makefile <code class="language-plaintext highlighter-rouge">repos/upgrade/%</code>
+target and runs the same full workflow against the explicit tag or branch. The
+special <code class="language-plaintext highlighter-rouge">major</code> value resolves the latest available semantic version tag within
+the same major line as the local <code class="language-plaintext highlighter-rouge">_VERSION</code>; the special <code class="language-plaintext highlighter-rouge">master</code> value upgrades
+from the template repository’s <code class="language-plaintext highlighter-rouge">master</code> branch tip.</p>
+
+<p>During the upgrade stack, <code class="language-plaintext highlighter-rouge">.github/workflows/</code> remains template-owned and is
+replaced. For a v5.10 target, the configuration upgrade refreshes an
+already-v5.10 repository and first migrates only target-matching legacy root
+CloudOps YAML from a pre-v5.10 <code class="language-plaintext highlighter-rouge">.github</code> layout; arbitrary GitHub operational YAML
+is not migrated as configuration. It then reconciles the v5.10 <code class="language-plaintext highlighter-rouge">.cloudopsworks/</code>
+layout. Issue and pull request templates are intentionally non-destructive:
+<code class="language-plaintext highlighter-rouge">.github/ISSUE_TEMPLATE/*</code> files, including <code class="language-plaintext highlighter-rouge">config.yml</code>, and
+<code class="language-plaintext highlighter-rouge">.github/PULL_REQUEST_TEMPLATE.md</code> are copied only when the implementation
+repository does not already have the destination file. Template repositories may
+store implementation issue forms with a disabled suffix such as
+<code class="language-plaintext highlighter-rouge">01_bug_report.yml.disabled</code>; the upgrade strips that suffix when copying into an
+implementation repository while still skipping reserved <code class="language-plaintext highlighter-rouge">98_*</code> and <code class="language-plaintext highlighter-rouge">99_*</code>
+template-only issue forms. <code class="language-plaintext highlighter-rouge">.github/dependabot.yml</code> follows the same
+non-destructive rule: it is copied when present in the template and absent from
+the implementation repository, and is left unchanged when already present. The
+same rule applies to <code class="language-plaintext highlighter-rouge">.github/secret_scanning.yml</code> and
+<code class="language-plaintext highlighter-rouge">.github/codeql/codeql-config.yml</code> for every repository type. For v5.10,
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/auto-assign.yml</code> is part of the value-aware YAML merge: active
+local reviewer and assignee values are retained while template defaults and
+documentation are refreshed. A v5.9-layout-to-v5.10 upgrade migrates only
+exact target-matching legacy root CloudOps YAML, including
+<code class="language-plaintext highlighter-rouge">.github/auto-assign.yml</code>; it does not treat arbitrary GitHub operational YAML
+as configuration. Targets that remain pre-v5.10 copy auto-assign files only when
+missing.
+The template <code class="language-plaintext highlighter-rouge">.gitignore</code> is merged through a stable managed block delimited by
+<code class="language-plaintext highlighter-rouge"># BEGIN TRONADOR TEMPLATE MANAGED BLOCK</code> and
+<code class="language-plaintext highlighter-rouge"># END TRONADOR TEMPLATE MANAGED BLOCK</code>. A valid existing block is replaced with
+the current template content while all bytes outside it remain unchanged. An
+unmarked or malformed destination is treated entirely as user-owned and receives
+a new managed block appended to it. Unchanged merge results are not rewritten or
+staged.</p>
+
+<h3 id="v510-cloudops-configuration-refresh">v5.10 CloudOps configuration refresh</h3>
+
+<p>Tronador detects target generation from CloudOps workflow blueprint references
+(or <code class="language-plaintext highlighter-rouge">blueprint_ref</code>), rather than the application-template <code class="language-plaintext highlighter-rouge">_VERSION</code>. Missing
+or contradictory active workflow evidence stops the upgrade. For a v5.10 target,
+it value-aware merges configuration YAML under the target <code class="language-plaintext highlighter-rouge">.cloudopsworks/</code>
+directory. That includes root policy YAML such as <code class="language-plaintext highlighter-rouge">cloudopsworks-ci.yaml</code>,
+labeler configuration, GitVersion profiles, and auto-assignment configuration,
+as well as applicable <code class="language-plaintext highlighter-rouge">vars/</code>, <code class="language-plaintext highlighter-rouge">vars/helm/</code>, <code class="language-plaintext highlighter-rouge">vars/apigw/</code>, and <code class="language-plaintext highlighter-rouge">vars/preview/</code>
+YAML. Target YAML supplies the baseline, retaining its active structure, comments,
+and defaults; active repository values overlay it recursively.</p>
+
+<p>For v5.10+ targets of the <code class="language-plaintext highlighter-rouge">terraform-module</code> and <code class="language-plaintext highlighter-rouge">terragrunt</code> templates, the
+target <code class="language-plaintext highlighter-rouge">.cloudopsworks/gitversion.yaml</code> is authoritative and replaces the
+implementation file’s exact content without merging values. Those templates own
+versioning policy, so consumer-side changes to that file are not retained; the
+existing implementation file permissions are preserved. Other template types
+continue to merge GitVersion configuration using the value-aware rules above.</p>
+
+<p>Only a template’s explicitly configured opaque boilerplate subtree is
+byte-for-byte exact-refreshed. Root policy YAML is not opaque boilerplate and is
+therefore value-aware merged.</p>
+
+<p>Environment files keep their local filenames. For a local top-level
+<code class="language-plaintext highlighter-rouge">vars/inputs-*.yaml</code> file, Tronador selects an input scaffold in this order:</p>
+
+<ol>
+  <li>When present, one or more local <code class="language-plaintext highlighter-rouge"># Agents:</code> declarations matched to exactly one same template
+baseline. A declaration may use <code class="language-plaintext highlighter-rouge">|</code> alternatives for <code class="language-plaintext highlighter-rouge">cloud</code> or <code class="language-plaintext highlighter-rouge">cloud_type</code>;
+every declared combination must resolve to that same baseline. Otherwise, the
+local file is preserved with a warning and Tronador does not fall back to an
+exact filename, mobile, or global selection.</li>
+  <li>When no local <code class="language-plaintext highlighter-rouge"># Agents:</code> metadata is present, an exact relative filename in the
+target <code class="language-plaintext highlighter-rouge">.cloudopsworks/</code> tree.</li>
+  <li>One active mobile family from <code class="language-plaintext highlighter-rouge">vars/inputs-global.yaml</code>: Android, XCode, or
+a Flutter platform selection. Both Android and XCode active is ambiguous and
+does not select a scaffold.</li>
+  <li>The <code class="language-plaintext highlighter-rouge">cloud</code> and <code class="language-plaintext highlighter-rouge">cloud_type</code> context from <code class="language-plaintext highlighter-rouge">vars/inputs-global.yaml</code>, mapped to
+Kubernetes (<code class="language-plaintext highlighter-rouge">kubernetes</code>, <code class="language-plaintext highlighter-rouge">eks</code>, <code class="language-plaintext highlighter-rouge">aks</code>, or <code class="language-plaintext highlighter-rouge">gke</code>), AWS Lambda, AWS Beanstalk,
+GCP App Engine, GCP Cloud Run, or a library/no-deployment scaffold.</li>
+</ol>
+
+<p>Within <code class="language-plaintext highlighter-rouge">vars/helm/</code>, <code class="language-plaintext highlighter-rouge">vars/apigw/</code>, and <code class="language-plaintext highlighter-rouge">vars/preview/</code>, an exact filename match
+is preferred. Otherwise, a single same-family <code class="language-plaintext highlighter-rouge">dev</code>, <code class="language-plaintext highlighter-rouge">uat</code>, or <code class="language-plaintext highlighter-rouge">prod</code> target is
+used, so <code class="language-plaintext highlighter-rouge">values-prod-live.yaml</code> can retain its name and values while adopting
+the <code class="language-plaintext highlighter-rouge">values-prod.yaml</code> baseline. Helm applies to Kubernetes targets or existing
+Helm YAML; API-gateway and preview configuration apply when present locally or
+enabled in the global inputs. A missing or ambiguous baseline leaves the local
+file in place and emits a preservation warning.</p>
+
+<p>Tronador preserves any local-only active YAML file or path and emits a warning
+instead of discarding it. It stops before changing <code class="language-plaintext highlighter-rouge">_VERSION</code> when it encounters
+unsafe YAML: duplicate mapping keys, aliases/anchors, or multiple documents.
+<code class="language-plaintext highlighter-rouge">_VERSION</code> is copied only after the configuration refresh succeeds. With
+<code class="language-plaintext highlighter-rouge">--dry-run</code>, Tronador acquires and analyses the selected temporary target checkout,
+then reports planned YAML writes and warnings without modifying repository files. Existing non-YAML behavior, including workflow replacement and
+non-YAML hook refreshes, remains unchanged.</p>
+
+<p>The Makefile’s <code class="language-plaintext highlighter-rouge">repos/upgrade/fetch</code>, <code class="language-plaintext highlighter-rouge">repos/upgrade/eval</code>,
+<code class="language-plaintext highlighter-rouge">repos/upgrade/stack</code>, and <code class="language-plaintext highlighter-rouge">repos/migrate/*</code> targets are internal workflow
+stages. They are intentionally not exposed as CLI subcommands. Public repos
+workflows remove the temporary <code class="language-plaintext highlighter-rouge">.template</code> checkout on completion and on
+recoverable failures; <code class="language-plaintext highlighter-rouge">repos recover</code> fetches its requested branch or tag instead
+of relying on a stale local <code class="language-plaintext highlighter-rouge">.template</code> directory.</p>
+
+<p>All commands support the root <code class="language-plaintext highlighter-rouge">--dry-run</code> flag and the <code class="language-plaintext highlighter-rouge">repos</code> persistent flags
+<code class="language-plaintext highlighter-rouge">--workdir</code>, <code class="language-plaintext highlighter-rouge">--config</code>, <code class="language-plaintext highlighter-rouge">--git</code>, <code class="language-plaintext highlighter-rouge">--gh</code>, and <code class="language-plaintext highlighter-rouge">--pull-branch</code> (<code class="language-plaintext highlighter-rouge">recover</code> only;
+<code class="language-plaintext highlighter-rouge">upgrade</code> uses optional <code class="language-plaintext highlighter-rouge">[version]</code>).</p>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

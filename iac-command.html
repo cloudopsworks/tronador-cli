@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/iac-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/iac-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/iac-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="iac-command"><code class="language-plaintext highlighter-rouge">iac</code> command</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador iac</code> contains infrastructure-as-code helpers for CloudOps Works
+workspaces. IaC commands are guarded by a workspace marker: the selected
+<code class="language-plaintext highlighter-rouge">--workdir</code> must contain <code class="language-plaintext highlighter-rouge">.cloudopsworks/.iac</code>.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac <span class="nt">--workdir</span> &lt;workspace&gt; &lt;<span class="nb">command</span><span class="o">&gt;</span>
+</code></pre></div></div>
+
+<h2 id="workspace-guard-and-path-semantics">Workspace guard and path semantics</h2>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">--workdir</code> is the guarded IaC workspace root. Marker validation always checks
+<code class="language-plaintext highlighter-rouge">&lt;workdir&gt;/.cloudopsworks/.iac</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">--path</code> on subcommands is a discovery start path, not a replacement for
+<code class="language-plaintext highlighter-rouge">--workdir</code>.</li>
+  <li>Relative <code class="language-plaintext highlighter-rouge">--path</code> values resolve under <code class="language-plaintext highlighter-rouge">--workdir</code>.</li>
+  <li>Absolute <code class="language-plaintext highlighter-rouge">--path</code> values are accepted only when they remain inside <code class="language-plaintext highlighter-rouge">--workdir</code>.</li>
+  <li>A path that resolves outside <code class="language-plaintext highlighter-rouge">--workdir</code> is rejected as an operational error;
+the command does not fall back to scanning the whole workspace.</li>
+</ul>
+
+<h2 id="iac-module"><code class="language-plaintext highlighter-rouge">iac module</code></h2>
+
+<p><code class="language-plaintext highlighter-rouge">iac module</code> reports Terraform/Terragrunt module sources in <code class="language-plaintext highlighter-rouge">terragrunt.hcl</code>
+files and can optionally update supported GitHub module source pins.</p>
+
+<p>Compatibility aliases remain available:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">iac module-versions</code></li>
+  <li><code class="language-plaintext highlighter-rouge">iac module_versions</code></li>
+</ul>
+
+<h3 id="supported-module-source-forms">Supported module source forms</h3>
+
+<p>The command only parses direct GitHub HTTPS sources that include an explicit
+<code class="language-plaintext highlighter-rouge">?ref=</code> pin:</p>
+
+<div class="language-hcl highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nx">source</span> <span class="err">=</span> <span class="s2">"git::https://github.com/org/repo.git//subdir?ref=v1.2.3"</span>
+<span class="nx">source</span> <span class="err">=</span> <span class="s2">"git::https://github.com/org/repo//subdir?ref=v1.2.3"</span>
+<span class="nx">source</span> <span class="err">=</span> <span class="s2">"https://github.com/org/repo.git//subdir?ref=v1.2.3"</span> <span class="c1"># missing git::</span>
+</code></pre></div></div>
+
+<p>Sources missing <code class="language-plaintext highlighter-rouge">git::</code> are accepted in report mode and marked as prefix-fix
+available. The <code class="language-plaintext highlighter-rouge">git::</code> prefix follows Terraform’s generic Git source syntax.</p>
+
+<p>The command deliberately does <strong>not</strong> mutate Terraform registry addresses, local
+paths, SSH/scp-style Git addresses, or sources without explicit <code class="language-plaintext highlighter-rouge">?ref=</code> pins.
+Unsupported or unparseable sources are reported instead of guessed.</p>
+
+<h3 id="version-lookup">Version lookup</h3>
+
+<p>For each supported GitHub source, the command lists repository tags through the
+GitHub API and calculates three independent upgrade targets:</p>
+
+<ul>
+  <li><strong>Patch</strong>: the highest eligible tag in the current major and minor series.</li>
+  <li><strong>Minor</strong>: the highest eligible tag in a later minor series within the current
+major.</li>
+  <li><strong>Major</strong>: the highest eligible tag in a later major series.</li>
+</ul>
+
+<p>Without <code class="language-plaintext highlighter-rouge">--upgrade</code>, all available targets are reported and files are not
+changed. With <code class="language-plaintext highlighter-rouge">-u, --upgrade</code>, the patch target is selected by default. Use
+<code class="language-plaintext highlighter-rouge">--minor</code> or <code class="language-plaintext highlighter-rouge">--major</code> with <code class="language-plaintext highlighter-rouge">--upgrade</code> to select the corresponding broader
+target; those flags are mutually exclusive. If the selected tier has no target,
+the command leaves the ref unchanged and reports any broader targets that are
+available. Release-tier lines are printed only for concrete available semantic
+version tags; unavailable tiers are omitted. When no tier has a target, the
+surrounding status summary is still printed unchanged.</p>
+
+<p>When <code class="language-plaintext highlighter-rouge">--major</code> is selected for an upgrade and no eligible major target exists,
+the command falls back to the highest eligible minor target in the current
+major version line. If neither a major nor same-major minor target is available,
+the ref remains unchanged.</p>
+
+<p>Stable tags always qualify. Alpha and beta prerelease tags qualify only when
+enabled with <code class="language-plaintext highlighter-rouge">--alpha</code> or <code class="language-plaintext highlighter-rouge">--beta</code>; their optional dot-separated suffixes must
+be numeric. Other prerelease channels are ignored. SemVer precedence is used
+after filtering, so a current prerelease can promote to a stable tag at the
+same version. Non-SemVer refs are reported but are never automatically
+rewritten. Findings such as outdated refs or missing prefixes are report results
+and do not by themselves cause a non-zero exit code.</p>
+
+<p>Operational failures, such as an invalid workdir, missing <code class="language-plaintext highlighter-rouge">.cloudopsworks/.iac</code>,
+out-of-scope <code class="language-plaintext highlighter-rouge">--path</code>, file read/write errors, or unhandled tag lookup failures,
+return non-zero.</p>
+
+<h3 id="flags">Flags</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--workdir &lt;dir&gt;</code></td>
+      <td>IaC workspace root. Defaults to <code class="language-plaintext highlighter-rouge">.</code> and must contain <code class="language-plaintext highlighter-rouge">.cloudopsworks/.iac</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-p, --path &lt;dir&gt;</code></td>
+      <td>Module discovery path relative to <code class="language-plaintext highlighter-rouge">--workdir</code>, or an absolute path inside <code class="language-plaintext highlighter-rouge">--workdir</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-u, --upgrade</code></td>
+      <td>Update eligible <code class="language-plaintext highlighter-rouge">?ref=</code> pins to the highest eligible patch target (same major/minor) and also add missing <code class="language-plaintext highlighter-rouge">git::</code> prefixes.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--minor</code></td>
+      <td>With <code class="language-plaintext highlighter-rouge">--upgrade</code>, select the highest eligible later minor target in the current major series. Mutually exclusive with <code class="language-plaintext highlighter-rouge">--major</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--major</code></td>
+      <td>With <code class="language-plaintext highlighter-rouge">--upgrade</code>, select the highest eligible later major target. Mutually exclusive with <code class="language-plaintext highlighter-rouge">--minor</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--alpha</code></td>
+      <td>Allow alpha prerelease tags when selecting an update.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--beta</code></td>
+      <td>Allow beta prerelease tags when selecting an update.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--fix-prefix</code></td>
+      <td>Add missing <code class="language-plaintext highlighter-rouge">git::</code> prefixes for eligible GitHub HTTPS sources without changing refs.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--dry-run</code></td>
+      <td>Analyze and print intended mutations without writing files.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-r, --report-ghaction</code></td>
+      <td>Emit GitHub Actions warning annotations for outdated modules.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">-c, --comment-pr-num &lt;number&gt;</code></td>
+      <td>Comment on a pull request when <code class="language-plaintext highlighter-rouge">--report-ghaction</code> is enabled.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="examples">Examples</h3>
+
+<p>Report module status for the whole workspace:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace
+</code></pre></div></div>
+
+<p>Report all available patch, minor, and major targets for one environment folder
+while still validating the workspace marker at <code class="language-plaintext highlighter-rouge">--workdir</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--path</span> <span class="nb">env</span>/dev
+</code></pre></div></div>
+
+<p>Preview the default patch upgrades and prefix fixes without writing files:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--path</span> <span class="nb">env</span>/dev <span class="nt">--upgrade</span> <span class="nt">--dry-run</span>
+</code></pre></div></div>
+
+<p>Apply the default patch ref upgrades and normalize missing <code class="language-plaintext highlighter-rouge">git::</code> prefixes:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--path</span> <span class="nb">env</span>/dev <span class="nt">--upgrade</span>
+</code></pre></div></div>
+
+<p>Apply the latest eligible minor or major target instead of the default patch
+target:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--path</span> <span class="nb">env</span>/dev <span class="nt">--upgrade</span> <span class="nt">--minor</span>
+tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--path</span> <span class="nb">env</span>/dev <span class="nt">--upgrade</span> <span class="nt">--major</span>
+</code></pre></div></div>
+
+<p>Allow alpha and beta prereleases when applying updates:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--upgrade</span> <span class="nt">--alpha</span> <span class="nt">--beta</span>
+</code></pre></div></div>
+
+<p>Only add missing <code class="language-plaintext highlighter-rouge">git::</code> prefixes without changing <code class="language-plaintext highlighter-rouge">?ref=</code> pins:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> ../my-iac-workspace <span class="nt">--fix-prefix</span>
+</code></pre></div></div>
+
+<p>Emit CI warnings for outdated modules:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador iac module <span class="nt">--workdir</span> <span class="nb">.</span> <span class="nt">--report-ghaction</span>
+</code></pre></div></div>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/versions-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/versions-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/versions-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="versions-command">Versions command</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador versions</code> manages a repository’s branching workflow and its
+GitVersion configuration. It is the CLI replacement for the supported
+GitFlow-oriented Make targets; it does <strong>not</strong> generate an application’s
+<code class="language-plaintext highlighter-rouge">VERSION</code> file. Use <a href="/project-command.html#version-generation"><code class="language-plaintext highlighter-rouge">tronador project version</code></a>
+for application-version metadata.</p>
+
+<p>The root aliases <code class="language-plaintext highlighter-rouge">gitflow</code>, <code class="language-plaintext highlighter-rouge">gf</code>, <code class="language-plaintext highlighter-rouge">githubflow</code>, and <code class="language-plaintext highlighter-rouge">flow</code> all select this
+same command tree. For example, <code class="language-plaintext highlighter-rouge">tronador gf init --gitflow</code> and
+<code class="language-plaintext highlighter-rouge">tronador versions init --gitflow</code> are equivalent.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions <span class="nt">--help</span>
+tronador versions init <span class="nt">--githubflow</span>
+tronador versions feature start add-metrics
+tronador versions feature publish
+</code></pre></div></div>
+
+<h2 id="repository-requirements-and-shared-guards">Repository requirements and shared guards</h2>
+
+<p>All commands operate on <code class="language-plaintext highlighter-rouge">--workdir</code> (default <code class="language-plaintext highlighter-rouge">.</code>). <code class="language-plaintext highlighter-rouge">--git &lt;path&gt;</code> selects the
+Git executable when it is not available on <code class="language-plaintext highlighter-rouge">PATH</code>; Git operations otherwise
+use <code class="language-plaintext highlighter-rouge">git</code>. <code class="language-plaintext highlighter-rouge">--main-branch &lt;name&gt;</code> overrides primary-branch discovery. The
+normal root <code class="language-plaintext highlighter-rouge">--dry-run</code> flag is mutation-free for every <code class="language-plaintext highlighter-rouge">versions</code> operation:
+it reports the selected action without changing configuration, fetching,
+checking out, merging, creating branches or tags, pushing, deleting, or opening
+a pull request.</p>
+
+<h3 id="gitversion-and-github-cli-resolution">GitVersion and GitHub CLI resolution</h3>
+
+<p><code class="language-plaintext highlighter-rouge">versions</code> resolves GitVersion and the GitHub CLI only when the selected
+operation reaches a call that needs that tool. Git is separate: <code class="language-plaintext highlighter-rouge">--git</code> keeps
+selecting it exactly as before, and Tronador never downloads Git.</p>
+
+<p>The inherited provisioning flags are available on <code class="language-plaintext highlighter-rouge">versions</code>, all aliases,
+and every subcommand:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>--tools-dir &lt;directory&gt;
+--tools-config &lt;file&gt;
+--no-install-tools
+--allow-network
+--tool-version &lt;name=version&gt;   # repeatable
+--tool-path &lt;name=path&gt;         # repeatable
+</code></pre></div></div>
+
+<p>For <code class="language-plaintext highlighter-rouge">gitversion</code> and <code class="language-plaintext highlighter-rouge">gh</code>, resolution is explicit path, then <code class="language-plaintext highlighter-rouge">PATH</code>, then an
+existing executable in the Tronador tools cache (<code class="language-plaintext highlighter-rouge">--tools-dir</code>, or
+<code class="language-plaintext highlighter-rouge">~/.cloudopsworks/tronador/</code> by default), and finally an opt-in download. A
+relative path supplied through <code class="language-plaintext highlighter-rouge">--tool-path</code> is resolved from the caller’s
+current directory before command execution changes to <code class="language-plaintext highlighter-rouge">--workdir</code>; a bare
+executable name supplied through the flag is searched on <code class="language-plaintext highlighter-rouge">PATH</code>.
+<code class="language-plaintext highlighter-rouge">--tool-version</code> selects the version only if a download is necessary; it never
+replaces a usable explicit, <code class="language-plaintext highlighter-rouge">PATH</code>, or cached executable. Downloads require <code class="language-plaintext highlighter-rouge">--allow-network</code>.
+<code class="language-plaintext highlighter-rouge">--no-install-tools</code> prohibits them even when network permission is present.
+The <code class="language-plaintext highlighter-rouge">--allow-network</code> flag permits only missing-tool downloads—it is not an
+offline mode switch and does not suppress the workflow’s normal Git or GitHub
+network operations.</p>
+
+<p>GitVersion is needed when <code class="language-plaintext highlighter-rouge">hotfix start</code>, <code class="language-plaintext highlighter-rouge">release start</code>, or <code class="language-plaintext highlighter-rouge">tag</code> must
+calculate a version. <code class="language-plaintext highlighter-rouge">tag --publish</code> can reuse an existing version tag at
+<code class="language-plaintext highlighter-rouge">HEAD</code> without GitVersion. The <code class="language-plaintext highlighter-rouge">gh</code> executable is needed by <code class="language-plaintext highlighter-rouge">feature finish</code>
+and non-local <code class="language-plaintext highlighter-rouge">hotfix finish</code> or <code class="language-plaintext highlighter-rouge">release finish</code> when they inspect or create
+pull requests. Local finishes do not use <code class="language-plaintext highlighter-rouge">gh</code>, and a release already contained
+in every applicable target can finish without a pull-request query. Installing
+<code class="language-plaintext highlighter-rouge">gh</code> does not authenticate it; configure GitHub CLI authentication separately.
+Git-only commands and <code class="language-plaintext highlighter-rouge">versions init</code> do not resolve either tool.</p>
+
+<p>CLI <code class="language-plaintext highlighter-rouge">--dry-run</code> returns before tool option parsing or resolution. It does not
+load <code class="language-plaintext highlighter-rouge">--tools-config</code>, create a cache, download or authenticate a tool, or
+execute Git, GitVersion, or <code class="language-plaintext highlighter-rouge">gh</code>.</p>
+
+<p>The command first reads the <code class="language-plaintext highlighter-rouge"># Agents: WayOfWork=&lt;workflow&gt;</code> header in
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/gitversion.yaml</code>. For a headerless legacy config, it can also
+detect the workflow when that file byte-matches exactly one unchanged selector
+checked into <code class="language-plaintext highlighter-rouge">HEAD</code> (<code class="language-plaintext highlighter-rouge">gitversion_gitflow.yaml</code>, <code class="language-plaintext highlighter-rouge">gitversion_githubflow.yaml</code>, or
+<code class="language-plaintext highlighter-rouge">gitversion_trunkbased.yaml</code>). Non-purge commands retain the historical
+GitFlow fallback when neither method is reliable. Destructive <code class="language-plaintext highlighter-rouge">purge</code> commands
+do not: the active config itself must also be unchanged from <code class="language-plaintext highlighter-rouge">HEAD</code>, and an
+ambiguous match, no match, modified/untracked selector, malformed header, or
+duplicate header stops before fetch, checkout, or deletion.
+Branching behavior is then workflow-sensitive:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Way of work</th>
+      <th>Feature/release base</th>
+      <th><code class="language-plaintext highlighter-rouge">develop</code></th>
+      <th>Support branches</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>GitFlow</td>
+      <td><code class="language-plaintext highlighter-rouge">develop</code></td>
+      <td>Required</td>
+      <td>Supported</td>
+    </tr>
+    <tr>
+      <td>GitHub Flow</td>
+      <td>detected primary branch</td>
+      <td>Not used</td>
+      <td>Rejected</td>
+    </tr>
+    <tr>
+      <td>Trunk-based</td>
+      <td>detected primary branch</td>
+      <td>Not used</td>
+      <td>Rejected</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The primary branch is resolved from <code class="language-plaintext highlighter-rouge">origin/HEAD</code>, then <code class="language-plaintext highlighter-rouge">origin/main</code> or
+<code class="language-plaintext highlighter-rouge">origin/master</code>; operations stop if none can be identified unless
+<code class="language-plaintext highlighter-rouge">--main-branch</code> supplies an override. An override must be a safe ref name and
+must exist as a branch at <code class="language-plaintext highlighter-rouge">origin</code>; a local-only or misspelled override is
+rejected. Commands reject unsafe branch and tag input; they invoke Git with
+typed arguments rather than shell interpolation.</p>
+
+<p>Publishing checks out the named branch and pushes it with <code class="language-plaintext highlighter-rouge">origin</code> as its
+upstream. Commands that create a pull request or tag require the named local
+branch to exactly equal its branch published at <code class="language-plaintext highlighter-rouge">origin</code>; publish first if that
+guard fails. Pull-request finishes require <code class="language-plaintext highlighter-rouge">gh</code> authentication.</p>
+
+<p>Purge is deliberately stricter than a branch deletion. It fetches <code class="language-plaintext highlighter-rouge">origin</code>,
+requires a remote branch to have a matching local branch for parity checking,
+and proves the source branch is merged into the freshly fetched workflow base
+before changing branches or deleting anything. An unmerged local-only branch
+is rejected; a branch absent both locally and remotely is already purged and
+is a successful no-op. Deletion uses Git’s safe merged-branch delete, never a
+force delete.</p>
+
+<h2 id="initialize-a-way-of-work">Initialize a way of work</h2>
+
+<p><code class="language-plaintext highlighter-rouge">init</code> first verifies that these three regular, non-symlink files exist:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>.cloudopsworks/gitversion_gitflow.yaml
+.cloudopsworks/gitversion_githubflow.yaml
+.cloudopsworks/gitversion_trunkbased.yaml
+</code></pre></div></div>
+
+<p>It copies the selected file atomically to <code class="language-plaintext highlighter-rouge">.cloudopsworks/gitversion.yaml</code>.
+When that target already exists, it warns with its detected WayOfWork; an
+unrecognised or missing header is reported as the compatible GitFlow default.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions init <span class="nt">--gitflow</span>
+tronador versions init <span class="nt">--githubflow</span>
+tronador versions init <span class="nt">--trunkbased</span>
+tronador versions init <span class="nt">--trunk</span>       <span class="c"># alias for --trunkbased</span>
+</code></pre></div></div>
+
+<p>Only one workflow flag may be used. With no flag, <code class="language-plaintext highlighter-rouge">init</code> reads
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/cloudopsworks-ci.yaml</code> when its <code class="language-plaintext highlighter-rouge">config.gitFlow.enabled</code>
+setting is available:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">true</code>, or an unsupported/missing setting, selects GitFlow.</li>
+  <li><code class="language-plaintext highlighter-rouge">false</code> opens a numeric interactive selector for GitFlow, GitHub Flow, or
+trunk-based development.</li>
+  <li>Selecting GitFlow changes the supported <code class="language-plaintext highlighter-rouge">config.gitFlow.enabled</code> scalar to
+<code class="language-plaintext highlighter-rouge">true</code> while preserving surrounding YAML comments and layout. Selecting a
+non-GitFlow workflow does not enable it.</li>
+</ul>
+
+<p>GitFlow alone creates and pushes <code class="language-plaintext highlighter-rouge">develop</code>. Before doing so it requires a
+clean worktree, an <code class="language-plaintext highlighter-rouge">origin</code> remote, a successful <code class="language-plaintext highlighter-rouge">origin</code> fetch, and a primary
+branch whose local commit exactly matches <code class="language-plaintext highlighter-rouge">origin/&lt;primary&gt;</code>. If <code class="language-plaintext highlighter-rouge">develop</code>
+already exists at <code class="language-plaintext highlighter-rouge">origin</code>, it is retained only when any local <code class="language-plaintext highlighter-rouge">develop</code> is
+identical; a divergent local and remote <code class="language-plaintext highlighter-rouge">develop</code> fails closed. When <code class="language-plaintext highlighter-rouge">origin</code>
+does not yet have <code class="language-plaintext highlighter-rouge">develop</code>, an existing local <code class="language-plaintext highlighter-rouge">develop</code> can be published only
+when it matches the synchronized primary branch. GitHub Flow and trunk-based
+selection never create <code class="language-plaintext highlighter-rouge">develop</code>.</p>
+
+<h2 id="feature-branches">Feature branches</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions feature start &lt;name&gt;
+tronador versions feature publish <span class="o">[</span>name]
+tronador versions feature finish <span class="o">[</span>name]
+tronador versions feature purge <span class="o">[</span>name]
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">start</code> creates <code class="language-plaintext highlighter-rouge">feature/&lt;name&gt;</code> from <code class="language-plaintext highlighter-rouge">develop</code> under GitFlow and from the
+primary branch otherwise. The other operations infer <code class="language-plaintext highlighter-rouge">&lt;name&gt;</code> from the current
+<code class="language-plaintext highlighter-rouge">feature/&lt;name&gt;</code> (or <code class="language-plaintext highlighter-rouge">feat/&lt;name&gt;</code>) branch when it is omitted. <code class="language-plaintext highlighter-rouge">finish</code> creates
+a guarded GitHub pull request into <code class="language-plaintext highlighter-rouge">develop</code> for GitFlow or the primary branch
+for GitHub Flow and trunk-based repositories; it does not merge the pull
+request. <code class="language-plaintext highlighter-rouge">purge</code> switches away from the branch before deleting its local and
+remote forms, selecting <code class="language-plaintext highlighter-rouge">develop</code> for GitFlow or the primary branch otherwise.</p>
+
+<h2 id="hotfix-branches">Hotfix branches</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions hotfix start
+tronador versions hotfix publish
+tronador versions hotfix finish
+tronador versions hotfix finish <span class="nt">--local</span>
+tronador versions hotfix purge <span class="o">[</span>version]
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">start</code> obtains GitVersion’s <code class="language-plaintext highlighter-rouge">MajorMinorPatch</code> and increments the patch
+component. It creates <code class="language-plaintext highlighter-rouge">hotfix/vX.Y.Z</code> from the primary branch; when started
+from a <code class="language-plaintext highlighter-rouge">support/*</code> branch, that branch is retained as the base. <code class="language-plaintext highlighter-rouge">publish</code> and
+<code class="language-plaintext highlighter-rouge">finish</code> operate on the current hotfix branch. <code class="language-plaintext highlighter-rouge">purge</code> accepts an optional
+version and otherwise infers it from the current <code class="language-plaintext highlighter-rouge">hotfix/*</code> or <code class="language-plaintext highlighter-rouge">fix/*</code> branch.</p>
+
+<p>The default <code class="language-plaintext highlighter-rouge">finish</code> creates a guarded pull request to the primary branch.
+<code class="language-plaintext highlighter-rouge">--local</code> journals the merge and annotated <code class="language-plaintext highlighter-rouge">vX.Y.Z</code> tag, then publishes the
+required target, that exact annotated tag, and the source-branch deletion in
+one server-side atomic push with leases. In a GitFlow repository, a matching
+<code class="language-plaintext highlighter-rouge">support/vX.Y</code> branch receives the local hotfix when one exists; otherwise the
+primary branch receives it. GitHub Flow and trunk-based repositories always
+target the primary branch.</p>
+
+<h2 id="release-branches">Release branches</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions release start
+tronador versions release start <span class="nt">--patch</span>
+tronador versions release start <span class="nt">--minor</span>
+tronador versions release start <span class="nt">--major</span>
+tronador versions release publish <span class="o">[</span>version]
+tronador versions release finish
+tronador versions release finish <span class="nt">--local</span>
+tronador versions release purge <span class="o">[</span>version]
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">start</code> defaults to a minor bump and calculates the next GitVersion
+<code class="language-plaintext highlighter-rouge">MajorMinorPatch</code> before creating <code class="language-plaintext highlighter-rouge">release/vX.Y.Z</code>. Pass one of <code class="language-plaintext highlighter-rouge">--patch</code>,
+<code class="language-plaintext highlighter-rouge">--minor</code>, or <code class="language-plaintext highlighter-rouge">--major</code> to select a different bump; combining multiple bump
+flags is an error. Its base is <code class="language-plaintext highlighter-rouge">develop</code> in GitFlow and the primary branch in
+GitHub Flow or trunk-based repositories. <code class="language-plaintext highlighter-rouge">publish</code> and <code class="language-plaintext highlighter-rouge">purge</code> infer the
+release version from the current <code class="language-plaintext highlighter-rouge">release/*</code> branch when omitted. <code class="language-plaintext highlighter-rouge">finish</code>
+operates on the current release branch.</p>
+
+<p>The normal finish creates a guarded pull request into the primary branch. In
+GitFlow it also creates a second guarded pull request from the release branch
+to <code class="language-plaintext highlighter-rouge">develop</code>, so both integration lines are explicit. With <code class="language-plaintext highlighter-rouge">--local</code>, Tronador
+journals the local merges and annotated version tag, then publishes every
+required target (<code class="language-plaintext highlighter-rouge">main</code> and <code class="language-plaintext highlighter-rouge">develop</code> for GitFlow), that exact annotated tag,
+and the source-branch deletion in one server-side atomic push with leases. The
+other workflows publish only the primary branch target.</p>
+
+<h3 id="resuming-a-local-finish">Resuming a local finish</h3>
+
+<p>Before a new local hotfix or release finish writes its schema-v4 journal,
+Tronador fetches the source and requires it to exactly match <code class="language-plaintext highlighter-rouge">origin</code>. This
+prevents a local finish from merging unpublished source work. Local finishes
+use a journal at Git’s <code class="language-plaintext highlighter-rouge">tronador/versions-journal.json</code> path plus a short-lived
+exclusive lock to prevent simultaneous finish invocations in the same
+worktree. The lock is not a recovery mechanism.</p>
+
+<p>If a merge conflict interrupts the operation, resolve the conflict and rerun
+the same <code class="language-plaintext highlighter-rouge">finish --local</code> command. The workflow continues <code class="language-plaintext highlighter-rouge">git merge
+--continue</code> when a merge is in progress and then follows the recorded next
+step. A resume journal is accepted only when its schema, WayOfWork, repository,
+worktree, operation, source/target, step plan, and cursor match the current
+operation; otherwise Tronador stops for manual resolution. Pre-schema-v4
+journals are incompatible and fail closed before a remote mutation. A matching
+resume may skip the source-parity check because a later completed step can
+already have removed the source branch.</p>
+
+<p>The atomic publication plan records each required remote target’s observed and
+desired commit plus the annotated tag object. A remote without atomic-push
+support, a changed remote ref, or a prepublished/no-op target or tag fails
+closed: the journal and source branch remain for resolution or retry. If the
+server accepted the atomic transaction but the client did not receive its
+result, rerunning the same command validates that every target contains the
+planned result and that the remote annotated tag has the exact recorded object
+and target before it deletes the local source and clears the journal.</p>
+
+<h2 id="support-branches-gitflow-only">Support branches (GitFlow only)</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions support start &lt;tag&gt;
+tronador versions support publish <span class="o">[</span>tag]
+tronador versions support purge <span class="o">[</span>tag]
+</code></pre></div></div>
+
+<p>Support branches are permanent maintenance lines and are available only when
+the selected WayOfWork is GitFlow. <code class="language-plaintext highlighter-rouge">start</code> fetches tags from <code class="language-plaintext highlighter-rouge">origin</code>, requires
+the requested version tag after that fetch, and creates <code class="language-plaintext highlighter-rouge">support/&lt;tag&gt;</code> at the
+tag. This allows a tag that initially exists only on the remote. Publish and
+purge infer the tag from the current <code class="language-plaintext highlighter-rouge">support/*</code> branch when omitted. Other
+workflows reject all support operations rather than silently creating a
+<code class="language-plaintext highlighter-rouge">develop</code>-style maintenance branch.</p>
+
+<h2 id="version-tags">Version tags</h2>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador versions tag
+tronador versions tag &lt;qualifier&gt;
+tronador versions tag &lt;qualifier&gt; <span class="nt">--publish</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">tag</code> preserves the legacy GitFlow version-tag behavior. On the primary branch
+it tags GitVersion’s <code class="language-plaintext highlighter-rouge">MajorMinorPatch</code>; on every other branch it uses
+GitVersion’s <code class="language-plaintext highlighter-rouge">SemVer</code>, retaining prerelease information. Tronador normalizes
+the value to a <code class="language-plaintext highlighter-rouge">v</code>-prefixed annotated tag. An optional <code class="language-plaintext highlighter-rouge">&lt;qualifier&gt;</code> appends
+<code class="language-plaintext highlighter-rouge">+deploy-&lt;qualifier&gt;</code> (for example,
+<code class="language-plaintext highlighter-rouge">v1.2.3-alpha.1+deploy-test</code>). This qualifier is deployment metadata, not a
+new semantic version.</p>
+
+<p><code class="language-plaintext highlighter-rouge">--publish</code> pushes the exact tag to <code class="language-plaintext highlighter-rouge">origin</code> in the same invocation. Before
+calculating a new version, it looks for a unique local SemVer tag already
+pointing at <code class="language-plaintext highlighter-rouge">HEAD</code> and publishes it if it is not yet on <code class="language-plaintext highlighter-rouge">origin</code>; if it is
+already published, the command is an idempotent no-op. This also checks the
+remote’s advertised target before creating a tag, so a remote-only tag in a
+clone without fetched tags is not recreated with a conflicting annotated-tag
+object. This avoids silently calculating and creating the next version after
+<code class="language-plaintext highlighter-rouge">tag</code> has already tagged the commit locally. If multiple local version tags
+point at <code class="language-plaintext highlighter-rouge">HEAD</code>, one unpushed tag is preferred; multiple unpushed candidates
+fail rather than guessing (a supplied deployment qualifier can disambiguate).
+A same-named local or remote tag that points elsewhere is rejected before
+local mutation.
+One commit may have multiple deployment-qualified aliases of the same version
+(for example, <code class="language-plaintext highlighter-rouge">v1.2.3+deploy-test</code> and <code class="language-plaintext highlighter-rouge">v1.2.3+deploy-prod</code>). Prerelease
+identifiers are part of the version: <code class="language-plaintext highlighter-rouge">v1.2.3-beta.3</code> and <code class="language-plaintext highlighter-rouge">v1.2.3-beta.4</code> are
+different versions and cannot both tag one commit. Tagging has the same exact
+remote-parity guard as a finish.</p>
+
+<h2 id="related-project-version-marker-generation">Related project-version marker generation</h2>
+
+<p><code class="language-plaintext highlighter-rouge">versions</code> never writes a repository upgrade marker. Use the separate guarded
+project command:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador project version <span class="nt">--generate</span> <span class="nt">--yes</span>
+tronador project version <span class="nt">--generate</span> <span class="nt">--dry-run</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">--generate</code> calculates GitVersion’s <code class="language-plaintext highlighter-rouge">MajorMinorPatch</code> and writes
+<code class="language-plaintext highlighter-rouge">vX.Y.Z</code> to <code class="language-plaintext highlighter-rouge">.cloudopsworks/_VERSION</code> (or a supported legacy
+<code class="language-plaintext highlighter-rouge">.github/_VERSION</code>). It is deliberately restricted to one unambiguous,
+catalog-managed versioned template layout or an explicitly registered private
+source marker. Private <code class="language-plaintext highlighter-rouge">.cloudopsworks/.blueprint</code> and
+<code class="language-plaintext highlighter-rouge">.cloudopsworks/.skills</code> markers are eligible without becoming public catalog
+templates; <code class="language-plaintext highlighter-rouge">.github/.skills</code> is not eligible. An ordinary project marker,
+<code class="language-plaintext highlighter-rouge">_VERSION</code>, or <code class="language-plaintext highlighter-rouge">.cloudopsworks</code> directory is not sufficient. A missing version
+marker may be created atomically only after the layout and its active regular
+eligibility marker have been verified. Symlinked or non-regular
+layouts/markers, conflicting markers, or multiple active layouts are rejected.
+Outside a dry-run it requires <code class="language-plaintext highlighter-rouge">--yes</code>, warns before replacing an existing
+marker because the marker controls template upgrades, and never creates a Git
+tag, commit, or push. It cannot be combined with <code class="language-plaintext highlighter-rouge">--plain</code> or <code class="language-plaintext highlighter-rouge">--snapshot</code>.</p>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

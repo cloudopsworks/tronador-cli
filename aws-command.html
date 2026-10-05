@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+
+<!-- Begin Jekyll SEO tag v2.7.1 -->
+<title>Tronador CLI Documentation | Installation, command references, and maintainer guides for Tronador CLI.</title>
+<meta name="generator" content="Jekyll v4.4.1" />
+<meta property="og:title" content="Tronador CLI Documentation" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<meta property="og:description" content="Installation, command references, and maintainer guides for Tronador CLI." />
+<link rel="canonical" href="http://tronador.cloudopsworks.co/aws-command.html" />
+<meta property="og:url" content="http://tronador.cloudopsworks.co/aws-command.html" />
+<meta property="og:site_name" content="Tronador CLI Documentation" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Tronador CLI Documentation" />
+<script type="application/ld+json">
+{"description":"Installation, command references, and maintainer guides for Tronador CLI.","headline":"Tronador CLI Documentation","@type":"WebPage","url":"http://tronador.cloudopsworks.co/aws-command.html","@context":"https://schema.org"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link rel="preload" href="https://fonts.googleapis.com/css?family=Open+Sans:400,700&display=swap" as="style" type="text/css" crossorigin>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#157878">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/assets/css/style.css?v=">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to the content.</a>
+
+    <header class="page-header" role="banner">
+      <h1 class="project-name">Tronador CLI Documentation</h1>
+      <h2 class="project-tagline">Installation, command references, and maintainer guides for Tronador CLI.</h2>
+      
+      
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      <h1 id="aws-command"><code class="language-plaintext highlighter-rouge">aws</code> command</h1>
+
+<p><a href="/index.html">Documentation home</a> · <a href="/commands.html">Command reference</a></p>
+
+<p><code class="language-plaintext highlighter-rouge">tronador aws</code> groups AWS resource automation commands for tagging,
+secrets copying, default VPC cleanup, and security remediation.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador aws <span class="o">[</span>global AWS flags] &lt;<span class="nb">command</span><span class="o">&gt;</span>
+</code></pre></div></div>
+
+<h2 id="shared-aws-flags">Shared AWS flags</h2>
+
+<p>All <code class="language-plaintext highlighter-rouge">aws</code> subcommands accept the same authentication and region flags.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--profile &lt;name&gt;</code></td>
+      <td>AWS profile to use.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--region &lt;region&gt;</code></td>
+      <td>AWS region to use where the subcommand is region-scoped.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--assume-role-arn &lt;arn&gt;</code></td>
+      <td>ARN of the source role to assume.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--assume-role-session-name &lt;name&gt;</code></td>
+      <td>Session name for assume-role calls.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--assume-role-external-id &lt;id&gt;</code></td>
+      <td>External ID for assume-role calls.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--assume-role-duration-secs &lt;seconds&gt;</code></td>
+      <td>Assume-role session duration. Defaults to <code class="language-plaintext highlighter-rouge">3600</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--dry-run</code></td>
+      <td>Show planned changes without making supported mutations.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--verbose</code></td>
+      <td>Print extra diagnostic output.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="aws-tag"><code class="language-plaintext highlighter-rouge">aws tag</code></h2>
+
+<p>Tags AWS resources with CloudOps Works organization metadata. The command uses
+Resource Groups Tagging API plus native service discovery fallback for broader
+coverage.</p>
+
+<p>Supported resource families include EC2 resources, S3 buckets, IAM roles and
+policies, SNS, SQS, Secrets Manager, ACM, KMS, AWS Backup, EventBridge event
+buses, and schedule groups.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador aws tag <span class="se">\</span>
+  <span class="nt">--organization</span> <span class="s2">"CloudOps"</span> <span class="se">\</span>
+  <span class="nt">--organization-unit</span> <span class="s2">"Platform"</span> <span class="se">\</span>
+  <span class="nt">--application-name</span> <span class="s2">"billing"</span> <span class="se">\</span>
+  <span class="nt">--application-type</span> <span class="s2">"service"</span> <span class="se">\</span>
+  <span class="nt">--target</span> all <span class="se">\</span>
+  <span class="nt">--types</span> all
+</code></pre></div></div>
+
+<p>Important flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--organization &lt;value&gt;</code></td>
+      <td>Organization tag value. Required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--organization-unit &lt;value&gt;</code></td>
+      <td>Organization unit tag value. Required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--application-name &lt;value&gt;</code></td>
+      <td>Application name tag value. Required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--application-type &lt;value&gt;</code></td>
+      <td>Application type tag value. Required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--managed-by &lt;value&gt;</code></td>
+      <td>Managed-by tag value. Defaults to <code class="language-plaintext highlighter-rouge">manual</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--fullname-sep &lt;value&gt;</code></td>
+      <td>Separator for generated organization full names. Defaults to <code class="language-plaintext highlighter-rouge">-</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--target resources|iam|all</code></td>
+      <td>Resource scope. Defaults to <code class="language-plaintext highlighter-rouge">all</code>.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--types &lt;list&gt;|all</code></td>
+      <td>Comma-separated resource type list, or all supported types.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--reapply</code></td>
+      <td>Reapply tags even when resources already have tags.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--include-service-linked</code></td>
+      <td>Include service-linked IAM roles.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="aws-copysecret"><code class="language-plaintext highlighter-rouge">aws copysecret</code></h2>
+
+<p>Copies an AWS Secrets Manager secret within an account, across regions, or across
+accounts using a destination assume role.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Copy within the same account and region; destination defaults to source name.</span>
+tronador aws copysecret <span class="nt">--source</span> app/config
+
+<span class="c"># Copy across regions.</span>
+tronador aws copysecret <span class="se">\</span>
+  <span class="nt">--source</span> app/config <span class="se">\</span>
+  <span class="nt">--dest</span> app/config-copy <span class="se">\</span>
+  <span class="nt">--dest-region</span> us-west-2
+
+<span class="c"># Copy into another account.</span>
+tronador aws copysecret <span class="se">\</span>
+  <span class="nt">--source</span> app/config <span class="se">\</span>
+  <span class="nt">--dest</span> app/config <span class="se">\</span>
+  <span class="nt">--dest-assume-role-arn</span> arn:aws:iam::123456789012:role/SecretCopyRole
+</code></pre></div></div>
+
+<p>Flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--source &lt;name-or-arn&gt;</code></td>
+      <td>Source secret name or ARN. Required.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--dest &lt;name&gt;</code></td>
+      <td>Destination secret name. Defaults to the source name.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--dest-region &lt;region&gt;</code></td>
+      <td>Destination region for cross-region copies.</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--dest-assume-role-arn &lt;arn&gt;</code></td>
+      <td>Destination account role ARN for cross-account copies.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>If the destination secret already exists, the command creates a new version
+instead of replacing the secret resource.</p>
+
+<h2 id="aws-remove-default-vpc"><code class="language-plaintext highlighter-rouge">aws remove-default-vpc</code></h2>
+
+<p>Removes default VPCs across all AWS regions in the account. The command deletes
+associated resources in dependency order, including internet gateways, subnets,
+non-default security groups, and then the default VPC itself.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador aws remove-default-vpc <span class="nt">--dry-run</span>
+tronador aws remove-default-vpc <span class="nt">--exclude-regions</span> us-west-2,eu-west-1
+</code></pre></div></div>
+
+<p>Flags:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Flag</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">--exclude-regions &lt;list&gt;</code></td>
+      <td>Comma-separated regions to skip.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The parent <code class="language-plaintext highlighter-rouge">--region</code> flag does not limit this command; it intentionally checks
+all regions unless excluded.</p>
+
+<h2 id="aws-remediation"><code class="language-plaintext highlighter-rouge">aws remediation</code></h2>
+
+<p>Groups AWS security remediation helpers.</p>
+
+<h3 id="aws-remediation-s3"><code class="language-plaintext highlighter-rouge">aws remediation s3</code></h3>
+
+<p>Implements AWS Security Hub control S3-5 by ensuring S3 buckets deny requests
+where <code class="language-plaintext highlighter-rouge">aws:SecureTransport</code> is false.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador aws remediation s3 <span class="nt">--dry-run</span>
+tronador aws remediation s3
+</code></pre></div></div>
+
+<h3 id="aws-remediation-ec2"><code class="language-plaintext highlighter-rouge">aws remediation ec2</code></h3>
+
+<p>Implements AWS Security Hub control EC2-2 by removing unrestricted inbound and
+outbound rules from default security groups in the current region.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>tronador aws remediation ec2 <span class="nt">--region</span> us-east-1 <span class="nt">--dry-run</span>
+tronador aws remediation ec2 <span class="nt">--region</span> us-east-1
+</code></pre></div></div>
+
+
+      <footer class="site-footer">
+        
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>
