@@ -59,13 +59,14 @@ config:
   reviewers:
     - berahac
     - cloudopsworks-bot
+    - cloudopsworks-dev
     - cloudopsworks/engineering
 
   # Required: needed for permit owners to perform commits under protected branches.
   # Teams are specified as org/team-name
   owners:
     - berahac
-    - cloudopsworks-dev
+    - cloudopsworks-bot
     - cloudopsworks/admin
 
   # Optional configure the repository members
