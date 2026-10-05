@@ -94,17 +94,19 @@ because the Pages site uses the repository’s configured custom domain.</p>
 
 <h2 id="publish">Publish</h2>
 
-<p>The <code class="language-plaintext highlighter-rouge">Documentation Pages</code> workflow rebuilds the site and publishes the output
-to the <code class="language-plaintext highlighter-rouge">gh-pages</code> branch whenever documentation or its build configuration is
-merged into <code class="language-plaintext highlighter-rouge">master</code>. It can also be started manually from the Actions tab.
-GitHub Pages must use the <code class="language-plaintext highlighter-rouge">gh-pages</code> branch and <code class="language-plaintext highlighter-rouge">/ (root)</code> as its publishing
-source; the published branch contains generated static files, not the Markdown
-source.</p>
+<p>The <code class="language-plaintext highlighter-rouge">Documentation Pages</code> workflow rebuilds the site and deploys the generated
+artifact whenever documentation or its build configuration is merged into
+<code class="language-plaintext highlighter-rouge">master</code>. It can also be started manually from the Actions tab. GitHub Pages
+must use <strong>GitHub Actions</strong> as its publishing source. The workflow builds the
+<code class="language-plaintext highlighter-rouge">docs-pages/</code> artifact and deploys it with GitHub’s Pages deployment actions,
+so it does not need write access to the protected <code class="language-plaintext highlighter-rouge">gh-pages</code> branch. The
+generated static files are also published to <code class="language-plaintext highlighter-rouge">gh-pages</code> as a repository
+snapshot when an authorized maintainer syncs that branch.</p>
 
-<p>After a successful workflow run, the site is available at
-<a href="http://tronador.cloudopsworks.co/">http://tronador.cloudopsworks.co/</a>. Check the workflow run and the Pages URL
+<p>After a successful workflow run and DNS propagation, the site is available at
+<a href="https://tronador.cloudopsworks.co/">https://tronador.cloudopsworks.co/</a>. Check the workflow run and the Pages URL
 after publication; a successful local Jekyll build alone does not prove that
-the remote Pages configuration is active.</p>
+the remote Pages configuration or custom-domain DNS is active.</p>
 
 
       <footer class="site-footer">
