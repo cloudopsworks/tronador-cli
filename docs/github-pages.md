@@ -47,14 +47,16 @@ because the Pages site uses the repository's configured custom domain.
 
 ## Publish
 
-The `Documentation Pages` workflow rebuilds the site and publishes the output
-to the `gh-pages` branch whenever documentation or its build configuration is
-merged into `master`. It can also be started manually from the Actions tab.
-GitHub Pages must use the `gh-pages` branch and `/ (root)` as its publishing
-source; the published branch contains generated static files, not the Markdown
-source.
+The `Documentation Pages` workflow rebuilds the site and deploys the generated
+artifact whenever documentation or its build configuration is merged into
+`master`. It can also be started manually from the Actions tab. GitHub Pages
+must use **GitHub Actions** as its publishing source. The workflow builds the
+`docs-pages/` artifact and deploys it with GitHub's Pages deployment actions,
+so it does not need write access to the protected `gh-pages` branch. The
+generated static files are also published to `gh-pages` as a repository
+snapshot when an authorized maintainer syncs that branch.
 
-After a successful workflow run, the site is available at
-<http://tronador.cloudopsworks.co/>. Check the workflow run and the Pages URL
+After a successful workflow run and DNS propagation, the site is available at
+<https://tronador.cloudopsworks.co/>. Check the workflow run and the Pages URL
 after publication; a successful local Jekyll build alone does not prove that
-the remote Pages configuration is active.
+the remote Pages configuration or custom-domain DNS is active.

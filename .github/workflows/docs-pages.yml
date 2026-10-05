@@ -13,18 +13,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
-  group: docs-pages-${{ github.repository }}
+  group: pages-${{ github.repository }}
   cancel-in-progress: true
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Set up Ruby and install locked dependencies
         uses: ruby/setup-ruby@v1
@@ -35,11 +40,18 @@ jobs:
       - name: Build Jekyll site
         run: ./scripts/build-docs-site.sh
 
-      - name: Publish generated site to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: ./docs-pages
-          cname: tronador.cloudopsworks.co
-          commit_message: "docs: publish site from ${{ github.sha }}"
+          path: ./docs-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
