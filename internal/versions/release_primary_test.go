@@ -14,7 +14,7 @@ func TestGitFlowReleaseStartRejectsMissingLiveConfiguredPrimaryBeforeMutation(t 
 		t.Fatal(err)
 	}
 
-	err = w.ReleaseStart(context.Background(), "minor")
+	err = w.ReleaseStart(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "exactly one live branch") {
 		t.Fatalf("ReleaseStart error = %v, want live configured primary rejection", err)
 	}
@@ -38,7 +38,7 @@ func TestGitFlowReleaseStartPropagatesLiveConfiguredPrimaryProbeFailure(t *testi
 		t.Fatal(err)
 	}
 
-	err = w.ReleaseStart(context.Background(), "minor")
+	err = w.ReleaseStart(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "remote unavailable") {
 		t.Fatalf("ReleaseStart error = %v, want live probe failure", err)
 	}
@@ -56,10 +56,10 @@ func TestGitFlowReleaseStartAcceptsExactLiveConfiguredPrimaryAndUsesDevelop(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = w.ReleaseStart(context.Background(), "minor"); err != nil {
+	if err = w.ReleaseStart(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !f.saw("git", "checkout", "-b", "release/v1.3.0", "refs/heads/develop") {
+	if !f.saw("git", "checkout", "-b", "release/v1.2.3", "refs/heads/develop") {
 		t.Fatalf("ReleaseStart did not retain develop base: %#v", f.calls)
 	}
 }
@@ -78,16 +78,16 @@ func TestGitFlowReleaseStartRejectsStaleTrackingConfiguredPrimary(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = w.ReleaseStart(ctx, "minor"); err == nil || !strings.Contains(err.Error(), "exactly one live branch") {
+	if err = w.ReleaseStart(ctx); err == nil || !strings.Contains(err.Error(), "exactly one live branch") {
 		t.Fatalf("ReleaseStart error = %v, want stale-primary rejection", err)
 	}
 	if current := gitTest(t, repo, "branch", "--show-current"); current != "develop\n" {
 		t.Fatalf("ReleaseStart changed current branch to %q", current)
 	}
-	if local := gitTest(t, repo, "branch", "--list", "release/v1.3.0"); local != "" {
+	if local := gitTest(t, repo, "branch", "--list", "release/v1.2.3"); local != "" {
 		t.Fatalf("ReleaseStart created local release branch: %q", local)
 	}
-	if remote := gitTest(t, repo, "ls-remote", "origin", "refs/heads/release/v1.3.0"); remote != "" {
+	if remote := gitTest(t, repo, "ls-remote", "origin", "refs/heads/release/v1.2.3"); remote != "" {
 		t.Fatalf("ReleaseStart published a release branch: %q", remote)
 	}
 }

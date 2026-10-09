@@ -22,7 +22,7 @@ func TestGitFlowConfiguredDevelopPrimaryRejectsEveryWorkflowMutation(t *testing.
 		{"hotfix publish", func(w *Workflows) error { return w.HotfixPublish(context.Background(), "1.2.3") }},
 		{"hotfix finish", func(w *Workflows) error { return w.HotfixFinish(context.Background(), "1.2.3", false) }},
 		{"hotfix purge", func(w *Workflows) error { return w.HotfixPurge(context.Background(), "1.2.3") }},
-		{"release start", func(w *Workflows) error { return w.ReleaseStart(context.Background(), "patch") }},
+		{"release start", func(w *Workflows) error { return w.ReleaseStart(context.Background()) }},
 		{"release publish", func(w *Workflows) error { return w.ReleasePublish(context.Background(), "1.2.3") }},
 		{"release finish", func(w *Workflows) error { return w.ReleaseFinish(context.Background(), "1.2.3", false) }},
 		{"release purge", func(w *Workflows) error { return w.ReleasePurge(context.Background(), "1.2.3") }},
@@ -70,7 +70,7 @@ func TestGitFlowDanglingDiscoveredPrimaryRejectsFeatureAndReleaseStartBeforeMuta
 		run  func(*Workflows) error
 	}{
 		{"feature", func(w *Workflows) error { return w.FeatureStart(context.Background(), "blocked") }},
-		{"release", func(w *Workflows) error { return w.ReleaseStart(context.Background(), "patch") }},
+		{"release", func(w *Workflows) error { return w.ReleaseStart(context.Background()) }},
 	}
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestGitFlowDiscoveredPrimaryRejectsStaleTrackingRefBeforeFeatureOrReleaseMu
 		run    func(*Workflows) error
 	}{
 		{"feature", "feature/stale-primary", func(w *Workflows) error { return w.FeatureStart(ctx, "stale-primary") }},
-		{"release", "release/v0.1.1", func(w *Workflows) error { return w.ReleaseStart(ctx, "patch") }},
+		{"release", "release/v0.1.1", func(w *Workflows) error { return w.ReleaseStart(ctx) }},
 	}
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {

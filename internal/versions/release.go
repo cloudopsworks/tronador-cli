@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
+func (w *Workflows) ReleaseStart(ctx context.Context) error {
 	if err := w.validateGitFlowTopology(ctx); err != nil {
 		return err
 	}
@@ -28,10 +28,6 @@ func (w *Workflows) ReleaseStart(ctx context.Context, kind string) error {
 		return e
 	}
 	v, e := w.CurrentVersion(ctx)
-	if e != nil {
-		return e
-	}
-	v, e = bump(v, kind)
 	if e != nil {
 		return e
 	}
