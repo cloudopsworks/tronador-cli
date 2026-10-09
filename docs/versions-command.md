@@ -196,22 +196,19 @@ target the primary branch.
 
 ```bash
 tronador versions release start
-tronador versions release start --patch
-tronador versions release start --minor
-tronador versions release start --major
 tronador versions release publish [version]
 tronador versions release finish
 tronador versions release finish --local
 tronador versions release purge [version]
 ```
 
-`start` defaults to a minor bump and calculates the next GitVersion
-`MajorMinorPatch` before creating `release/vX.Y.Z`. Pass one of `--patch`,
-`--minor`, or `--major` to select a different bump; combining multiple bump
-flags is an error. Its base is `develop` in GitFlow and the primary branch in
-GitHub Flow or trunk-based repositories. `publish` and `purge` infer the
-release version from the current `release/*` branch when omitted. `finish`
-operates on the current release branch.
+`start` creates `release/vX.Y.Z` using GitVersion's calculated
+`MajorMinorPatch` unchanged. The synchronized base is `develop` in GitFlow and
+the primary branch in GitHub Flow or trunk-based repositories. GitVersion
+configuration in `.cloudopsworks/gitversion.yaml` is authoritative for the
+version and increment; `release start` does not apply an additional bump.
+`publish` and `purge` infer the release version from the current `release/*`
+branch when omitted. `finish` operates on the current release branch.
 
 The normal finish creates a guarded pull request into the primary branch. In
 GitFlow it also creates a second guarded pull request from the release branch

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestReleaseStartUsesWorkflowSpecificBase(t *testing.T) {
+func TestReleaseStartUsesGitVersionCalculatedVersionAndWorkflowSpecificBase(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		wow  string
@@ -23,7 +23,7 @@ func TestReleaseStartUsesWorkflowSpecificBase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeRunner{replies: map[string]string{
-				gitVersionKey("MajorMinorPatch"):                                    "1.2.3\n",
+				gitVersionKey("MajorMinorPatch"):                                    "1.5.0\n",
 				key("git", "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"):   "refs/remotes/origin/main\n",
 				key("git", "ls-remote", "--exit-code", "origin", "refs/heads/main"): "abc\trefs/heads/main\n",
 			}}
@@ -31,10 +31,10 @@ func TestReleaseStartUsesWorkflowSpecificBase(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := w.ReleaseStart(context.Background(), "minor"); err != nil {
+			if err := w.ReleaseStart(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if !f.saw("git", "checkout", "-b", "release/v1.3.0", "refs/heads/"+tc.base) {
+			if !f.saw("git", "checkout", "-b", "release/v1.5.0", "refs/heads/"+tc.base) {
 				t.Fatalf("release was not created from %s: %#v", tc.base, f.calls)
 			}
 		})

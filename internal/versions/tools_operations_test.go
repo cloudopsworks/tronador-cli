@@ -96,7 +96,7 @@ func TestOperationResolverDemandForCalculatedStarts(t *testing.T) {
 		}}
 		runner := newResolverAwareOperationRunner(fake)
 		workflow := newOperationWorkflow(t, WorkflowOptions{WayOfWork: "githubflow", Runner: runner})
-		if err := workflow.ReleaseStart(context.Background(), "minor"); err != nil {
+		if err := workflow.ReleaseStart(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if got := runner.ensurer.calls; len(got) != 1 || got[0] != "gitversion" {

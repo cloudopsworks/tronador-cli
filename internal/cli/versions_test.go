@@ -154,24 +154,6 @@ func TestVersionsWorkflowCommandGrammar(t *testing.T) {
 	}
 }
 
-func TestVersionsReleaseStartDefaultsToMinorAndAllowsOneBumpFlag(t *testing.T) {
-	for _, test := range []struct {
-		patch, minor, major bool
-		want                string
-		valid               bool
-	}{
-		{patch: true, want: "patch", valid: true}, {minor: true, want: "minor", valid: true}, {major: true, want: "major", valid: true}, {want: "minor", valid: true}, {patch: true, minor: true},
-	} {
-		got, err := releaseBumpKind(test.patch, test.minor, test.major)
-		if test.valid && (err != nil || got != test.want) {
-			t.Fatalf("releaseBumpKind = %q, %v; want %q", got, err, test.want)
-		}
-		if !test.valid && err == nil {
-			t.Fatalf("releaseBumpKind(%t,%t,%t) unexpectedly accepted", test.patch, test.minor, test.major)
-		}
-	}
-}
-
 func TestVersionsHelpDocumentsRepositorySensitiveCapabilities(t *testing.T) {
 	for _, test := range []struct {
 		command *cobra.Command
@@ -196,7 +178,7 @@ func TestVersionsHelpDocumentsRepositorySensitiveCapabilities(t *testing.T) {
 	}
 }
 
-func TestVersionsReleaseStartHelpDocumentsMinorDefault(t *testing.T) {
+func TestVersionsReleaseStartUsesGitVersionCalculatedVersion(t *testing.T) {
 	release := newVersionsReleaseCommand()
 	start, _, err := release.Find([]string{"start"})
 	if err != nil {
@@ -207,8 +189,13 @@ func TestVersionsReleaseStartHelpDocumentsMinorDefault(t *testing.T) {
 	if err := start.Help(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "defaults to --minor") {
-		t.Fatalf("release start help omits default bump:\n%s", output.String())
+	if !strings.Contains(output.String(), "GitVersion's calculated MajorMinorPatch") {
+		t.Fatalf("release start help omits GitVersion version source:\n%s", output.String())
+	}
+	for _, flag := range []string{"patch", "minor", "major"} {
+		if start.Flags().Lookup(flag) != nil {
+			t.Fatalf("release start unexpectedly exposes --%s", flag)
+		}
 	}
 }
 
@@ -224,8 +211,8 @@ func TestVersionsWorkflowFlagsAreScopedToTheirCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, flag := range []string{"patch", "minor", "major"} {
-		if start.Flags().Lookup(flag) == nil {
-			t.Fatalf("release start lacks --%s", flag)
+		if start.Flags().Lookup(flag) != nil {
+			t.Fatalf("release start unexpectedly exposes --%s", flag)
 		}
 	}
 	tag, _, err := rootCmd.Find([]string{"versions", "tag"})
@@ -265,6 +252,19 @@ func TestVersionsDryRunPlanIncludesSubcommandAndResolvedArguments(t *testing.T) 
 	for _, want := range []string{"Dry-run plan for versions feature start (no changes made):", "1. Select the feature base branch", "3. Create and check out feature/demo"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("dry-run plan missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestVersionsReleaseStartDryRunPlanUsesGitVersionConfiguration(t *testing.T) {
+	command, _, err := rootCmd.Find([]string{"versions", "release", "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := strings.Join(versionsActionPlan(command, command.Use, nil), "\n")
+	for _, want := range []string{"GitVersion's calculated MajorMinorPatch unchanged", "configuration determines the version increment"} {
+		if !strings.Contains(plan, want) {
+			t.Fatalf("release start dry-run plan missing %q:\n%s", want, plan)
 		}
 	}
 }

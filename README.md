@@ -163,7 +163,7 @@ and safety behavior.
 - `versions init --gitflow|--githubflow|--trunkbased` — install a checked-in GitVersion workflow; an unset workflow can be selected interactively when CI explicitly disables GitFlow. GitFlow alone creates and publishes `develop`.
 - `versions feature` — start, publish, finish, or purge feature branches; publish, finish, and purge infer a missing name from the current feature branch.
 - `versions hotfix` — start the next patch, publish or finish the current hotfix, or purge a named/current hotfix.
-- `versions release` — start a patch, minor, or major release; publish or purge a named/current release, or finish the current release.
+- `versions release` — start the GitVersion-calculated release version from the workflow base; publish or purge a named/current release, or finish the current release.
 - `versions support` — manage persistent maintenance branches in GitFlow only.
 - `versions tag [qualifier] --publish` — create the legacy GitVersion tag and optionally push it.
 

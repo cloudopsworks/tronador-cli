@@ -282,17 +282,9 @@ Finish creates a guarded pull request by default; --local uses restartable
 breadcrumbs for local merge/tag work, then atomically publishes every required
 target, the tag, and source deletion.`,
 	}
-	var patch, minor, major bool
-	start := versionsAction("start", "Start a release branch", "Start release/vX.Y.Z; defaults to --minor when no bump flag is provided.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
-		kind, err := releaseBumpKind(patch, minor, major)
-		if err != nil {
-			return err
-		}
-		return workflow.ReleaseStart(ctx, kind)
+	start := versionsAction("start", "Start a release branch", "Start release/vX.Y.Z using GitVersion's calculated MajorMinorPatch from the synchronized release base.", cobra.NoArgs, func(ctx context.Context, workflow *versions.Workflows, _ []string) error {
+		return workflow.ReleaseStart(ctx)
 	})
-	start.Flags().BoolVar(&patch, "patch", false, "Start the next patch release")
-	start.Flags().BoolVar(&minor, "minor", false, "Start the next minor release")
-	start.Flags().BoolVar(&major, "major", false, "Start the next major release")
 	command.AddCommand(
 		start,
 		versionsAction("publish [name]", "Publish a release branch", "Publish release/vX.Y.Z; infer the name from the current release branch when omitted.", cobra.MaximumNArgs(1), func(ctx context.Context, workflow *versions.Workflows, args []string) error {
@@ -410,13 +402,7 @@ func versionsActionPlan(cmd *cobra.Command, use string, args []string) []string 
 	case "hotfix purge":
 		steps = []string{fmt.Sprintf("Resolve hotfix branch %s.", name), "Fetch origin and verify branch parity and merge safety.", "Check out a safe base if necessary, then delete the local and remote hotfix branch."}
 	case "release start":
-		kind := "minor"
-		for _, flag := range []string{"patch", "minor", "major"} {
-			if enabled, _ := cmd.Flags().GetBool(flag); enabled {
-				kind = flag
-			}
-		}
-		steps = []string{fmt.Sprintf("Select and synchronize the release base branch (GitFlow uses develop; bump: %s).", kind), "Calculate the next release version with GitVersion.", "Create and check out release/vX.Y.Z from the base."}
+		steps = []string{"Select and synchronize the release base branch (GitFlow uses develop).", "Use GitVersion's calculated MajorMinorPatch unchanged; its configuration determines the version increment.", "Create and check out release/vX.Y.Z from the base."}
 	case "release publish":
 		steps = []string{fmt.Sprintf("Resolve release branch %s.", name), "Check out that branch.", "Push it to origin and set its upstream tracking branch."}
 	case "release finish":
@@ -478,30 +464,4 @@ func optionalArg(args []string) string {
 		return ""
 	}
 	return args[0]
-}
-
-func releaseBumpKind(patch, minor, major bool) (string, error) {
-	count := 0
-	if patch {
-		count++
-	}
-	if minor {
-		count++
-	}
-	if major {
-		count++
-	}
-	if count > 1 {
-		return "", fmt.Errorf("at most one of --patch, --minor, or --major may be provided")
-	}
-	if count == 0 {
-		return "minor", nil
-	}
-	if patch {
-		return "patch", nil
-	}
-	if minor {
-		return "minor", nil
-	}
-	return "major", nil
 }
