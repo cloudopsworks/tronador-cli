@@ -70,7 +70,9 @@ jobs:
       golang_version: ${{ steps.build.outputs.golang_version }}
       golang_goreleaser: ${{ steps.build.outputs.golang_goreleaser }}
       golang_goreleaser_macos: ${{ steps.build.outputs.golang_goreleaser_macos }}
+      golang_goreleaser_macos_config: ${{ steps.build.outputs.golang_goreleaser_macos_config }}
       golang_goreleaser_chocolatey: ${{ steps.build.outputs.golang_goreleaser_chocolatey }}
+      golang_goreleaser_chocolatey_config: ${{ steps.build.outputs.golang_goreleaser_chocolatey_config }}
     steps:
       - name: Checkout w/Blueprint
         uses: cloudopsworks/blueprints/cd/checkout@v5.10

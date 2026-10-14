@@ -28,26 +28,8 @@ func (w *Workflows) Tag(ctx context.Context, qualifier string, publish bool) (st
 			return tag, nil
 		}
 	}
-	main, e := w.Main(ctx)
+	v, e := w.calculatedTagForBranch(ctx, branch, qualifier)
 	if e != nil {
-		return "", e
-	}
-	variable := "SemVer"
-	if branch == main {
-		variable = "MajorMinorPatch"
-	}
-	o, e := w.gitVersion(ctx, variable)
-	if e != nil {
-		return "", e
-	}
-	v := normalizeVersion(strings.TrimSpace(o))
-	if qualifier != "" {
-		if e = w.ensureSafeRef(qualifier); e != nil {
-			return "", e
-		}
-		v += "+deploy-" + qualifier
-	}
-	if e = w.ensureSafeRef(v); e != nil {
 		return "", e
 	}
 	// A clone may not have fetched tags even though the calculated tag already
@@ -77,6 +59,43 @@ func (w *Workflows) Tag(ctx context.Context, qualifier string, publish bool) (st
 		if e = w.publishTagIfNeeded(ctx, v); e != nil {
 			return "", e
 		}
+	}
+	return v, nil
+}
+
+// CalculatedTag returns the version GitVersion computes for the current branch
+// without creating or publishing a tag. Publish may instead reuse a version tag
+// already on HEAD, so this value is explicitly the calculated candidate.
+func (w *Workflows) CalculatedTag(ctx context.Context, qualifier string) (string, error) {
+	branch, err := w.Current(ctx)
+	if err != nil {
+		return "", err
+	}
+	return w.calculatedTagForBranch(ctx, branch, qualifier)
+}
+
+func (w *Workflows) calculatedTagForBranch(ctx context.Context, branch, qualifier string) (string, error) {
+	main, e := w.Main(ctx)
+	if e != nil {
+		return "", e
+	}
+	variable := "SemVer"
+	if branch == main {
+		variable = "MajorMinorPatch"
+	}
+	o, e := w.gitVersion(ctx, variable)
+	if e != nil {
+		return "", e
+	}
+	v := normalizeVersion(strings.TrimSpace(o))
+	if qualifier != "" {
+		if e = w.ensureSafeRef(qualifier); e != nil {
+			return "", e
+		}
+		v += "+deploy-" + qualifier
+	}
+	if e = w.ensureSafeRef(v); e != nil {
+		return "", e
 	}
 	return v, nil
 }

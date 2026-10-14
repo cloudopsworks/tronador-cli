@@ -526,14 +526,25 @@ func (w *Workflows) mergeContinue(ctx context.Context) error {
 // It is intentionally separate from Init so callers can execute actions after
 // configuration selection without re-reading mutable YAML.
 func (r *Runner) Workflow(wow WayOfWork) (*Workflows, error) {
+	return r.workflow(wow, false)
+}
+
+// ReadOnlyWorkflow preserves dry-run mutation guards while resolving installed
+// tools for calculations that must run during a preview. It never provisions a
+// missing tool, even when the caller enabled network access.
+func (r *Runner) ReadOnlyWorkflow(wow WayOfWork) (*Workflows, error) {
+	return r.workflow(wow, true)
+}
+
+func (r *Runner) workflow(wow WayOfWork, resolveDryRunTools bool) (*Workflows, error) {
 	command := runnerCommand{dir: r.workDir, gitPath: r.gitPath, dryRun: r.dryRun}
-	if !r.dryRun {
+	if !r.dryRun || resolveDryRunTools {
 		command.tools = newCommandToolResolver(commandToolResolverOptions{
 			workDir:        r.workDir,
 			toolsDir:       r.toolsDir,
 			toolsConfig:    r.toolsConfig,
-			noInstallTools: r.noInstallTools,
-			allowNetwork:   r.allowNetwork,
+			noInstallTools: r.noInstallTools || r.dryRun,
+			allowNetwork:   r.allowNetwork && !r.dryRun,
 			versions:       r.toolVersions,
 			paths:          r.toolPaths,
 			stderr:         r.stderr,
