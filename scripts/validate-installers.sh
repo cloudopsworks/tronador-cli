@@ -11,14 +11,17 @@ else
 fi
 
 if command -v pwsh >/dev/null 2>&1; then
-  pwsh -NoProfile -NonInteractive -Command "[scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/install.ps1')) | Out-Null"
+  powershell_cmd=pwsh
 elif command -v powershell >/dev/null 2>&1; then
-  powershell -NoProfile -NonInteractive -Command "[scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/install.ps1')) | Out-Null"
+  powershell_cmd=powershell
 else
   echo "PowerShell parser (pwsh/powershell) is required to validate scripts/install.ps1" >&2
   exit 1
 fi
+"$powershell_cmd" -NoProfile -NonInteractive -Command "[scriptblock]::Create((Get-Content -Raw -LiteralPath 'scripts/install.ps1')) | Out-Null"
 
-sh -n packaging/chocolatey/package.sh
+sh -n packaging/chocolatey/publish.sh
+packaging/chocolatey/test-publish.sh
+"$powershell_cmd" -NoProfile -NonInteractive -File scripts/test-install.ps1
 
 printf 'Installer scripts validated: scripts/install.sh, scripts/install.ps1\n'

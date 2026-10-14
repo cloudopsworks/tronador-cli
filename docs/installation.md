@@ -143,13 +143,13 @@ brew uninstall tronador-cli
 
 ## Chocolatey
 
-Chocolatey package metadata is also owned by GoReleaser. The `.goreleaser.yml`
-`publishers` section calls `packaging/chocolatey/package.sh` for the Windows
-`amd64` archive so the `.nupkg` is generated from the same release artifact set.
-Publishing remains credential-gated: package generation fails the release when
-metadata generation fails, while pushing to Chocolatey requires
-`TRONADOR_CHOCOLATEY_PUBLISH=true` and `CHOCOLATEY_API_KEY` in the release
-environment.
+Chocolatey package metadata is owned by the native `chocolateys` section in
+`windows.goreleaser.yml`. GoReleaser uses the Windows ZIP archives to generate
+`tronador-cli.<version>.nupkg`; the package installs the `tronador` command.
+The Windows pass uploads this package to the GitHub draft but does not push to
+the Chocolatey feed. After the default pass publishes the GitHub release,
+`packaging/chocolatey/publish.sh` verifies the release is public, downloads the
+native package, and pushes it with `choco` and `CHOCOLATEY_API_KEY`.
 
 User-facing install command once the package is published:
 
@@ -176,17 +176,23 @@ choco uninstall tronador-cli
 
 ## Maintainer workflow
 
-1. Keep `.goreleaser.yml` as the source of truth for release archives,
-   Homebrew, Chocolatey, DEB/RPM/APK packages, checksums, signatures, and
-   installer uploads.
+1. Run `windows.goreleaser.yml` first to upload Windows archives, its distinct
+   `*_windows_SHA256SUMS` manifest, `install.ps1`, and native `.nupkg` to the
+   existing draft. A `choco` executable is required for this pass.
+   Then run `.goreleaser.yml` on the same tag to add other platforms, packages,
+   Homebrew, and `install.sh`, and publish the draft. Do not push the Chocolatey
+   package until the GitHub release is public.
 2. Validate installer syntax locally when editing release scripts:
    ```bash
    scripts/validate-installers.sh
    ```
 3. Validate GoReleaser configuration before merging release changes:
    ```bash
-   goreleaser check
+   goreleaser check --config windows.goreleaser.yml
+   goreleaser check --config .goreleaser.yml
+   packaging/chocolatey/test-native.sh
    ```
-4. The release workflow runs the GoReleaser pipeline. It uploads `install.sh` and
-   `install.ps1` as GitHub Release assets and generates package-manager metadata
-   as part of the same release run.
+4. The release workflow must run both configurations in that order. They reuse
+   the same GitHub draft without replacing previously uploaded assets. Only
+   after the second pass succeeds should the native Chocolatey package be
+   pushed to the feed.

@@ -229,10 +229,13 @@ usage: |-
   # Validate installer scripts
   scripts/validate-installers.sh
 
-  # Validate GoReleaser config, including archives, Homebrew, Chocolatey, and nFPM packages
-  goreleaser check
+  # Validate both GoReleaser passes (Windows draft first, default publish second)
+  goreleaser check --config windows.goreleaser.yml
+  goreleaser check --config .goreleaser.yml
+  packaging/chocolatey/test-native.sh
 
-  # Build a local snapshot without publishing
+  # Build local snapshots without publishing (the Windows pass requires choco on PATH)
+  goreleaser release --snapshot --clean --skip=before --skip=publish --skip=sign --config windows.goreleaser.yml
   goreleaser release --snapshot --clean --skip=before --skip=publish --skip=sign
   ```
 

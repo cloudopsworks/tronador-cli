@@ -1,0 +1,78 @@
+# Windows artifacts are uploaded to the existing GitHub draft before the default
+# .goreleaser.yml pass publishes it. Keep asset names distinct across both runs.
+version: 2
+dist: dist-windows
+before:
+  hooks:
+    - go mod tidy
+    - ./scripts/validate-installers.sh
+builds:
+  - id: tronador-cli-windows
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+    ldflags:
+      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - '386'
+      - arm64
+    binary: tronador
+archives:
+  - id: tronador-cli-windows
+    ids:
+      - tronador-cli-windows
+    formats:
+      - zip
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - src: .cloudopsworks/LICENSE
+        dst: LICENSE
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_windows_SHA256SUMS'
+  algorithm: sha256
+signs:
+  - artifacts: checksum
+    args:
+      - '--batch'
+      - '--local-user'
+      - '{{ .Env.GPG_FINGERPRINT }}'
+      - '--output'
+      - '${signature}'
+      - '--detach-sign'
+      - '${artifact}'
+chocolateys:
+  - name: tronador-cli
+    ids:
+      - tronador-cli-windows
+    package_source_url: https://github.com/cloudopsworks/tronador-cli/tree/master/packaging/chocolatey
+    owners: Cloud Ops Works LLC
+    title: Tronador CLI
+    authors: Cloud Ops Works LLC
+    project_url: https://github.com/cloudopsworks/tronador-cli
+    project_source_url: https://github.com/cloudopsworks/tronador-cli
+    docs_url: https://github.com/cloudopsworks/tronador-cli/blob/master/docs/installation.md
+    bug_tracker_url: https://github.com/cloudopsworks/tronador-cli/issues
+    license_url: https://github.com/cloudopsworks/tronador-cli/blob/master/.cloudopsworks/LICENSE
+    require_license_acceptance: false
+    summary: CLI tool for Cloud Ops Works Tronador workflows and AWS automation
+    description: Tronador CLI provides repository and AWS automation commands.
+    tags: tronador cli cloudopsworks aws devops
+    release_notes: 'https://github.com/cloudopsworks/tronador-cli/releases/tag/{{ .Tag }}'
+    skip_publish: true
+release:
+  draft: true
+  use_existing_draft: true
+  extra_files:
+    - glob: ./scripts/install.ps1
+      name_template: install.ps1
+    - glob: ./dist-windows/tronador-cli.*.nupkg
+  name_template: '{{ .Tag }}'
+  prerelease: auto
+changelog:
+  disable: true
