@@ -401,6 +401,9 @@ func TestHotfixLocalFinishResumesAfterConflictAndRejectsOtherWorkflowJournal(t *
 	if got := gitTest(t, repo, "show", "main:conflict.txt"); got != "resolved\n" {
 		t.Fatalf("main merge resolution = %q", got)
 	}
+	if got := strings.TrimSpace(gitTest(t, repo, "log", "-1", "--format=%s", "main")); got != "chore: Hotfix Release from hotfix/v0.1.1" {
+		t.Fatalf("hotfix merge title = %q, want finish title pattern", got)
+	}
 	if _, err = os.Stat(filepath.Join(repo, ".git", "tronador", "versions-journal.json")); !os.IsNotExist(err) {
 		t.Fatalf("journal remains after successful finish: %v", err)
 	}
@@ -513,6 +516,11 @@ func TestReleaseLocalFinishResumesAfterConflict(t *testing.T) {
 	}
 	if got := gitTest(t, repo, "show", "main:conflict.txt"); got != "resolved\n" {
 		t.Fatalf("main merge resolution = %q", got)
+	}
+	for _, base := range []string{"main", "develop"} {
+		if got := strings.TrimSpace(gitTest(t, repo, "log", "-1", "--format=%s", base)); got != "chore: Release v0.2.0 from release/v0.2.0" {
+			t.Fatalf("%s release merge title = %q, want finish title pattern", base, got)
+		}
 	}
 	if _, err = os.Stat(filepath.Join(repo, ".git", "tronador", "versions-journal.json")); !os.IsNotExist(err) {
 		t.Fatalf("journal remains after successful release finish: %v", err)

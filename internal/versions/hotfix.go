@@ -179,7 +179,7 @@ func (w *Workflows) finishHotfixLocal(ctx context.Context, branch, version strin
 				e = w.mergeContinue(ctx)
 			}
 			if e == nil {
-				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Hotfix Release %s", version))
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Hotfix Release from %s", j.Source))
 			}
 		case "tag":
 			e = w.recordFinishTagTarget(ctx, p, j)

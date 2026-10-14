@@ -175,6 +175,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 	if e != nil {
 		return e
 	}
+	mergeTitle := fmt.Sprintf("chore: Release %s from %s", version, j.Source)
 	for j.Done < len(j.Steps) {
 		s := j.Steps[j.Done]
 		switch s {
@@ -186,7 +187,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				e = w.mergeContinue(ctx)
 			}
 			if e == nil {
-				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", mergeTitle)
 			}
 		case "merge-develop":
 			e = w.checkoutFinishBranch(ctx, "develop")
@@ -194,7 +195,7 @@ func (w *Workflows) finishReleaseLocal(ctx context.Context, branch, version stri
 				e = w.mergeContinue(ctx)
 			}
 			if e == nil {
-				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", fmt.Sprintf("chore: Release %s", version))
+				_, e = w.git(ctx, "merge", "--no-ff", j.SourceSHA, "-m", mergeTitle)
 			}
 		case "tag":
 			e = w.checkoutFinishBranch(ctx, target)
