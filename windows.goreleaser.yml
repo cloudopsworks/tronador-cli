@@ -56,7 +56,7 @@ chocolateys:
     authors: Cloud Ops Works LLC
     project_url: https://github.com/cloudopsworks/tronador-cli
     project_source_url: https://github.com/cloudopsworks/tronador-cli
-    docs_url: https://github.com/cloudopsworks/tronador-cli/blob/master/docs/installation.md
+    docs_url: https://tonador.cloudopsworks
     bug_tracker_url: https://github.com/cloudopsworks/tronador-cli/issues
     license_url: https://github.com/cloudopsworks/tronador-cli/blob/master/.cloudopsworks/LICENSE
     require_license_acceptance: false
