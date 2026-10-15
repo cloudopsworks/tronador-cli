@@ -269,26 +269,37 @@ func TestVersionsReleaseStartDryRunPlanUsesGitVersionConfiguration(t *testing.T)
 	}
 }
 
-func TestVersionsTagDryRunDoesNotRequireRepositoryOrMutate(t *testing.T) {
-	restoreVersionsToolOptions(t)
-	cache := filepath.Join(t.TempDir(), "missing-cache")
-	badConfig := filepath.Join(t.TempDir(), "invalid.json")
-	if err := os.WriteFile(badConfig, []byte("not json"), 0o600); err != nil {
-		t.Fatal(err)
+func TestVersionsTagDryRunPrintsCalculatedVersionWithoutMutation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
 	}
-	versionsToolsDir, versionsToolsConfig = cache, badConfig
-	versionsAllowNetwork = true
-	versionsToolVersions = []string{"malformed"}
-	versionsToolPaths = []string{"also-malformed"}
+	restoreVersionsToolOptions(t)
+	repo := setupVersionsTagRepo(t)
+	cache := filepath.Join(t.TempDir(), "missing-cache")
+	versionsWorkDir, versionsMainBranch, versionsToolsDir = repo, "main", cache
+	versionsNoInstallTools = true
+	versionsToolPaths = []string{"gitversion=" + writeCLITool(t, t.TempDir(), "gitversion", "1.2.3-alpha.1")}
+	cliGit(t, repo, "checkout", "-b", "feature/test")
+	cliGit(t, repo, "push", "-u", "origin", "feature/test")
 	command := newVersionsTagCommand()
 	command.Flags().Bool("dry-run", true, "")
+	command.SetArgs([]string{"--publish", "blue"})
 	var output bytes.Buffer
 	command.SetOut(&output)
 	if err := command.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Dry-run plan for versions tag (no changes made):") || !strings.Contains(output.String(), "Create the annotated tag locally") {
+	if !strings.Contains(output.String(), "Calculated GitVersion tag: v1.2.3-alpha.1+deploy-blue") ||
+		!strings.Contains(output.String(), "Dry-run plan for versions tag (no changes made):") ||
+		!strings.Contains(output.String(), "may select an existing tag on HEAD") ||
+		!strings.Contains(output.String(), "Push the selected tag") {
 		t.Fatalf("dry-run output = %q", output.String())
+	}
+	if tags := cliGit(t, repo, "tag", "--list"); strings.TrimSpace(tags) != "" {
+		t.Fatalf("dry-run created tag: %q", tags)
+	}
+	if tags := cliGit(t, repo, "ls-remote", "--tags", "origin"); strings.TrimSpace(tags) != "" {
+		t.Fatalf("dry-run pushed tag: %q", tags)
 	}
 	if _, err := os.Stat(cache); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created tool cache: %v", err)

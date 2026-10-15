@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProjectName = 'tronador-cli'
-$BinaryName = 'tronador-cli.exe'
+$BinaryName = 'tronador.exe'
 
 function Resolve-TronadorArch {
   param([string]$RequestedArchitecture)
@@ -53,10 +53,12 @@ $arch = Resolve-TronadorArch -RequestedArchitecture $Architecture
 $tag = Resolve-TronadorTag -RequestedVersion $Version -Repo $Repository
 $assetVersion = $tag.TrimStart('v')
 $archive = "${ProjectName}_${assetVersion}_windows_${arch}.zip"
-$checksums = "${ProjectName}_${assetVersion}_SHA256SUMS"
+$checksums = "${ProjectName}_${assetVersion}_windows_SHA256SUMS"
+$legacyChecksums = "${ProjectName}_${assetVersion}_SHA256SUMS"
 $baseUrl = "https://github.com/$Repository/releases/download/$tag"
 $archiveUrl = "$baseUrl/$archive"
 $checksumsUrl = "$baseUrl/$checksums"
+$legacyChecksumsUrl = "$baseUrl/$legacyChecksums"
 
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
   $localAppData = $env:LOCALAPPDATA
@@ -83,7 +85,16 @@ try {
   $checksumsPath = Join-Path $tempDir $checksums
   Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
   if (-not $NoVerify) {
-    Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath
+    try {
+      Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath
+    } catch {
+      if ($null -eq $_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) {
+        throw
+      }
+      # Releases before the split used a single checksum manifest.
+      $checksumsPath = Join-Path $tempDir $legacyChecksums
+      Invoke-WebRequest -Uri $legacyChecksumsUrl -OutFile $checksumsPath
+    }
     $expected = Get-ChecksumFromManifest -ManifestPath $checksumsPath -ArchiveName $archive
     $actual = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($expected.ToLowerInvariant() -ne $actual) {
@@ -93,9 +104,7 @@ try {
 
   $extractDir = Join-Path $tempDir 'extract'
   Expand-Archive -Path $archivePath -DestinationPath $extractDir -Force
-  $binary = Get-ChildItem -Path $extractDir -File -Recurse | Where-Object {
-    $_.Name -eq $BinaryName -or $_.Name -like "$ProjectName*.exe"
-  } | Select-Object -First 1
+  $binary = Get-ChildItem -Path $extractDir -Filter $BinaryName -File -Recurse | Select-Object -First 1
   if ($null -eq $binary) {
     throw "Unable to locate $BinaryName inside $archive"
   }

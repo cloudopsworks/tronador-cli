@@ -8,8 +8,6 @@ on:
       - "docs/**"
       - "Gemfile"
       - "Gemfile.lock"
-      - "scripts/build-docs-site.sh"
-      - ".github/workflows/docs-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -19,34 +17,32 @@ permissions:
 
 concurrency:
   group: pages-${{ github.repository }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.config.outputs.pages_enabled }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Set up Ruby and install locked dependencies
-        uses: ruby/setup-ruby@v1
+      - name: Checkout and Config
+        id: config
+        uses: cloudopsworks/blueprints/cd/pages/config@v5.10
         with:
-          ruby-version: "3.3"
-          bundler-cache: true
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Jekyll site
-        run: ./scripts/build-docs-site.sh
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+      - name: Build GitHub Pages site
+        if: ${{ steps.config.outputs.pages_enabled == 'true' }}
+        uses: cloudopsworks/blueprints/cd/pages/build@v5.10
         with:
-          path: ./docs-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pages_enabled: ${{ steps.config.outputs.pages_enabled }}
+          docs_path: ${{ steps.config.outputs.docs_path }}
+          pages_path: ${{ steps.config.outputs.pages_path }}
 
   deploy:
     needs: build
+    if: ${{ needs.build.outputs.pages_enabled == 'true' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -54,4 +50,6 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: cloudopsworks/blueprints/cd/pages/deploy@v5.10
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

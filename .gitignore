@@ -17,7 +17,6 @@ test-results/
 *.dylib
 VERSION
 dist/
-docs-pages/
 .gocache*/
 .gomodcache*/
 
@@ -70,3 +69,5 @@ tronador/
 # Tronador Go app
 tronador-cli
 omx_wiki
+dist-windows/
+docs-pages/

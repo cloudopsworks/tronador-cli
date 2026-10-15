@@ -149,6 +149,10 @@ func versionsWayOfWork() (versions.WayOfWork, error) {
 }
 
 func newVersionsWorkflow(cmd *cobra.Command, requireReliableWayOfWork bool) (*versions.Workflows, error) {
+	return newVersionsWorkflowWithPreview(cmd, requireReliableWayOfWork, false)
+}
+
+func newVersionsWorkflowWithPreview(cmd *cobra.Command, requireReliableWayOfWork, preview bool) (*versions.Workflows, error) {
 	toolVersions, err := parseAssignments(versionsToolVersions, "tool-version")
 	if err != nil {
 		return nil, err
@@ -183,6 +187,9 @@ func newVersionsWorkflow(cmd *cobra.Command, requireReliableWayOfWork bool) (*ve
 	}
 	if err != nil {
 		return nil, err
+	}
+	if preview {
+		return runner.ReadOnlyWorkflow(wow)
 	}
 	return runner.Workflow(wow)
 }
@@ -339,13 +346,25 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
+				workflow, err := newVersionsWorkflowWithPreview(cmd, false, true)
+				if err != nil {
+					return err
+				}
+				calculated, err := workflow.CalculatedTag(cmd.Context(), optionalArg(args))
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Calculated GitVersion tag: %s\n", calculated)
 				steps := []string{"Calculate the GitVersion tag for the current commit."}
 				if qualifier := optionalArg(args); qualifier != "" {
 					steps[0] = fmt.Sprintf("Calculate the GitVersion tag and apply deployment qualifier %q.", qualifier)
 				}
-				steps = append(steps, "Create the annotated tag locally if it does not already exist on this commit.")
 				if publish {
+					steps = append(steps, "Reuse a unique version tag already on HEAD when present; otherwise create the calculated tag locally.")
 					steps = append(steps, "Push the selected tag to origin unless it is already published.")
+					fmt.Fprintln(cmd.OutOrStdout(), "Note: --publish may select an existing tag on HEAD instead of the calculated candidate.")
+				} else {
+					steps = append(steps, "Create the annotated tag locally if it does not already exist on this commit.")
 				}
 				writeVersionsPlan(cmd.OutOrStdout(), "versions tag", steps)
 				return nil
