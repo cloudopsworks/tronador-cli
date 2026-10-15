@@ -144,7 +144,8 @@ Set these values before your first pipeline run:
 Use `cloud: none` and `cloud_type: none` only for repositories that should build/scan without deployment. In that mode, your upstream blueprint configuration must resolve deployment to disabled.
 
 Common optional sections:
-- `golang` — package name override, Go version, target OS/arch, image variant, CGO toggle, and optional GoReleaser publishing
+- `golang` — package name override, Go version, target OS/arch, image variant, CGO toggle, and optional GoReleaser publishing (including macOS and Chocolatey/Windows runners)
+- `pages` — GitHub Pages publishing for Jekyll documentation (see [GitHub Pages documentation](#github-pages-documentation))
 - `preview` — PR preview environment behavior
 - `apis` — API Gateway publishing
 - `observability` — tracing/monitoring agent configuration
@@ -158,23 +159,36 @@ golang:
   package_name: my-cli
 ```
 
-To enable GoReleaser for tagged releases, add the flag under `golang`:
+To enable GoReleaser for tagged releases, configure the `goreleaser` block under `golang`:
 
 ```yaml
 golang:
-  goreleaser: true
+  goreleaser:
+    enabled: true     # run GoReleaser on the default runner with .goreleaser.yml
+    macos: true       # optional: run GoReleaser on a macOS runner with macos.goreleaser.yml
+    chocolatey: true  # optional: run GoReleaser on a Windows runner with windows.goreleaser.yml
 ```
 
-Leave it unset when the repository should only build container/image artifacts. The release workflow keeps GoReleaser disabled by default.
+| Key | Runner | Config file (repository root) | Typical use |
+|---|---|---|---|
+| `enabled` | `runner_set` (default runner) | `.goreleaser.yml` | Cross-platform binaries, archives, checksums, Homebrew tap |
+| `macos` | `macos-latest` | `macos.goreleaser.yml` | macOS code signing and notarization |
+| `chocolatey` | `windows-latest` | `windows.goreleaser.yml` | Chocolatey package build and push |
 
-> **Required `.goreleaser.yml` configuration:** The CloudOps Works release workflow creates a GitHub draft release before invoking GoReleaser. Your `.goreleaser.yml` must include `release.use_existing_draft: true` so GoReleaser updates that draft instead of attempting to create a new release. Without this setting GoReleaser will fail because the release already exists.
+Each key opts in independently and defaults to disabled. Enabling any of them makes the release job create the GitHub release as a draft for GoReleaser to complete. The macOS and Chocolatey jobs run first, and the main GoReleaser job runs after them. A failure in the macOS or Chocolatey job does not block the main job. All GoReleaser jobs run only after a successful release job, and only for release builds without a prerelease qualifier.
+
+The boolean form `golang.goreleaser: true` is deprecated but still supported; it is equivalent to `goreleaser.enabled: true`.
+
+Leave GoReleaser unset when the repository should only build container/image artifacts. The release workflow keeps GoReleaser disabled by default.
+
+> **Required GoReleaser configuration:** The CloudOps Works release workflow creates a GitHub draft release before invoking GoReleaser. Every GoReleaser config file you enable (`.goreleaser.yml`, `macos.goreleaser.yml`, `windows.goreleaser.yml`) must include `release.use_existing_draft: true` so GoReleaser updates that draft instead of attempting to create a new release. Without this setting GoReleaser will fail because the release already exists.
 >
 > ```yaml
 > release:
 >   use_existing_draft: true
 > ```
 
-> **Required secrets when `goreleaser: true` is set:** The GoReleaser step signs release artifacts using GPG. Before enabling this flag you must add the following secrets at the repository or organization level:
+> **Required secrets when any GoReleaser job is enabled:** The GoReleaser steps sign release artifacts using GPG. Before enabling `enabled`, `macos`, or `chocolatey` you must add the following secrets at the repository or organization level:
 >
 > - `GPG_PRIVATE_KEY` — armored GPG private key used to sign released artifacts
 > - `GPG_PASSPHRASE` — passphrase for the GPG private key
@@ -184,9 +198,10 @@ Leave it unset when the repository should only build container/image artifacts. 
 > **Optional GoReleaser distribution secrets:** If your GoReleaser configuration publishes to Homebrew, Chocolatey, or signed macOS binaries, also add:
 >
 > - `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository. Falls back to `BOT_TOKEN` when absent, so Homebrew tap commits use the bot identity instead of failing.
-> - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
-> - `XCODE_BUILD_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing
-> - `XCODE_BUILD_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate
+> - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages (used by the `chocolatey` job)
+> - `APPLE_SIGN_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing. Falls back to `XCODE_BUILD_CERTIFICATE_BASE64` when absent.
+> - `APPLE_SIGN_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate. Falls back to `XCODE_BUILD_CERTIFICATE_PASS` when absent.
+> - `APPLE_KEYCHAIN_PASSWORD` — password for the temporary signing keychain on the macOS runner. Falls back to `XCODE_KEYCHAIN_PASSWORD` when absent.
 > - `APPLE_STORE_CONNECT_KEY_BASE64` — base64-encoded App Store Connect API key for macOS notarization
 > - `APPLE_STORE_CONNECT_KEY_ID` — App Store Connect API key identifier
 > - `APPLE_STORE_CONNECT_ISSUER_ID` — App Store Connect API issuer identifier
@@ -268,6 +283,26 @@ Use preview environments when pull requests from `feature/**` or `hotfix/**` sho
 
 ---
 
+## GitHub Pages documentation
+
+The `docs-pages.yml` workflow builds a Jekyll site from your repository docs and deploys it to GitHub Pages. It is disabled by default. Enable it in `inputs-global.yaml`:
+
+```yaml
+pages:
+  enabled: true
+  docs_path: "docs"         # Jekyll source folder (default: docs)
+  pages_path: "docs-pages"  # build output folder uploaded to Pages (default: docs-pages)
+```
+
+Requirements:
+- Jekyll-format docs under `docs_path`, including a `_config.yml`
+- `Gemfile` and `Gemfile.lock` at the repository root that pin Jekyll and its plugins
+- Repository **Settings → Pages → Build and deployment → Source** set to **GitHub Actions**
+
+The workflow runs on pushes to `master` that change `docs/**`, `Gemfile`, or `Gemfile.lock`, and on manual dispatch. If you set a custom `docs_path`, pushes under that folder do not trigger it automatically, so run it manually (`docs-pages.yml` is template-owned and is overwritten on upgrade). When `pages.enabled` is not `true`, the build step and deploy job are skipped.
+
+---
+
 ## GitHub Actions workflow model
 
 Important workflows in this template:
@@ -279,9 +314,10 @@ Important workflows in this template:
 - `deploy-blue-green.yml` — blue/green deployment flow
 - `scan.yml` — SAST/SCA/DAST orchestration
 - `environment-unlock.yml` / `environment-destroy.yml` — environment operations
+- `docs-pages.yml` — Jekyll build and GitHub Pages deployment when `pages.enabled: true`
 - `automerge.yml`, slash-command workflows, Jira integration workflows — repo automation
 
-When `golang.goreleaser: true` is set, `main-build.yml` also runs an additional GoReleaser publication step during the release job after the standard GitHub release is created. Use that mode only when the generated repository includes a valid GoReleaser configuration and the signing secrets described below.
+When GoReleaser is enabled under `golang.goreleaser`, `main-build.yml` runs GoReleaser publication jobs after the standard GitHub release is created: `goreleaser_mac` (macOS runner) and `goreleaser_chocolatey` (Windows runner) when their flags are set, then `goreleaser_main`. Use that mode only when the generated repository includes valid GoReleaser configuration files and the signing secrets described below.
 
 This template now also includes dedicated GitVersion reference files for both GitFlow and GitHub Flow release models. If your generated repository wants to use one of them directly, wire it explicitly in your generator/build logic rather than assuming automatic selection.
 
@@ -300,15 +336,16 @@ Typical examples:
 - `DEPLOYMENT_AZURE_SERVICE_ID` / `DEPLOYMENT_AZURE_SERVICE_SECRET`
 - runner, registry, region, and state configuration variables
 
-If you enable `golang.goreleaser: true`, the following secrets are **required** at the repository or organization level — the workflow will fail without them:
+If you enable any GoReleaser job under `golang.goreleaser`, the following secrets are **required** at the repository or organization level — the workflow will fail without them:
 - `GPG_PRIVATE_KEY` — armored GPG private key for signing release artifacts
 - `GPG_PASSPHRASE` — passphrase for the GPG private key
 
 The following secrets are **optional** and only needed when your GoReleaser configuration targets those distribution channels or signing steps:
 - `HOMEBREW_TAP_TOKEN` — GitHub personal access token with write access to your Homebrew tap repository. Falls back to `BOT_TOKEN` when absent.
 - `CHOCOLATEY_API_KEY` — Chocolatey community repository API key for publishing packages
-- `XCODE_BUILD_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing
-- `XCODE_BUILD_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate
+- `APPLE_SIGN_CERTIFICATE_BASE64` — base64-encoded Apple Developer certificate (P12) for macOS binary signing. Falls back to `XCODE_BUILD_CERTIFICATE_BASE64`.
+- `APPLE_SIGN_CERTIFICATE_PASS` — passphrase for the Apple Developer certificate. Falls back to `XCODE_BUILD_CERTIFICATE_PASS`.
+- `APPLE_KEYCHAIN_PASSWORD` — password for the temporary signing keychain on the macOS runner. Falls back to `XCODE_KEYCHAIN_PASSWORD`.
 - `APPLE_STORE_CONNECT_KEY_BASE64` — base64-encoded App Store Connect API key for macOS notarization
 - `APPLE_STORE_CONNECT_KEY_ID` — App Store Connect API key identifier
 - `APPLE_STORE_CONNECT_ISSUER_ID` — App Store Connect API issuer identifier
@@ -347,6 +384,7 @@ If you use the CloudOps Works release workflow, keep changes grouped by release 
 - [ ] Update `.cloudopsworks/vars/inputs-global.yaml`
 - [ ] Configure exactly one target file per active environment
 - [ ] Configure preview settings if needed
+- [ ] Configure GitHub Pages docs (`pages`) and GoReleaser runners (`golang.goreleaser`) if needed
 - [ ] Add required GitHub secrets and variables
 - [ ] Run `go test ./...`
 - [ ] Open a PR and verify `pr-build.yml`
