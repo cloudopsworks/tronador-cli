@@ -5,7 +5,7 @@ dist: dist-windows
 before:
   hooks:
     - go mod tidy
-    - powershell.exe -NoProfile -NonInteractive -File ./scripts/test-install.ps1
+    - pwsh -NoProfile -NonInteractive -File ./scripts/test-install.ps1
 builds:
   - id: tronador-cli-windows
     env:
