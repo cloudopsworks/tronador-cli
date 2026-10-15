@@ -61,7 +61,10 @@ chocolateys:
     license_url: https://github.com/cloudopsworks/tronador-cli/blob/master/.cloudopsworks/LICENSE
     require_license_acceptance: false
     summary: CLI tool for Cloud Ops Works Tronador workflows and AWS automation
-    description: Tronador CLI provides repository and AWS automation commands.
+    description: |
+      Tronador CLI provides repository and AWS automation commands.
+      It is designed to be used in CI/CD pipelines and automation scripts.
+      It is a cross-platform tool that can be used on Windows, Linux, and macOS.
     tags: tronador cli cloudopsworks aws devops
     release_notes: 'https://github.com/cloudopsworks/tronador-cli/releases/tag/{{ .Tag }}'
     skip_publish: true
