@@ -25,8 +25,8 @@ golang:
 # Set GitHub Pages processing to true if want to enable, the tool is disabled by default, all docs are expected to be under the `docs` folder
 # The build script expects that docs are built into the `docs-pages` folder, if you want to change this behavior, configure accordingly.
 # Docs are expected to be in Jekyll format only.
-#pages:
-#  enabled: true
+pages:
+  enabled: true
 #  docs_path: "docs"
 #  pages_path: "docs-pages"
 #
