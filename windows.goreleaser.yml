@@ -64,9 +64,7 @@ chocolateys:
     description: Tronador CLI provides repository and AWS automation commands.
     tags: tronador cli cloudopsworks aws devops
     release_notes: 'https://github.com/cloudopsworks/tronador-cli/releases/tag/{{ .Tag }}'
-    skip_publish: false
-    api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
-    source_repo: "https://push.chocolatey.org/"
+    skip_publish: true
 release:
   draft: true
   use_existing_draft: true
