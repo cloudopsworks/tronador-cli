@@ -4,8 +4,9 @@
 
 The Markdown guides in `docs/` are the source for the Tronador CLI
 documentation site. Jekyll renders them with the GitHub Pages Cayman theme into
-`docs-pages/`. The theme's blue/slate palette and system-font styling follow the
-current Cloud Ops Works website at [cloudopsworks.co](https://cloudopsworks.co)
+`docs-pages/`. The shared header uses the [Cloud Ops Works logo](https://cloudopsworks.co/images/logo.png),
+and its blue/slate palette and system-font styling follow the
+Cloud Ops Works website at [cloudopsworks.co](https://cloudopsworks.co)
 and the [`cloudopsworks/main-website`](https://github.com/cloudopsworks/main-website)
 design tokens (`#2563eb` blue, `#0f172a` slate, and `#f8fafc` surfaces).
 
@@ -27,14 +28,16 @@ GitHub Pages-compatible plugin dependencies and build the site:
 
 ```bash
 bundle install
-./scripts/build-docs-site.sh
+bundle exec jekyll build \
+  --source docs \
+  --destination docs-pages \
+  --config docs/_config.yml
 ```
 
 The generated static site is written to `docs-pages/`. To preview it locally
 without the GitHub Pages project prefix:
 
 ```bash
-./scripts/build-docs-site.sh --baseurl ""
 bundle exec jekyll serve \
   --source docs \
   --destination docs-pages \

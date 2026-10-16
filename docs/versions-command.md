@@ -278,6 +278,11 @@ the value to a `v`-prefixed annotated tag. An optional `<qualifier>` appends
 `v1.2.3-alpha.1+deploy-test`). This qualifier is deployment metadata, not a
 new semantic version.
 
+If `.cloudopsworks/gitversion.yaml` is absent, `tag` warns on stderr and runs
+GitVersion without `-config`, so GitVersion uses its default configuration.
+The same fallback applies to `tag --dry-run`; other `versions` workflows still
+require their installed configuration.
+
 `--publish` pushes the exact tag to `origin` in the same invocation. Before
 calculating a new version, it looks for a unique local SemVer tag already
 pointing at `HEAD` and publishes it if it is not yet on `origin`; if it is

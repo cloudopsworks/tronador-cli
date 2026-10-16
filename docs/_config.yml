@@ -1,6 +1,6 @@
-title: Tronador CLI Documentation
-description: Installation, command references, and maintainer guides for Tronador CLI.
-url: http://tronador.cloudopsworks.co
+title: Tronador CLI
+description: A cross-platform CLI for Cloud Ops Works Tronador workflows, AWS resource automation, IaC module auditing, and repository template lifecycle management.
+url: https://tronador.cloudopsworks.co
 baseurl: ""
 repository: cloudopsworks/tronador-cli
 
