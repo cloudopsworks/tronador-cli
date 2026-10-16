@@ -109,6 +109,24 @@ func TestRunnerWorkflowResolvesOnlyDemandedTools(t *testing.T) {
 	}
 }
 
+func TestTagWorkflowDoesNotTreatInvalidConfigAsMissing(t *testing.T) {
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, ".cloudopsworks", "gitversion.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	runner, err := NewRunner(Options{WorkDir: workDir, Stderr: &stderr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.TagWorkflow(false); err == nil {
+		t.Fatal("directory at GitVersion config path was accepted")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected warning for invalid config: %q", stderr.String())
+	}
+}
+
 func TestRunnerWorkflowDryRunBypassesNewResolver(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")

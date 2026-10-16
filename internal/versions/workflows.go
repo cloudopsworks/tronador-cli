@@ -42,6 +42,7 @@ type WorkflowOptions struct {
 type Workflows struct {
 	dir, wow, remote, main string
 	mainConfigured         bool
+	defaultGitVersion      bool
 	run                    CommandRunner
 	results                []ActionResult
 }
@@ -60,6 +61,9 @@ func (w *Workflows) ActionResults() []ActionResult {
 }
 
 func (w *Workflows) gitVersion(ctx context.Context, variable string) (string, error) {
+	if w.defaultGitVersion {
+		return w.run.Run(ctx, "gitversion", "-showvariable", variable)
+	}
 	config := filepath.Join(cloudOpsWorksDir, "gitversion.yaml")
 	return w.run.Run(ctx, "gitversion", "-config", config, "-showvariable", variable)
 }
@@ -534,6 +538,33 @@ func (r *Runner) Workflow(wow WayOfWork) (*Workflows, error) {
 // missing tool, even when the caller enabled network access.
 func (r *Runner) ReadOnlyWorkflow(wow WayOfWork) (*Workflows, error) {
 	return r.workflow(wow, true)
+}
+
+// TagWorkflow permits GitVersion's built-in configuration when the repository
+// has no installed config. Other workflow commands still require one.
+func (r *Runner) TagWorkflow(preview bool) (*Workflows, error) {
+	wow, err := r.CurrentWayOfWork()
+	missingConfig := false
+	if err != nil {
+		config := filepath.Join(r.workDir, cloudOpsWorksDir, "gitversion.yaml")
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		if _, statErr := os.Lstat(config); !errors.Is(statErr, os.ErrNotExist) {
+			return nil, err
+		}
+		wow = WayOfWorkGitFlow
+		missingConfig = true
+	}
+	w, err := r.workflow(wow, preview)
+	if err != nil {
+		return nil, err
+	}
+	if missingConfig {
+		w.defaultGitVersion = true
+		fmt.Fprintf(r.stderr, "warning: %s not found; using GitVersion default configuration\n", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"))
+	}
+	return w, nil
 }
 
 func (r *Runner) workflow(wow WayOfWork, resolveDryRunTools bool) (*Workflows, error) {

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en-US' }}">
+  <head>
+    <meta charset="UTF-8">
+    {% seo %}
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="icon" href="{{ '/favicon.ico' | relative_url }}">
+    <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
+  </head>
+  <body>
+    <a id="skip-to-content" href="#content">Skip to content</a>
+    <header class="page-header" role="banner">
+      <div class="site-masthead">
+        <a class="site-brand" href="{{ '/' | relative_url }}" aria-label="Tronador CLI documentation home">
+          <img src="https://cloudopsworks.co/images/logo.png" alt="Cloud Ops Works logo" width="48" height="48">
+          <span>Tronador CLI <small>Documentation</small></span>
+        </a>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="{{ '/' | relative_url }}">Home</a>
+          <a href="{{ '/installation.html' | relative_url }}">Install</a>
+          <a href="{{ '/commands.html' | relative_url }}">Commands</a>
+          <a href="https://github.com/cloudopsworks/tronador-cli">GitHub</a>
+        </nav>
+      </div>
+      <p class="project-tagline">{{ site.description }}</p>
+    </header>
+
+    <main id="content" class="main-content" role="main">
+      {{ content }}
+      <footer class="site-footer">
+        <span>Tronador CLI is open source under the <a href="https://github.com/cloudopsworks/tronador-cli/blob/master/LICENSE">Apache 2.0 license</a>.</span>
+        <span>Maintained by <a href="https://cloudopsworks.co/">Cloud Ops Works</a>.</span>
+      </footer>
+    </main>
+  </body>
+</html>

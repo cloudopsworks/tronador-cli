@@ -152,7 +152,7 @@ func newVersionsWorkflow(cmd *cobra.Command, requireReliableWayOfWork bool) (*ve
 	return newVersionsWorkflowWithPreview(cmd, requireReliableWayOfWork, false)
 }
 
-func newVersionsWorkflowWithPreview(cmd *cobra.Command, requireReliableWayOfWork, preview bool) (*versions.Workflows, error) {
+func newVersionsRunner(cmd *cobra.Command) (*versions.Runner, error) {
 	toolVersions, err := parseAssignments(versionsToolVersions, "tool-version")
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func newVersionsWorkflowWithPreview(cmd *cobra.Command, requireReliableWayOfWork
 	if err != nil {
 		return nil, err
 	}
-	runner, err := versions.NewRunner(versions.Options{
+	return versions.NewRunner(versions.Options{
 		WorkDir:        versionsWorkDir,
 		GitPath:        versionsGitPath,
 		MainBranch:     versionsMainBranch,
@@ -176,6 +176,18 @@ func newVersionsWorkflowWithPreview(cmd *cobra.Command, requireReliableWayOfWork
 		Stdout:         cmd.OutOrStdout(),
 		Stderr:         cmd.ErrOrStderr(),
 	})
+}
+
+func newVersionsTagWorkflow(cmd *cobra.Command, preview bool) (*versions.Workflows, error) {
+	runner, err := newVersionsRunner(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return runner.TagWorkflow(preview)
+}
+
+func newVersionsWorkflowWithPreview(cmd *cobra.Command, requireReliableWayOfWork, preview bool) (*versions.Workflows, error) {
+	runner, err := newVersionsRunner(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +358,7 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if commandDryRun(cmd) {
-				workflow, err := newVersionsWorkflowWithPreview(cmd, false, true)
+				workflow, err := newVersionsTagWorkflow(cmd, true)
 				if err != nil {
 					return err
 				}
@@ -369,7 +381,7 @@ are rejected; only deployment-qualified aliases of the same version are allowed.
 				writeVersionsPlan(cmd.OutOrStdout(), "versions tag", steps)
 				return nil
 			}
-			workflow, err := newVersionsWorkflow(cmd, false)
+			workflow, err := newVersionsTagWorkflow(cmd, false)
 			if err != nil {
 				return err
 			}

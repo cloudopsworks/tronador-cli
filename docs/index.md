@@ -1,32 +1,54 @@
 ---
 layout: default
-title: Tronador CLI Documentation
-description: Installation, command references, and maintainer guides for the Tronador CLI.
+title: Tronador CLI documentation
+description: Cross-platform automation for Cloud Ops Works workflows.
 ---
 
-# Tronador CLI
+# tronador-cli
 
-Cross-platform automation for Cloud Ops Works workflows. Use Tronador to manage
-AWS resources, inspect IaC module pins, run project capabilities, and automate
-repository-template and release workflows.
+A cross-platform CLI for Cloud Ops Works Tronador workflows, AWS resource
+automation, IaC module auditing, and repository template lifecycle management.
 
-[Install Tronador](installation.md) · [Browse all commands](commands.md) ·
-[View the source on GitHub](https://github.com/cloudopsworks/tronador-cli)
+Tronador brings the repeatable DevOps foundations featured on
+[cloudopsworks.co](https://cloudopsworks.co/) to your terminal. The repository
+and packages are named `tronador-cli`; the installed command is `tronador`.
 
-## Get started
+[Install Tronador](installation.md) · [Browse commands](commands.md) ·
+[View on GitHub](https://github.com/cloudopsworks/tronador-cli)
 
-Install the latest stable release for your operating system, then check the
-available commands:
+## Get started with Tronador
+
+Install the latest stable release on Linux or macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cloudopsworks/tronador-cli/master/scripts/install.sh | sh
+```
+
+For Windows, Homebrew, Chocolatey, and native Linux packages, see the
+[installation guide](installation.md). Once installed:
 
 ```bash
 tronador --help
 tronador version
 ```
 
-The [installation guide](installation.md) covers shell and PowerShell
-installers, Linux packages, Homebrew, Chocolatey, and release selection.
+## What you can do
 
-## Command guides
+- **Automate AWS resources:** apply organization tags, copy secrets, remove
+  default VPCs, and remediate S3 and EC2 security settings.
+- **Audit infrastructure modules:** inspect Terragrunt source pins and preview
+  safe patch, minor, or major upgrades.
+- **Maintain repositories:** initialize, upgrade, recover, and migrate
+  template-derived projects.
+- **Run guarded version workflows:** configure GitVersion and manage feature,
+  hotfix, release, and tag operations.
+- **Generate project documentation:** build README files and Terraform or Make
+  target references from the CLI.
+
+Release artifacts include the `tronador` executable for Linux, macOS, Windows,
+and FreeBSD. The project is [open source under Apache 2.0](https://github.com/cloudopsworks/tronador-cli/blob/master/LICENSE).
+
+## Explore the command guides
 
 - [Command reference](commands.md) — top-level commands, aliases, global flags,
   and links to the detailed guides.
@@ -43,14 +65,15 @@ installers, Linux packages, Homebrew, Chocolatey, and release selection.
 - [README and docs](readme-docs-command.md) — README generation, Make target
   docs, Terraform docs, and template assets.
 
-## Maintainer guides
+## For maintainers
 
 - [CLI architecture](architecture.md) — package responsibilities,
   request flow, and testing boundaries.
 - [Build and publish these docs](github-pages.md) — local Jekyll preview, the
   generated `docs-pages/` output, and the `gh-pages` deployment flow.
 
-## Project links
+## Cloud Ops Works and project links
 
 - [GitHub repository](https://github.com/cloudopsworks/tronador-cli)
 - [Cloud Ops Works](https://cloudopsworks.co)
+- [Tronador on Cloud Ops Works](https://cloudopsworks.co/resources/tronador-cli-installation/)

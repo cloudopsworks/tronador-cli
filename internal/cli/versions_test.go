@@ -306,6 +306,76 @@ func TestVersionsTagDryRunPrintsCalculatedVersionWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestVersionsTagUsesGitVersionDefaultsWhenConfigMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	for _, tc := range []struct {
+		name, branch, variable string
+		dryRun                 bool
+	}{
+		{name: "main", branch: "main", variable: "MajorMinorPatch"},
+		{name: "feature", branch: "feature/test", variable: "SemVer"},
+		{name: "dry-run", branch: "main", variable: "MajorMinorPatch", dryRun: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreVersionsToolOptions(t)
+			repo := setupVersionsTagRepo(t)
+			config := filepath.Join(repo, ".cloudopsworks", "gitversion.yaml")
+			if err := os.Remove(config); err != nil {
+				t.Fatal(err)
+			}
+			cliGit(t, repo, "add", "-u")
+			cliGit(t, repo, "commit", "-m", "remove GitVersion config")
+			cliGit(t, repo, "push", "origin", "main")
+			if tc.branch != "main" {
+				cliGit(t, repo, "checkout", "-b", tc.branch)
+				cliGit(t, repo, "push", "-u", "origin", tc.branch)
+			}
+
+			argsPath := filepath.Join(t.TempDir(), "gitversion-args")
+			tool := filepath.Join(t.TempDir(), "gitversion")
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nprintf '1.2.3\\n'\n", argsPath)
+			if err := os.WriteFile(tool, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			versionsWorkDir, versionsMainBranch = repo, "main"
+			versionsNoInstallTools = true
+			versionsToolPaths = []string{"gitversion=" + tool}
+
+			command := newVersionsTagCommand()
+			if tc.dryRun {
+				command.Flags().Bool("dry-run", true, "")
+			}
+			var stdout, stderr bytes.Buffer
+			command.SetOut(&stdout)
+			command.SetErr(&stderr)
+			if err := command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if got := stderr.String(); got != "warning: .cloudopsworks/gitversion.yaml not found; using GitVersion default configuration\n" {
+				t.Fatalf("stderr = %q", got)
+			}
+			if got, err := os.ReadFile(argsPath); err != nil || string(got) != "-showvariable\n"+tc.variable+"\n" {
+				t.Fatalf("GitVersion args = %q, %v", got, err)
+			}
+			if tc.dryRun {
+				if !strings.Contains(stdout.String(), "Calculated GitVersion tag: v1.2.3") {
+					t.Fatalf("dry-run stdout = %q", stdout.String())
+				}
+				if tags := cliGit(t, repo, "tag", "--list"); strings.TrimSpace(tags) != "" {
+					t.Fatalf("dry-run created tag: %q", tags)
+				}
+			} else if stdout.String() != "v1.2.3\n" || strings.TrimSpace(cliGit(t, repo, "tag", "--list")) != "v1.2.3" {
+				t.Fatalf("tag output = %q; local tags = %q", stdout.String(), cliGit(t, repo, "tag", "--list"))
+			}
+			if _, err := os.Lstat(config); !os.IsNotExist(err) {
+				t.Fatalf("tag created GitVersion config: %v", err)
+			}
+		})
+	}
+}
+
 func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixtures")
@@ -321,9 +391,12 @@ func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
 		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
 		versionsNoInstallTools = true
 		versionsToolPaths = []string{"gitversion=" + writeCLITool(t, t.TempDir(), "gitversion", "1.2.3")}
-		stdout, _ := executeVersionsTagCommand(t)
+		stdout, stderr := executeVersionsTagCommand(t)
 		if stdout != "v1.2.3\n" {
 			t.Fatalf("stdout = %q", stdout)
+		}
+		if stderr != "" {
+			t.Fatalf("unexpected warning with installed config: %q", stderr)
 		}
 	})
 
