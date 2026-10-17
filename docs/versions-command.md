@@ -69,19 +69,25 @@ in every applicable target can finish without a pull-request query. Installing
 `gh` does not authenticate it; configure GitHub CLI authentication separately.
 Git-only commands and `versions init` do not resolve either tool.
 
-CLI `--dry-run` returns before tool option parsing or resolution. It does not
-load `--tools-config`, create a cache, download or authenticate a tool, or
-execute Git, GitVersion, or `gh`.
+Branch-action `--dry-run` returns before tool option parsing or resolution. It
+does not load `--tools-config`, create a cache, download or authenticate a tool,
+or execute Git, GitVersion, or `gh`. `tag --dry-run` is different: it resolves
+GitVersion locally and calculates the candidate tag without mutating the repo.
 
 The command first reads the `# Agents: WayOfWork=<workflow>` header in
 `.cloudopsworks/gitversion.yaml`. For a headerless legacy config, it can also
 detect the workflow when that file byte-matches exactly one unchanged selector
 checked into `HEAD` (`gitversion_gitflow.yaml`, `gitversion_githubflow.yaml`, or
 `gitversion_trunkbased.yaml`). Non-purge commands retain the historical
-GitFlow fallback when neither method is reliable. Destructive `purge` commands
-do not: the active config itself must also be unchanged from `HEAD`, and an
+GitFlow fallback when neither method is reliable. If the active config is
+absent, workflow commands warn on stderr and use the GitFlow-compatible default;
+GitVersion calls omit `-config` and use GitVersion's built-in configuration.
+With an installed config, destructive `purge` commands do not use the ambiguous
+fallback: the active config itself must also be unchanged from `HEAD`, and an
 ambiguous match, no match, modified/untracked selector, malformed header, or
-duplicate header stops before fetch, checkout, or deletion.
+duplicate header stops before fetch, checkout, or deletion. Without an active
+config, feature and release purges require merge proof against the primary
+branch and, when present, `develop` before deleting anything.
 Branching behavior is then workflow-sensitive:
 
 | Way of work | Feature/release base | `develop` | Support branches |
@@ -204,9 +210,9 @@ tronador versions release purge [version]
 
 `start` creates `release/vX.Y.Z` using GitVersion's calculated
 `MajorMinorPatch` unchanged. The synchronized base is `develop` in GitFlow and
-the primary branch in GitHub Flow or trunk-based repositories. GitVersion
-configuration in `.cloudopsworks/gitversion.yaml` is authoritative for the
-version and increment; `release start` does not apply an additional bump.
+the primary branch in GitHub Flow or trunk-based repositories. When present,
+GitVersion configuration in `.cloudopsworks/gitversion.yaml` is authoritative
+for the version and increment; `release start` does not apply an additional bump.
 `publish` and `purge` infer the release version from the current `release/*`
 branch when omitted. `finish` operates on the current release branch.
 
@@ -280,8 +286,7 @@ new semantic version.
 
 If `.cloudopsworks/gitversion.yaml` is absent, `tag` warns on stderr and runs
 GitVersion without `-config`, so GitVersion uses its default configuration.
-The same fallback applies to `tag --dry-run`; other `versions` workflows still
-require their installed configuration.
+The same fallback applies to `tag --dry-run` and the other `versions` workflows.
 
 `--publish` pushes the exact tag to `origin` in the same invocation. Before
 calculating a new version, it looks for a unique local SemVer tag already
