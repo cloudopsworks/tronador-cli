@@ -87,8 +87,10 @@ func (w *Workflows) FeaturePurge(ctx context.Context, name string) error {
 	if err := w.validateConfiguredGitFlowTopology(); err != nil {
 		return err
 	}
-	if _, e := w.featureBase(ctx); e != nil {
-		return e
+	if !w.missingGitVersionConfig {
+		if _, e := w.featureBase(ctx); e != nil {
+			return e
+		}
 	}
 	branch, e := w.featureBranch(ctx, name)
 	if e != nil {
@@ -193,7 +195,7 @@ func (w *Workflows) purge(ctx context.Context, branch string) error {
 
 func (w *Workflows) verifyPurgeBases(ctx context.Context, branch, source string, bases []string) error {
 	// Test every required freshly fetched remote base. GitFlow releases require
-	// both main and develop; the other workflows retain their single base.
+	// both main and develop; config-less feature/release purges may require both.
 	for _, base := range bases {
 		if _, err := w.git(ctx, "merge-base", "--is-ancestor", source, "refs/remotes/"+w.remote+"/"+base); err != nil {
 			return fmt.Errorf("cannot safely purge %s: it is not merged into %s: %w", branch, base, err)
@@ -203,6 +205,26 @@ func (w *Workflows) verifyPurgeBases(ctx context.Context, branch, source string,
 }
 
 func (w *Workflows) purgeBases(ctx context.Context, branch string) ([]string, error) {
+	if w.missingGitVersionConfig && (strings.HasPrefix(branch, "feature/") || strings.HasPrefix(branch, "feat/") || strings.HasPrefix(branch, "release/")) {
+		// Without an installed config, the repository might use GitFlow or a
+		// primary-only workflow. Require both possible integration lines when
+		// develop exists, rather than deleting a branch merged into only one.
+		main, err := w.Main(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if main == "develop" {
+			return []string{main}, nil
+		}
+		_, hasDevelop, err := w.remoteBranchSHA(ctx, "develop")
+		if err != nil {
+			return nil, err
+		}
+		if hasDevelop {
+			return []string{main, "develop"}, nil
+		}
+		return []string{main}, nil
+	}
 	if w.hasDevelop() && strings.HasPrefix(branch, "release/") {
 		main, err := w.Main(ctx)
 		if err != nil {

@@ -162,7 +162,7 @@ func TestVersionsHelpDocumentsRepositorySensitiveCapabilities(t *testing.T) {
 		{versionsCmd, []string{"not the project-version generator", "develop", "GitFlow"}},
 		{newVersionsFeatureCommand(), []string{"GitFlow", "GitHub Flow", "trunk-based", "develop", "main"}},
 		{newVersionsReleaseCommand(), []string{"GitFlow", "GitHub Flow", "trunk-based", "breadcrumbs", "--local"}},
-		{newVersionsSupportCommand(), []string{"only", "WayOfWork=gitflow"}},
+		{newVersionsSupportCommand(), []string{"WayOfWork=gitflow", "GitFlow fallback"}},
 		{newVersionsTagCommand(), []string{"MajorMinorPatch", "SemVer", "--publish", "+deploy"}},
 	} {
 		var output bytes.Buffer
@@ -371,6 +371,133 @@ func TestVersionsTagUsesGitVersionDefaultsWhenConfigMissing(t *testing.T) {
 			}
 			if _, err := os.Lstat(config); !os.IsNotExist(err) {
 				t.Fatalf("tag created GitVersion config: %v", err)
+			}
+		})
+	}
+}
+
+func TestVersionsBranchCommandsUseDefaultsWhenConfigMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	for _, tc := range []struct {
+		name, wantBranch, gitVersionVariable string
+		command                              func() *cobra.Command
+		args                                 []string
+	}{
+		{name: "feature", wantBranch: "feature/fallback", command: newVersionsFeatureCommand, args: []string{"start", "fallback"}},
+		{name: "hotfix", wantBranch: "hotfix/v1.2.4", gitVersionVariable: "MajorMinorPatch", command: newVersionsHotfixCommand, args: []string{"start"}},
+		{name: "release", wantBranch: "release/v1.2.3", gitVersionVariable: "MajorMinorPatch", command: newVersionsReleaseCommand, args: []string{"start"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreVersionsToolOptions(t)
+			repo := setupVersionsTagRepo(t)
+			config := filepath.Join(repo, ".cloudopsworks", "gitversion.yaml")
+			if err := os.Remove(config); err != nil {
+				t.Fatal(err)
+			}
+			cliGit(t, repo, "add", "-u")
+			cliGit(t, repo, "commit", "-m", "remove GitVersion config")
+			cliGit(t, repo, "push", "origin", "main")
+			cliGit(t, repo, "checkout", "-b", "develop")
+			cliGit(t, repo, "push", "-u", "origin", "develop")
+			cliGit(t, repo, "checkout", "main")
+
+			argsPath := filepath.Join(t.TempDir(), "gitversion-args")
+			tool := filepath.Join(t.TempDir(), "gitversion")
+			script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nprintf '1.2.3\\n'\n", argsPath)
+			if err := os.WriteFile(tool, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			versionsWorkDir, versionsMainBranch = repo, "main"
+			versionsNoInstallTools = true
+			versionsToolPaths = []string{"gitversion=" + tool}
+			command := tc.command()
+			command.SetArgs(tc.args)
+			var stdout, stderr bytes.Buffer
+			command.SetOut(&stdout)
+			command.SetErr(&stderr)
+			if err := command.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if got := stderr.String(); got != "warning: .cloudopsworks/gitversion.yaml not found; using GitVersion default configuration\n" {
+				t.Fatalf("stderr = %q", got)
+			}
+			if got := strings.TrimSpace(cliGit(t, repo, "branch", "--show-current")); got != tc.wantBranch {
+				t.Fatalf("current branch = %q; want %q", got, tc.wantBranch)
+			}
+			args, err := os.ReadFile(argsPath)
+			if tc.gitVersionVariable == "" {
+				if !os.IsNotExist(err) {
+					t.Fatalf("GitVersion was called by Git-only action: %q, %v", args, err)
+				}
+			} else if err != nil || string(args) != "-showvariable\n"+tc.gitVersionVariable+"\n" {
+				t.Fatalf("GitVersion args = %q, %v", args, err)
+			}
+			if _, err := os.Lstat(config); !os.IsNotExist(err) {
+				t.Fatalf("command created GitVersion config: %v", err)
+			}
+		})
+	}
+}
+
+func TestVersionsFeaturePurgeWithoutConfigRequiresEveryAvailableBase(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		createDevelop bool
+	}{
+		{name: "main-only"},
+		{name: "develop-not-merged", createDevelop: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreVersionsToolOptions(t)
+			repo := setupVersionsTagRepo(t)
+			config := filepath.Join(repo, ".cloudopsworks", "gitversion.yaml")
+			if err := os.Remove(config); err != nil {
+				t.Fatal(err)
+			}
+			cliGit(t, repo, "add", "-u")
+			cliGit(t, repo, "commit", "-m", "remove GitVersion config")
+			cliGit(t, repo, "push", "origin", "main")
+			if tc.createDevelop {
+				cliGit(t, repo, "checkout", "-b", "develop")
+				cliGit(t, repo, "push", "-u", "origin", "develop")
+				cliGit(t, repo, "checkout", "main")
+			}
+			cliGit(t, repo, "checkout", "-b", "feature/ready")
+			if err := os.WriteFile(filepath.Join(repo, "feature.txt"), []byte("ready\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cliGit(t, repo, "add", "feature.txt")
+			cliGit(t, repo, "commit", "-m", "feature ready")
+			cliGit(t, repo, "push", "-u", "origin", "feature/ready")
+			cliGit(t, repo, "checkout", "main")
+			cliGit(t, repo, "merge", "--no-ff", "feature/ready", "-m", "merge feature")
+			cliGit(t, repo, "push", "origin", "main")
+
+			versionsWorkDir, versionsMainBranch = repo, "main"
+			command := newVersionsFeatureCommand()
+			command.SetArgs([]string{"purge", "ready"})
+			var stdout, stderr bytes.Buffer
+			command.SetOut(&stdout)
+			command.SetErr(&stderr)
+			err := command.Execute()
+			if !tc.createDevelop && err != nil {
+				t.Fatal(err)
+			}
+			if tc.createDevelop && (err == nil || !strings.Contains(err.Error(), "not merged into develop")) {
+				t.Fatalf("purge without develop merge = %v", err)
+			}
+			if got := stderr.String(); !strings.Contains(got, "warning: .cloudopsworks/gitversion.yaml not found; using GitVersion default configuration\n") {
+				t.Fatalf("stderr = %q", got)
+			}
+			local := strings.TrimSpace(cliGit(t, repo, "branch", "--list", "feature/ready"))
+			remote := strings.TrimSpace(cliGit(t, repo, "ls-remote", "--heads", "origin", "feature/ready"))
+			if !tc.createDevelop && (local != "" || remote != "") {
+				t.Fatalf("purged branch remains: local %q, remote %q", local, remote)
+			}
+			if tc.createDevelop && (local == "" || remote == "") {
+				t.Fatalf("unsafe purge deleted branch: local %q, remote %q", local, remote)
 			}
 		})
 	}

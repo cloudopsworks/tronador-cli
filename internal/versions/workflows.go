@@ -40,11 +40,11 @@ type WorkflowOptions struct {
 	Runner     CommandRunner
 }
 type Workflows struct {
-	dir, wow, remote, main string
-	mainConfigured         bool
-	defaultGitVersion      bool
-	run                    CommandRunner
-	results                []ActionResult
+	dir, wow, remote, main  string
+	mainConfigured          bool
+	missingGitVersionConfig bool
+	run                     CommandRunner
+	results                 []ActionResult
 }
 
 // ActionResult is useful output returned by a mutating Git/GitHub command.
@@ -61,7 +61,7 @@ func (w *Workflows) ActionResults() []ActionResult {
 }
 
 func (w *Workflows) gitVersion(ctx context.Context, variable string) (string, error) {
-	if w.defaultGitVersion {
+	if w.missingGitVersionConfig {
 		return w.run.Run(ctx, "gitversion", "-showvariable", variable)
 	}
 	config := filepath.Join(cloudOpsWorksDir, "gitversion.yaml")
@@ -540,10 +540,27 @@ func (r *Runner) ReadOnlyWorkflow(wow WayOfWork) (*Workflows, error) {
 	return r.workflow(wow, true)
 }
 
-// TagWorkflow permits GitVersion's built-in configuration when the repository
-// has no installed config. Other workflow commands still require one.
-func (r *Runner) TagWorkflow(preview bool) (*Workflows, error) {
-	wow, err := r.CurrentWayOfWork()
+// CurrentWorkflow uses GitVersion's built-in configuration when the repository
+// has no installed config. An invalid or inaccessible config is still an error.
+func (r *Runner) CurrentWorkflow(preview bool) (*Workflows, error) {
+	return r.currentWorkflow(context.Background(), preview, false)
+}
+
+// PurgeWorkflow retains strict WayOfWork validation for installed configs. If
+// the config is absent, purge uses the default workflow with conservative
+// merge checks before any branch is deleted.
+func (r *Runner) PurgeWorkflow(ctx context.Context) (*Workflows, error) {
+	return r.currentWorkflow(ctx, false, true)
+}
+
+func (r *Runner) currentWorkflow(ctx context.Context, preview, purge bool) (*Workflows, error) {
+	var wow WayOfWork
+	var err error
+	if purge {
+		wow, err = r.CurrentWayOfWorkForPurge(ctx)
+	} else {
+		wow, err = r.CurrentWayOfWork()
+	}
 	missingConfig := false
 	if err != nil {
 		config := filepath.Join(r.workDir, cloudOpsWorksDir, "gitversion.yaml")
@@ -561,7 +578,7 @@ func (r *Runner) TagWorkflow(preview bool) (*Workflows, error) {
 		return nil, err
 	}
 	if missingConfig {
-		w.defaultGitVersion = true
+		w.missingGitVersionConfig = true
 		fmt.Fprintf(r.stderr, "warning: %s not found; using GitVersion default configuration\n", filepath.Join(cloudOpsWorksDir, "gitversion.yaml"))
 	}
 	return w, nil

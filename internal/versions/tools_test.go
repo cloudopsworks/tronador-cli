@@ -109,7 +109,7 @@ func TestRunnerWorkflowResolvesOnlyDemandedTools(t *testing.T) {
 	}
 }
 
-func TestTagWorkflowDoesNotTreatInvalidConfigAsMissing(t *testing.T) {
+func TestCurrentWorkflowDoesNotTreatInvalidConfigAsMissing(t *testing.T) {
 	workDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workDir, ".cloudopsworks", "gitversion.yaml"), 0o755); err != nil {
 		t.Fatal(err)
@@ -119,11 +119,38 @@ func TestTagWorkflowDoesNotTreatInvalidConfigAsMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.TagWorkflow(false); err == nil {
+	if _, err := runner.CurrentWorkflow(false); err == nil {
 		t.Fatal("directory at GitVersion config path was accepted")
+	}
+	if _, err := runner.PurgeWorkflow(context.Background()); err == nil {
+		t.Fatal("purge accepted directory at GitVersion config path")
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected warning for invalid config: %q", stderr.String())
+	}
+}
+
+func TestCurrentAndPurgeWorkflowUseDefaultsWhenConfigDirectoryMissing(t *testing.T) {
+	var stderr bytes.Buffer
+	runner, err := NewRunner(Options{WorkDir: t.TempDir(), Stderr: &stderr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := runner.CurrentWorkflow(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purge, err := runner.PurgeWorkflow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, workflow := range []*Workflows{current, purge} {
+		if workflow.wow != "gitflow" || !workflow.missingGitVersionConfig {
+			t.Fatalf("missing config workflow = %+v", workflow)
+		}
+	}
+	if got := stderr.String(); strings.Count(got, "warning: .cloudopsworks/gitversion.yaml not found; using GitVersion default configuration\n") != 2 {
+		t.Fatalf("warnings = %q", got)
 	}
 }
 
