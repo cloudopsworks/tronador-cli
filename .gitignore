@@ -71,3 +71,4 @@ tronador-cli
 omx_wiki
 dist-windows/
 docs-pages/
+*.syso

@@ -6,6 +6,7 @@ before:
   hooks:
     - go mod tidy
     - pwsh -NoProfile -NonInteractive -File ./scripts/test-install.ps1
+    - go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64,386,arm64 --product-version {{ .Version }} --file-version {{ .Version }}
 builds:
   - id: tronador-cli-windows
     env:

@@ -1,0 +1,34 @@
+{
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "minimum-os": "win10",
+        "execution-level": "as invoker",
+        "ui-access": false,
+        "auto-elevate": false,
+        "dpi-awareness": "system",
+        "long-path-aware": true
+      }
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0409": {
+        "fixed": {
+          "file_version": "0.0.0.0",
+          "product_version": "0.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "Cloud Ops Works LLC",
+            "ProductName": "Tronador CLI",
+            "FileDescription": "CLI tool for Cloud Ops Works Tronador workflows and AWS automation",
+            "InternalName": "tronador",
+            "OriginalFilename": "tronador.exe",
+            "LegalCopyright": "© 2026 Cloud Ops Works LLC"
+          }
+        }
+      }
+    }
+  }
+}
