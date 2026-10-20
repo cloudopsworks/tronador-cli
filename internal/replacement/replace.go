@@ -14,10 +14,10 @@ func Replace(source, destination string) error {
 
 // ReplaceInRoot installs source at destination without resolving either name
 // outside root. Source and destination must name entries in the pinned root.
-// On Windows this is a rooted namespace rename/replace, not ReplaceFileW's
-// metadata-preserving replacement transaction; callers prepare the temporary
-// file's intended mode before the rename. Callers must close source before
-// calling ReplaceInRoot.
+// On Windows this uses os.Root.Rename, not ReplaceFileW's metadata-preserving
+// replacement transaction; callers prepare the temporary file's intended mode
+// before the rename. As with os.Rename, atomicity is not guaranteed on Windows.
+// Callers must close source before calling ReplaceInRoot.
 func ReplaceInRoot(root *os.Root, source, destination string) error {
 	return replaceInRoot(root, source, destination)
 }
