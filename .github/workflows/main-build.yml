@@ -270,6 +270,14 @@ jobs:
           golang_version: ${{ needs.code-build.outputs.golang_version }}
           chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
 
+      - name: Chocolatey Package Push
+        uses: ./bp/cd/release/chocolatey
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          semver: ${{ needs.code-build.outputs.semver }}
+          goreleaser_config: ${{ needs.code-build.outputs.golang_goreleaser_chocolatey_config }}
+          chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
+
   goreleaser_main:
     name: 'GoReleaser Pipeline'
     needs:
