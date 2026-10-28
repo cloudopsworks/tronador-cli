@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -26,6 +27,7 @@ type Options struct {
 	GHPath     string
 	PullBranch string
 	DryRun     bool
+	NoCommit   bool
 	Stdout     io.Writer
 	Stderr     io.Writer
 }
@@ -476,7 +478,8 @@ const (
 	gitignoreManagedEndMarker   = "# END TRONADOR TEMPLATE MANAGED BLOCK"
 )
 
-// Stack applies the fetched template into the target repository and commits it.
+// Stack applies the fetched template into the target repository and commits it
+// unless NoCommit is set.
 // It is an internal full-upgrade workflow step, not a public CLI subcommand.
 func (r *Runner) Stack(ctx context.Context, opts StackOptions) (err error) {
 	defer func() {
@@ -528,6 +531,13 @@ func (r *Runner) Stack(ctx context.Context, opts StackOptions) (err error) {
 		}
 	}
 
+	if r.Opts.NoCommit {
+		if r.Opts.DryRun {
+			fmt.Fprintln(r.Opts.Stderr, "WARNING: --no-commit is enabled with --dry-run; no changes or commit will be made.")
+		} else {
+			fmt.Fprintln(r.Opts.Stderr, "WARNING: --no-commit is enabled; any upgrade changes will be staged without creating a commit. Review them with git diff --cached before committing.")
+		}
+	}
 	if !opts.Template.Merge {
 		fmt.Fprintln(r.Opts.Stdout, "No templates supported to upgrade by this script, skipping upgrade")
 		return nil
@@ -671,7 +681,15 @@ func (r *Runner) Stack(ctx context.Context, opts StackOptions) (err error) {
 	if err := r.commitUpgradeEffects(ctx, updatedState, targetVersion); err != nil {
 		return err
 	}
-	fmt.Fprintln(r.Opts.Stdout, "Please review changes and push to remote repository")
+	if r.Opts.NoCommit {
+		if r.Opts.DryRun {
+			fmt.Fprintln(r.Opts.Stdout, "Dry-run with --no-commit: no changes or commit were made")
+		} else {
+			fmt.Fprintln(r.Opts.Stdout, "No commit created (--no-commit). Review staged changes with git diff --cached and commit manually before pushing")
+		}
+	} else {
+		fmt.Fprintln(r.Opts.Stdout, "Please review changes and push to remote repository")
+	}
 	return nil
 }
 
@@ -1717,24 +1735,154 @@ func buildGitignoreManagedBlock(templateContent []byte) ([]byte, error) {
 }
 
 func mergeGitignoreContent(existing, managedBlock []byte) []byte {
-	if start, end, ok := findGitignoreManagedBlock(existing); ok {
-		replacement := managedBlock
-		if startsWithLineEnding(existing[end:]) {
-			replacement = trimTrailingLineEnding(replacement)
+	// Older upgrades appended the managed block after local rules. Remove every
+	// complete block so those rules can be moved behind the current baseline.
+	userContent := bytes.Clone(existing)
+	for {
+		start, end, ok := findGitignoreManagedBlock(userContent)
+		if !ok {
+			break
 		}
-		merged := make([]byte, 0, len(existing)-end+start+len(replacement))
-		merged = append(merged, existing[:start]...)
-		merged = append(merged, replacement...)
-		merged = append(merged, existing[end:]...)
-		return merged
+		if end < len(userContent) && userContent[end] == '\r' {
+			end++
+		}
+		if end < len(userContent) && userContent[end] == '\n' {
+			end++
+		}
+		userContent = append(userContent[:start], userContent[end:]...)
 	}
-	merged := make([]byte, 0, len(existing)+1+len(managedBlock))
-	merged = append(merged, existing...)
-	if len(merged) > 0 && merged[len(merged)-1] != '\n' {
-		merged = append(merged, '\n')
+
+	seen := make(map[string]int)
+	var rules []string
+	forEachGitignoreLine(managedBlock, func(line, _ []byte) {
+		if key, ok := gitignorePatternKey(line); ok {
+			rules = append(rules, key)
+			seen[key] = len(rules) - 1
+		}
+	})
+	baseline := make(map[string]int, len(seen))
+	for key, index := range seen {
+		baseline[key] = index
 	}
-	merged = append(merged, managedBlock...)
+
+	merged := append([]byte(nil), managedBlock...)
+	forEachGitignoreLine(userContent, func(line, ending []byte) {
+		if key, ok := gitignorePatternKey(line); ok {
+			prior, duplicate := seen[key]
+			if !duplicate {
+				if covering := gitignoreBaselineCoveringRule(key, baseline); covering != "" {
+					prior, duplicate = baseline[covering], true
+				}
+			}
+			if duplicate && !gitignoreReassertionNeeded(key, prior, rules) {
+				return
+			}
+			rules = append(rules, key)
+			seen[key] = len(rules) - 1
+		}
+		merged = append(merged, line...)
+		if len(ending) > 0 {
+			merged = append(merged, ending...)
+		} else {
+			merged = append(merged, '\n')
+		}
+	})
 	return merged
+}
+
+func gitignoreBaselineCoveringRule(rule string, baseline map[string]int) string {
+	// An unanchored, file-or-directory literal covers the root-only and
+	// directory-only forms. The reverse is not true (e.g. node_modules/ does
+	// not cover a file named /node_modules), so do not strip slashes generally.
+	name := strings.TrimSuffix(strings.TrimPrefix(rule, "/"), "/")
+	if name == "" || strings.ContainsAny(name, "/\\*?[]!") {
+		return ""
+	}
+	if _, ok := baseline[name]; ok {
+		return name
+	}
+	if strings.HasSuffix(rule, "/") {
+		if _, ok := baseline[name+"/"]; ok {
+			return name + "/"
+		}
+	}
+	return ""
+}
+
+func gitignoreReassertionNeeded(rule string, prior int, rules []string) bool {
+	for _, intervening := range rules[prior+1:] {
+		if strings.HasPrefix(rule, "!") == strings.HasPrefix(intervening, "!") {
+			continue
+		}
+		if gitignoreRulesMayOverlap(rule, intervening) {
+			return true
+		}
+	}
+	return false
+}
+
+func gitignoreRulesMayOverlap(a, b string) bool {
+	if strings.Contains(a+b, "//") || strings.ContainsAny(a+b, " \t\r") {
+		return true
+	}
+	a = strings.Trim(strings.TrimPrefix(a, "!"), "/")
+	b = strings.Trim(strings.TrimPrefix(b, "!"), "/")
+	// Escapes, recursive wildcards and path globs need Git's full wildmatch
+	// semantics. Preserve the rule rather than guessing that it is redundant.
+	if a == "" || b == "" || strings.ContainsAny(a+b, "\\[") || strings.Contains(a+b, "**") {
+		return true
+	}
+	for _, pair := range [][2]string{{a, b}, {b, a}} {
+		glob, literal := pair[0], pair[1]
+		if !strings.ContainsAny(glob, "*?") {
+			continue
+		}
+		if strings.Contains(glob, "/") || strings.ContainsAny(literal, "*?") {
+			return true
+		}
+		for _, segment := range strings.Split(literal, "/") {
+			matched, err := path.Match(glob, segment)
+			if err != nil || matched {
+				return true
+			}
+		}
+		return false
+	}
+	for _, left := range strings.Split(a, "/") {
+		for _, right := range strings.Split(b, "/") {
+			if left == right {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func forEachGitignoreLine(content []byte, visit func(line, ending []byte)) {
+	for len(content) > 0 {
+		lineEnd := bytes.IndexByte(content, '\n')
+		if lineEnd < 0 {
+			visit(content, nil)
+			return
+		}
+		line := content[:lineEnd]
+		ending := content[lineEnd : lineEnd+1]
+		if bytes.HasSuffix(line, []byte{'\r'}) {
+			line = line[:len(line)-1]
+			ending = content[lineEnd-1 : lineEnd+1]
+		}
+		visit(line, ending)
+		content = content[lineEnd+1:]
+	}
+}
+
+func gitignorePatternKey(line []byte) (string, bool) {
+	// Keep rule spelling intact: escaping, whitespace and negation can change
+	// matching semantics. Safe basename coverage is handled separately.
+	if len(line) == 0 || line[0] == '#' {
+		return "", false
+	}
+	return string(line), true
 }
 
 func findGitignoreManagedBlock(content []byte) (start, end int, ok bool) {
@@ -1802,10 +1950,6 @@ func trimTrailingLineEnding(content []byte) []byte {
 		return content[:len(content)-1]
 	}
 	return content
-}
-
-func startsWithLineEnding(content []byte) bool {
-	return bytes.HasPrefix(content, []byte("\r\n")) || bytes.HasPrefix(content, []byte("\n"))
 }
 
 // gitAddCloudopsworks is retained for the standalone compatibility command.
@@ -2167,6 +2311,9 @@ func (r *Runner) commitUpgradeEffects(ctx context.Context, state RepositoryState
 		if !changed {
 			return nil
 		}
+	}
+	if r.Opts.NoCommit {
+		return nil
 	}
 	version := state.Version
 	if targetVersion != "" {
