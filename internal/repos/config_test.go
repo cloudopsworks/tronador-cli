@@ -638,7 +638,7 @@ func TestCopyAutoAssignIfExistsPreservesExistingConfigurations(t *testing.T) {
 	}
 }
 
-func TestMergeGitignoreReplacesManagedBlockAndPreservesUserBytes(t *testing.T) {
+func TestMergeGitignoreReplacesManagedBlockAndMovesUserEntriesAfterIt(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -654,7 +654,7 @@ func TestMergeGitignoreReplacesManagedBlockAndPreservesUserBytes(t *testing.T) {
 	if err := runner.mergeGitignoreIfExists(context.Background()); err != nil {
 		t.Fatalf("mergeGitignoreIfExists() error = %v", err)
 	}
-	want := "before\r\n" + string(formatGitignoreManagedBlock([]byte("new\n"))) + "after\n"
+	want := string(formatGitignoreManagedBlock([]byte("new\n"))) + "before\r\nafter\n"
 	if got := mustRead(t, filepath.Join(dir, ".gitignore")); got != want {
 		t.Fatalf("merged .gitignore = %q, want %q", got, want)
 	}
@@ -681,7 +681,7 @@ func TestMergeGitignoreAcceptsMarkedTemplateAndIsIdempotent(t *testing.T) {
 	if err := runner.mergeGitignoreIfExists(context.Background()); err != nil {
 		t.Fatalf("first mergeGitignoreIfExists() error = %v", err)
 	}
-	want := "before\n" + string(formatGitignoreManagedBlock([]byte("new\n"))) + "after\n"
+	want := string(formatGitignoreManagedBlock([]byte("new\n"))) + "before\nafter\n"
 	if got := mustRead(t, filepath.Join(dir, ".gitignore")); got != want {
 		t.Fatalf("marked template merge = %q, want %q", got, want)
 	}
@@ -693,7 +693,7 @@ func TestMergeGitignoreAcceptsMarkedTemplateAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestMergeGitignoreAppendsManagedBlockToUnmarkedFile(t *testing.T) {
+func TestMergeGitignorePrependsManagedBlockToUnmarkedFile(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -710,8 +710,61 @@ func TestMergeGitignoreAppendsManagedBlockToUnmarkedFile(t *testing.T) {
 		t.Fatalf("mergeGitignoreIfExists() error = %v", err)
 	}
 
-	if got := mustRead(t, filepath.Join(dir, ".gitignore")); !strings.HasPrefix(got, "user custom content") || !strings.Contains(got, gitignoreManagedStartMarker) {
-		t.Fatalf("merged .gitignore did not preserve and append content: %q", got)
+	want := string(formatGitignoreManagedBlock([]byte("template defaults\n"))) + "user custom content\n"
+	if got := mustRead(t, filepath.Join(dir, ".gitignore")); got != want {
+		t.Fatalf("merged .gitignore = %q, want %q", got, want)
+	}
+}
+
+func TestMergeGitignoreDeduplicatesUserPatternsWithoutChangingDistinctRules(t *testing.T) {
+	template := []byte("# defaults\nnode_modules/\n*.log\n")
+	existing := []byte("# local\nnode_modules/\ncustom/\ncustom/\n*.log\n!local.log\n/node_modules\n")
+	want := string(formatGitignoreManagedBlock(template)) + "# local\ncustom/\n!local.log\n/node_modules\n"
+	merged := mergeGitignoreContent(existing, formatGitignoreManagedBlock(template))
+	if string(merged) != want {
+		t.Fatalf("merged .gitignore = %q, want %q", merged, want)
+	}
+	if repeated := mergeGitignoreContent(merged, formatGitignoreManagedBlock(template)); !bytes.Equal(repeated, merged) {
+		t.Fatalf("second merge changed .gitignore: %q", repeated)
+	}
+}
+
+func TestMergeGitignoreDeduplicatesLegacyContentAroundMultipleManagedBlocks(t *testing.T) {
+	baseline := formatGitignoreManagedBlock([]byte("node_modules/\n*.log\n"))
+	existing := []byte("node_modules/\nlocal-a/\n" + string(formatGitignoreManagedBlock([]byte("old-a\n"))) + "*.log\nlocal-b/\n" + string(formatGitignoreManagedBlock([]byte("old-b\n"))) + "local-a/\n")
+	want := string(baseline) + "local-a/\nlocal-b/\n"
+	if got := mergeGitignoreContent(existing, baseline); string(got) != want {
+		t.Fatalf("merged .gitignore = %q, want %q", got, want)
+	}
+}
+
+func TestMergeGitignoreKeepsRuleReassertedAfterRelevantNegation(t *testing.T) {
+	baseline := formatGitignoreManagedBlock([]byte("*.log\n"))
+	existing := []byte("!keep.log\n*.log\n")
+	want := string(baseline) + "!keep.log\n*.log\n"
+	if got := mergeGitignoreContent(existing, baseline); string(got) != want {
+		t.Fatalf("merged .gitignore = %q, want %q", got, want)
+	}
+	if got := mergeGitignoreContent([]byte(want), baseline); string(got) != want {
+		t.Fatalf("repeated merge changed .gitignore: %q", got)
+	}
+}
+
+func TestMergeGitignoreKeepsNegationReassertedAfterRelevantRule(t *testing.T) {
+	baseline := formatGitignoreManagedBlock([]byte("!keep.log\n"))
+	existing := []byte("*.log\n!keep.log\n")
+	want := string(baseline) + "*.log\n!keep.log\n"
+	if got := mergeGitignoreContent(existing, baseline); string(got) != want {
+		t.Fatalf("merged .gitignore = %q, want %q", got, want)
+	}
+}
+
+func TestMergeGitignoreRemovesSafeBaselineRedundanciesFromLegacyNextJSFile(t *testing.T) {
+	baseline := formatGitignoreManagedBlock([]byte("node_modules/\ncoverage\n.next\nbuild\n.DS_Store\n*.tsbuildinfo\n"))
+	existing := []byte("/node_modules\n/coverage\n/.next/\n/out/\n/build\n.DS_Store\n*.tsbuildinfo\n")
+	want := string(baseline) + "/node_modules\n/out/\n"
+	if got := mergeGitignoreContent(existing, baseline); string(got) != want {
+		t.Fatalf("merged .gitignore = %q, want %q", got, want)
 	}
 }
 
@@ -729,7 +782,7 @@ func TestMergeGitignorePreservesMalformedMarkers(t *testing.T) {
 	if err := runner.mergeGitignoreIfExists(context.Background()); err != nil {
 		t.Fatalf("mergeGitignoreIfExists() error = %v", err)
 	}
-	want := existing + string(formatGitignoreManagedBlock([]byte("template\n")))
+	want := string(formatGitignoreManagedBlock([]byte("template\n"))) + existing
 	if got := mustRead(t, filepath.Join(dir, ".gitignore")); got != want {
 		t.Fatalf("malformed .gitignore = %q, want %q", got, want)
 	}
@@ -758,7 +811,7 @@ func TestMergeGitignoreTreatsEmbeddedMarkersAsUserContent(t *testing.T) {
 	if err := runner.mergeGitignoreIfExists(context.Background()); err != nil {
 		t.Fatalf("mergeGitignoreIfExists() error = %v", err)
 	}
-	want := existing + string(formatGitignoreManagedBlock([]byte("template\n")))
+	want := string(formatGitignoreManagedBlock([]byte("template\n"))) + existing
 	if got := mustRead(t, filepath.Join(dir, ".gitignore")); got != want {
 		t.Fatalf("embedded marker content was not preserved: %q", got)
 	}
@@ -793,7 +846,7 @@ func TestMergeGitignoreNoOpLeavesFileUnstaged(t *testing.T) {
 	runGit(t, dir, "init")
 	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
 	runGit(t, dir, "config", "user.name", "tronador-cli test")
-	existing := "user\n" + string(formatGitignoreManagedBlock([]byte("template\n"))) + "tail\n"
+	existing := string(formatGitignoreManagedBlock([]byte("template\n"))) + "user\ntail\n"
 	mustWrite(t, filepath.Join(dir, ".gitignore"), existing)
 	runGit(t, dir, "add", ".gitignore")
 	runGit(t, dir, "commit", "-m", "initial")
@@ -1089,6 +1142,70 @@ func TestStackPreV510AndUnversionedRoutesCommitRecordedEffects(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStackNoCommitStagesUpgradeEffectsWithoutCreatingCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "tronador-cli-test@example.com")
+	runGit(t, dir, "config", "user.name", "tronador-cli test")
+	mustWrite(t, filepath.Join(dir, ".github", "workflows", "build.yml"), "old\n")
+	mustWrite(t, filepath.Join(dir, "Makefile"), "old\n")
+	mustWrite(t, filepath.Join(dir, "README.local"), "old\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	head := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD"))
+	mustWrite(t, filepath.Join(dir, "README.local"), "unrelated staged work\n")
+	runGit(t, dir, "add", "README.local")
+	mustWrite(t, filepath.Join(dir, ".template", ".github", "workflows", "build.yml"), "uses: cloudopsworks/blueprints/cd/checkout@v5.9\n")
+	mustWrite(t, filepath.Join(dir, ".template", "Makefile"), "new\n")
+
+	out, warnings := &bytes.Buffer{}, &bytes.Buffer{}
+	runner, err := NewRunner(Options{WorkDir: dir, NoCommit: true, Stdout: out, Stderr: warnings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := RepositoryState{WorkDir: dir, BlueprintPath: ".github", VersionFile: ".github/_VERSION", Version: "v5.8.0"}
+	tmpl := Template{Name: "go", Merge: true}
+	if err := runner.Stack(context.Background(), StackOptions{Template: tmpl, State: state, PullBranch: "test", TemplateHash: "target-hash"}); err != nil {
+		t.Fatalf("Stack() error = %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, dir, "rev-parse", "HEAD")); got != head {
+		t.Fatalf("--no-commit changed HEAD: got %s, want %s", got, head)
+	}
+	if got := runGit(t, dir, "diff", "--cached", "--name-only"); got != ".github/workflows/build.yml\nMakefile\nREADME.local\n" {
+		t.Fatalf("staged paths = %q", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, "Makefile")); got != "new\n" {
+		t.Fatalf("upgrade was not applied: %q", got)
+	}
+	if !strings.Contains(warnings.String(), "WARNING") || !strings.Contains(warnings.String(), "--no-commit") {
+		t.Fatalf("missing no-commit warning: %q", warnings.String())
+	}
+	if !strings.Contains(out.String(), "git diff --cached") || strings.Contains(out.String(), "Please review changes and push") {
+		t.Fatalf("no-commit guidance = %q", out.String())
+	}
+}
+
+func TestNoCommitDryRunDoesNotPrintCommitIntent(t *testing.T) {
+	out := &bytes.Buffer{}
+	runner, err := NewRunner(Options{WorkDir: t.TempDir(), DryRun: true, NoCommit: true, Stdout: out, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.effects = newUpgradeEffects()
+	if err := runner.effects.add("Makefile"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.commitUpgradeEffects(context.Background(), RepositoryState{Version: "v5.10.0"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "add -A") || strings.Contains(out.String(), "commit --only") {
+		t.Fatalf("dry-run no-commit output = %q", out.String())
 	}
 }
 

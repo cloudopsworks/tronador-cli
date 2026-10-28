@@ -54,6 +54,10 @@ func newReposRunner(cmd *cobra.Command) (*repos.Runner, error) {
 	if flag := cmd.Flag("dry-run"); flag != nil {
 		dryRun = flag.Value.String() == "true"
 	}
+	noCommit := false
+	if flag := cmd.Flag("no-commit"); flag != nil {
+		noCommit = flag.Value.String() == "true"
+	}
 	return repos.NewRunner(repos.Options{
 		WorkDir:    reposWorkDir,
 		ConfigPath: reposConfigPath,
@@ -61,6 +65,7 @@ func newReposRunner(cmd *cobra.Command) (*repos.Runner, error) {
 		GHPath:     reposGHPath,
 		PullBranch: reposPullBranch,
 		DryRun:     dryRun,
+		NoCommit:   noCommit,
 	})
 }
 
@@ -194,7 +199,7 @@ func addConfiguredTemplateCommands(parent *cobra.Command) {
 }
 
 func newReposUpgradeCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "upgrade [version]",
 		Short: "Run the full repository template upgrade workflow",
 		Long: `Run the full repository template upgrade workflow.
@@ -203,6 +208,9 @@ Without [version], the command mirrors the Tronador make repos/upgrade target:
 it detects the current template type, resolves the latest tag in the current
 major/minor line, fetches that template internally, applies the stack, updates
 CICD metadata when applicable, and commits the result.
+
+With --no-commit, the upgrade still applies and stages its changes, but leaves
+the commit to you. Review staged changes with git diff --cached before committing.
 
 Passing [version] is equivalent to the Makefile repos/upgrade/<version> target
 and runs the same full workflow against that explicit tag or branch. The special
@@ -220,6 +228,8 @@ version "major" resolves to the latest tag in the current major line, and
 			return runner.Upgrade(context.Background())
 		},
 	}
+	cmd.Flags().Bool("no-commit", false, "Apply and stage upgrade changes without creating a commit (for review)")
+	return cmd
 }
 
 func newReposRecoverCommand() *cobra.Command {

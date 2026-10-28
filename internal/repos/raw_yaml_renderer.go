@@ -322,8 +322,8 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 			} else if localValue.Kind == yaml.ScalarNode && safeCommentedScalarLine(targetLines[targetSpan.start], key.Value) {
 				// Documentation around a scalar default belongs to neighboring
 				// sections, but the exact no-gap commented key is still a provable
-				// template placeholder. Replace only that line.
-				candidateReplacements, ok = []rawReplacement{{start: targetSpan.start, end: targetSpan.start + 1, lines: reindentRawLines(localLines[localSpan.start:localSpan.start+1], renderedTargetIndent(childPath, targetSpans))}}, true
+				// template placeholder. A block scalar also owns its body lines.
+				candidateReplacements, ok = activateCommentedScalar(localValue, childPath, targetSpan, localSpan, targetLines, localLines, targetSpans)
 			} else if localValue.Kind != yaml.MappingNode && path == "" {
 				// A prose line may contain a colon and resemble a key. Do not
 				// consume it; append the active local scalar after the template.
@@ -706,10 +706,23 @@ func safeCommentedCandidate(lines []string, wantedKey string) bool {
 
 func safeCommentedScalarLine(line, wantedKey string) bool {
 	trimmed := strings.TrimLeft(line, " ")
-	// A space directly after '#' marks prose rather than the template's
-	// commented-out scalar convention.
-	if !strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "# ") {
+	// A space directly after '#' normally marks prose rather than the
+	// commented-out scalar convention. Legacy global inputs use one known
+	// padded placeholder: `# runner_set: "arc-runner-set"`. Do not infer
+	// arbitrary padded prose (even quoted prose) as schema.
+	if !strings.HasPrefix(trimmed, "#") {
 		return false
+	}
+	if strings.HasPrefix(trimmed, "# ") {
+		if wantedKey != "runner_set" {
+			return false
+		}
+		var doc yaml.Node
+		if err := yaml.Unmarshal([]byte(uncommentStructuralLine(line)+"\n"), &doc); err != nil {
+			return false
+		}
+		root := documentRoot(&doc)
+		return root != nil && root.Kind == yaml.MappingNode && len(root.Content) == 2 && root.Content[0].Value == wantedKey && root.Content[1].Kind == yaml.ScalarNode && root.Content[1].Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0
 	}
 	return safeCommentedCandidate([]string{line}, wantedKey)
 }
@@ -761,7 +774,7 @@ func activateCommentedValue(target, local *yaml.Node, path string, targetLines, 
 		return replacements, true
 	}
 	if local.Kind == yaml.ScalarNode {
-		return []rawReplacement{{start: targetSpan.start, end: targetSpan.start + 1, lines: reindentRawLines(localLines[localSpan.start:localSpan.start+1], renderedTargetIndent(path, targetSpans))}}, true
+		return activateCommentedScalar(local, path, targetSpan, localSpan, targetLines, localLines, targetSpans)
 	}
 	// Sequences are intentionally atomic. Limit the replaced target span to
 	// contiguous structural commented sequence lines so following prose remains
@@ -775,6 +788,127 @@ func activateCommentedValue(target, local *yaml.Node, path string, targetLines, 
 	}
 	lines = preserveTargetKeyComment(targetSequence, preserveSequenceComments(targetSequence, lines))
 	return []rawReplacement{{start: targetSpan.start, end: sequenceEnd, lines: lines}}, true
+}
+
+// activateCommentedScalar replaces a documented scalar at its template slot.
+// Literal and folded scalars are one value even though their body spans lines;
+// copying only the header would lose data and force a whole-file marshal.
+func activateCommentedScalar(local *yaml.Node, path string, targetSpan, localSpan rawYAMLSpan, targetLines, localLines []string, targetSpans map[string]rawYAMLSpan) ([]rawReplacement, bool) {
+	if localSpan.start < 0 || localSpan.start >= len(localLines) {
+		return nil, false
+	}
+	end := localSpan.start + 1
+	if local.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		headerIndent := leadingRawSpaces(localLines[localSpan.start])
+		for end < len(localLines) {
+			line := localLines[end]
+			if strings.TrimSpace(line) != "" && leadingRawSpaces(line) <= headerIndent {
+				break
+			}
+			end++
+		}
+	}
+	source := localLines[localSpan.start:end]
+	if !scalarSourceMatches(source, local) {
+		return nil, false
+	}
+	lines := reindentBlockScalarLines(source, renderedTargetIndent(path, targetSpans))
+	if len(lines) > 1 && local.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 && !blockScalarHasExplicitIndent(source[0]) {
+		bodyIndent := -1
+		for _, line := range lines[1:] {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			indent := leadingRawSpaces(line)
+			if bodyIndent < 0 || indent < bodyIndent {
+				bodyIndent = indent
+			}
+		}
+		if bodyIndent >= 0 {
+			delta := renderedTargetIndent(path, targetSpans) + yamlParentIndentWidth(path, targetSpans) - bodyIndent
+			for index := 1; index < len(lines); index++ {
+				if strings.TrimSpace(lines[index]) == "" {
+					continue
+				}
+				indent := leadingRawSpaces(lines[index]) + delta
+				if indent < 0 {
+					return nil, false
+				}
+				lines[index] = strings.Repeat(" ", indent) + strings.TrimLeft(lines[index], " ")
+			}
+		}
+	}
+	if !scalarSourceMatches(lines, local) {
+		return nil, false
+	}
+	// A physically indented commented example would become scalar content after
+	// activating the header. Keep it as a comment at the header's indentation.
+	targetEnd := targetSpan.start + 1
+	if local.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
+		headerIndent := leadingRawSpaces(targetLines[targetSpan.start])
+		for targetEnd < len(targetLines) {
+			line := targetLines[targetEnd]
+			if strings.TrimSpace(line) == "" {
+				// A blank separator can precede another indented example.
+				// Consume it only when that example is provably next.
+				next := targetEnd + 1
+				for next < len(targetLines) && strings.TrimSpace(targetLines[next]) == "" {
+					next++
+				}
+				if next < len(targetLines) && leadingRawSpaces(targetLines[next]) > headerIndent && strings.HasPrefix(strings.TrimSpace(targetLines[next]), "#") {
+					targetEnd = next
+					continue
+				}
+				break
+			}
+			if leadingRawSpaces(line) <= headerIndent || !strings.HasPrefix(strings.TrimSpace(line), "#") {
+				break
+			}
+			lines = append(lines, strings.Repeat(" ", renderedTargetIndent(path, targetSpans))+strings.TrimLeft(line, " "))
+			targetEnd++
+		}
+	}
+	return []rawReplacement{{start: targetSpan.start, end: targetEnd, lines: lines}}, true
+}
+
+func scalarSourceMatches(lines []string, wanted *yaml.Node) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.Join(reindentBlockScalarLines(lines, 0), "\n")+"\n"), &doc); err != nil {
+		return false
+	}
+	root := documentRoot(&doc)
+	return root != nil && root.Kind == yaml.MappingNode && len(root.Content) == 2 && root.Content[1].Kind == wanted.Kind && root.Content[1].Tag == wanted.Tag && root.Content[1].Value == wanted.Value
+}
+
+// Block-scalar content is data, including lines that begin with '#'. Do not
+// pass it through the structural-comment indentation logic.
+func reindentBlockScalarLines(lines []string, targetIndent int) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	sourceIndent := leadingRawSpaces(lines[0])
+	out := make([]string, len(lines))
+	for index, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			out[index] = line
+			continue
+		}
+		indent := targetIndent + leadingRawSpaces(line) - sourceIndent
+		if indent < 0 {
+			return nil
+		}
+		out[index] = strings.Repeat(" ", indent) + strings.TrimLeft(line, " ")
+	}
+	return out
+}
+
+func blockScalarHasExplicitIndent(header string) bool {
+	value, _ := splitRawInlineComment(header)
+	colon := strings.IndexByte(value, ':')
+	if colon < 0 {
+		return false
+	}
+	return strings.ContainsAny(strings.TrimSpace(value[colon+1:]), "123456789")
 }
 
 func commentedFlowCollectionHeader(line, wantedKey string) bool {

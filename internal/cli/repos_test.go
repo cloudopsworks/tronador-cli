@@ -81,6 +81,23 @@ func TestReposUpgradeCommandIsSingleFullWorkflowSurface(t *testing.T) {
 	}
 }
 
+func TestReposUpgradeNoCommitFlagReachesRunner(t *testing.T) {
+	cmd := newReposUpgradeCommand()
+	if flag := cmd.Flags().Lookup("no-commit"); flag == nil {
+		t.Fatal("upgrade command is missing --no-commit")
+	}
+	if err := cmd.Flags().Set("no-commit", "true"); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := newReposRunner(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runner.Opts.NoCommit {
+		t.Fatal("--no-commit was not passed to the runner")
+	}
+}
+
 func hasString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

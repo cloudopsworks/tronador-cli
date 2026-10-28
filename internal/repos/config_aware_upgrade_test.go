@@ -878,6 +878,172 @@ func TestUpgradeCloudOpsworksConfigRendersPadOneCommentedMappingWithNormalIndent
 	}
 }
 
+func TestUpgradeCloudOpsworksConfigActivatesCommentedBlockScalarsInPlace(t *testing.T) {
+	dir, runner, out := configUpgradeRunner(t, false)
+	writeConfigFixture(t, dir, ".cloudopsworks/vars/inputs-global.yaml", "cloud: aws\ncloud_type: kubernetes\ndocker_inline: |\n  COPY ./nginx/site.conf /etc/nginx/conf.d/default.conf\n  COPY ./nginx/redirects.inc /etc/nginx/redirects.inc\n")
+	writeConfigFixture(t, dir, ".template/.cloudopsworks/vars/inputs-global.yaml", "# Dockerfile content\n#docker_inline: |\n#  # Example content\ncloud: aws\ncloud_type: kubernetes\n")
+	writeConfigFixture(t, dir, ".cloudopsworks/vars/inputs-dev.yaml", "environment: dev\nrunner_set: custom-runners\nnode_extra_env: |\n  CONFIG_PATH=./config/dev\n")
+	writeConfigFixture(t, dir, ".template/.cloudopsworks/vars/inputs-KUBERNETES-ENV.yaml", "environment: dev\n#runner_set: RUNNER-ENV\n#node_extra_env: |\n#  ENV_VAR=value\n")
+
+	if err := runner.upgradeCloudOpsworksConfig(RepositoryState{WorkDir: dir, BlueprintPath: ".cloudopsworks"}); err != nil {
+		t.Fatalf("upgradeCloudOpsworksConfig() error = %v", err)
+	}
+	if strings.Contains(out.String(), "renderer-fallback") {
+		t.Fatalf("commented block scalar triggered renderer fallback: %s", out.String())
+	}
+	global := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-global.yaml"))
+	assertContainsAll(t, global, "docker_inline: |\n  COPY ./nginx/site.conf /etc/nginx/conf.d/default.conf\n  COPY ./nginx/redirects.inc /etc/nginx/redirects.inc")
+	if strings.Contains(global, "#docker_inline:") {
+		t.Fatalf("active global input retained commented placeholder:\n%s", global)
+	}
+	env := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-dev.yaml"))
+	assertContainsAll(t, env, "runner_set: custom-runners", "node_extra_env: |\n  CONFIG_PATH=./config/dev")
+	if strings.Contains(env, "#runner_set:") || strings.Contains(env, "#node_extra_env:") || strings.Count(env, "runner_set:") != 1 {
+		t.Fatalf("active environment inputs retained commented placeholders:\n%s", env)
+	}
+	if err := runner.upgradeCloudOpsworksConfig(RepositoryState{WorkDir: dir, BlueprintPath: ".cloudopsworks"}); err != nil {
+		t.Fatalf("second upgradeCloudOpsworksConfig() error = %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-global.yaml")); got != global {
+		t.Fatalf("second upgrade changed global input bytes:\n%s", got)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-dev.yaml")); got != env {
+		t.Fatalf("second upgrade changed environment input bytes:\n%s", got)
+	}
+}
+
+func TestRenderYAMLTargetBaselineCommentedBlockScalarVariants(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		marker string
+		body   string
+	}{
+		{name: "literal with comment-looking content", marker: "|", body: "    # note: this is data\n    COPY a b\n"},
+		{name: "folded", marker: ">-", body: "    first line\n    second line\n"},
+		{name: "keep chomping", marker: "|+", body: "    first line\n\n"},
+		{name: "explicit indentation", marker: "|2", body: "  first line\n"},
+		{name: "physically indented template example", marker: "|", body: "  runtime value\n"},
+		{name: "indented template example after blank", marker: "|", body: "  runtime value\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			example := "#  example: value"
+			if test.name == "physically indented template example" {
+				example = "  # example: value"
+			}
+			if test.name == "indented template example after blank" {
+				example = "\n  # example: value"
+			}
+			target := "#script: " + test.marker + "\n" + example + "\nnext: template\n"
+			local := "script: " + test.marker + "\n" + test.body + "next: local\n"
+			var targetNode, localNode yaml.Node
+			if err := yaml.Unmarshal([]byte(target), &targetNode); err != nil {
+				t.Fatal(err)
+			}
+			if err := yaml.Unmarshal([]byte(local), &localNode); err != nil {
+				t.Fatal(err)
+			}
+			rendered, ok := renderYAMLTargetBaseline([]byte(target), []byte(local), &targetNode, &localNode)
+			if !ok {
+				t.Fatal("commented block scalar triggered fallback")
+			}
+			if strings.Contains(string(rendered), "#script:") || !strings.Contains(string(rendered), "script: "+test.marker) {
+				t.Fatalf("block scalar not activated at template position:\n%s", rendered)
+			}
+			if test.name == "literal with comment-looking content" && !strings.Contains(string(rendered), "script: |\n  # note: this is data\n  COPY a b\n") {
+				t.Fatalf("implicit block indentation did not follow the template:\n%s", rendered)
+			}
+			if !renderedYAMLSemanticallyMatches(rendered, &targetNode, &localNode) {
+				t.Fatalf("block scalar value changed:\n%s", rendered)
+			}
+		})
+	}
+}
+
+func TestRenderYAMLTargetBaselineRepairsPreviouslyMarshaledInputs(t *testing.T) {
+	target := "environment: dev\n#runner_set: RUNNER-ENV\n#node_extra_env: |\n#  ENV_VAR=value\n"
+	local := "environment: dev\n#runner_set: RUNNER-ENV\n#node_extra_env: |\n#  ENV_VAR=value\nrunner_set: custom-runners\nnode_extra_env: |\n    CONFIG_PATH=./config/dev\n"
+	var targetNode, localNode yaml.Node
+	if err := yaml.Unmarshal([]byte(target), &targetNode); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(local), &localNode); err != nil {
+		t.Fatal(err)
+	}
+	rendered, ok := renderYAMLTargetBaseline([]byte(target), []byte(local), &targetNode, &localNode)
+	if !ok {
+		t.Fatal("previously marshaled input triggered fallback")
+	}
+	if !strings.Contains(string(rendered), "environment: dev\nrunner_set: custom-runners\nnode_extra_env: |\n  CONFIG_PATH=./config/dev\n") || strings.Contains(string(rendered), "#runner_set:") || strings.Contains(string(rendered), "#node_extra_env:") {
+		t.Fatalf("previously marshaled input was not repaired in place:\n%s", rendered)
+	}
+	if !renderedYAMLSemanticallyMatches(rendered, &targetNode, &localNode) {
+		t.Fatalf("repair changed YAML values:\n%s", rendered)
+	}
+}
+
+func TestRenderYAMLTargetBaselineActivatesLegacyPaddedRunnerPlaceholder(t *testing.T) {
+	target := "cloud: aws\n# Indicate the runner used for deployment\n# runner_set: \"arc-runner-set\"\n"
+	local := "cloud: aws\nrunner_set: custom-runners\n"
+	var targetNode, localNode yaml.Node
+	if err := yaml.Unmarshal([]byte(target), &targetNode); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(local), &localNode); err != nil {
+		t.Fatal(err)
+	}
+	rendered, ok := renderYAMLTargetBaseline([]byte(target), []byte(local), &targetNode, &localNode)
+	if !ok {
+		t.Fatal("padded runner placeholder triggered fallback")
+	}
+	if strings.Contains(string(rendered), "# runner_set:") || strings.Count(string(rendered), "runner_set:") != 1 || !strings.Contains(string(rendered), "# Indicate the runner used for deployment\nrunner_set: custom-runners") {
+		t.Fatalf("runner_set was not activated at its documented template position:\n%s", rendered)
+	}
+}
+
+func TestRenderYAMLTargetBaselineDoesNotActivateQuotedProse(t *testing.T) {
+	target := "# endpoint: \"example documentation\"\nregion: us-east-1\n"
+	local := "endpoint: https://runtime.example\nregion: us-east-1\n"
+	var targetNode, localNode yaml.Node
+	if err := yaml.Unmarshal([]byte(target), &targetNode); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(local), &localNode); err != nil {
+		t.Fatal(err)
+	}
+	rendered, ok := renderYAMLTargetBaseline([]byte(target), []byte(local), &targetNode, &localNode)
+	if !ok {
+		t.Fatal("quoted prose triggered fallback")
+	}
+	if !strings.Contains(string(rendered), "# endpoint: \"example documentation\"") || !strings.Contains(string(rendered), "endpoint: https://runtime.example") {
+		t.Fatalf("quoted prose was consumed as schema:\n%s", rendered)
+	}
+}
+
+func TestUpgradeCloudOpsworksConfigMixedLegacyGlobalPlaceholders(t *testing.T) {
+	dir, runner, out := configUpgradeRunner(t, false)
+	writeConfigFixture(t, dir, ".cloudopsworks/vars/inputs-global.yaml", "cloud: aws\nrunner_set: custom-runners\ndocker_inline: \"COPY a b\"\nnode_extra_env: |\n    CONFIG_PATH=./config/dev\n")
+	writeConfigFixture(t, dir, ".template/.cloudopsworks/vars/inputs-global.yaml", "cloud: aws\n# Deployment runner\n# runner_set: \"arc-runner-set\"\n# Dockerfile content\n#docker_inline: |\n#  # Example content\n#node_extra_env: |\n#  ENV_VAR=value\n")
+	if err := runner.upgradeCloudOpsworksConfig(RepositoryState{WorkDir: dir, BlueprintPath: ".cloudopsworks"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "renderer-fallback") {
+		t.Fatalf("mixed legacy placeholders triggered fallback: %s", out.String())
+	}
+	content := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-global.yaml"))
+	for _, key := range []string{"runner_set", "docker_inline", "node_extra_env"} {
+		if strings.Count(content, key+":") != 1 {
+			t.Fatalf("%s was not activated exactly once:\n%s", key, content)
+		}
+	}
+	assertContainsAll(t, content, "# Deployment runner\nrunner_set: custom-runners", "docker_inline: \"COPY a b\"", "node_extra_env: |\n  CONFIG_PATH=./config/dev")
+	if err := runner.upgradeCloudOpsworksConfig(RepositoryState{WorkDir: dir, BlueprintPath: ".cloudopsworks"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRead(t, filepath.Join(dir, ".cloudopsworks/vars/inputs-global.yaml")); got != content {
+		t.Fatalf("second upgrade changed mixed global input bytes:\n%s", got)
+	}
+}
+
 func configUpgradeRunner(t *testing.T, dryRun bool) (string, *Runner, *bytes.Buffer) {
 	t.Helper()
 	dir := t.TempDir()
