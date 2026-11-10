@@ -44,6 +44,13 @@ tronador version
 Release builds populate the version from GoReleaser/linker metadata. Development
 builds may print the development default.
 
+Release binaries silently check the latest stable GitHub release before command
+output (including help and usage errors). If a newer version is available, a
+one-line notice is written to stderr; stdout remains unchanged for scripts. The
+check has a 300 ms total timeout, makes no retries, and never changes the command's
+exit status. Network failures, rate limits, invalid responses, and up-to-date
+installs produce no notice. Development/unknown-version builds skip the check.
+
 ## `completion`
 
 Generates shell completion scripts for supported shells. Use Cobra help for the
