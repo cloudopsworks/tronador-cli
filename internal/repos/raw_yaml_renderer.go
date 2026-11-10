@@ -235,14 +235,45 @@ func rawYAMLKey(line string) (indent int, key string, commented bool, ok bool) {
 		rest = rest[extraIndent:]
 	}
 	colon := strings.IndexByte(rest, ':')
+	quotedKey := len(rest) > 0 && (rest[0] == '\'' || rest[0] == '"')
+	if quotedKey {
+		// Quoted YAML keys can contain spaces, colons and escaped quotes. Find
+		// their actual delimiter instead of treating the first colon as one.
+		colon = -1
+		for end := 1; end < len(rest); end++ {
+			if rest[0] == '"' && rest[end] == '\\' {
+				end++
+				continue
+			}
+			if rest[end] != rest[0] {
+				continue
+			}
+			if rest[0] == '\'' && end+1 < len(rest) && rest[end+1] == '\'' {
+				end++
+				continue
+			}
+			after := end + 1
+			for after < len(rest) && rest[after] == ' ' {
+				after++
+			}
+			if after < len(rest) && rest[after] == ':' {
+				colon = after
+			}
+			break
+		}
+	}
 	if colon <= 0 || strings.HasPrefix(rest, "-") {
 		return 0, "", false, false
 	}
 	key = strings.TrimSpace(rest[:colon])
-	if len(key) >= 2 && ((key[0] == '\'' && key[len(key)-1] == '\'') || (key[0] == '"' && key[len(key)-1] == '"')) {
-		key = key[1 : len(key)-1]
+	if quotedKey {
+		var decoded string
+		if yaml.Unmarshal([]byte(key), &decoded) != nil {
+			return 0, "", false, false
+		}
+		key = decoded
 	}
-	if key == "" || strings.ContainsAny(key, " \t") {
+	if key == "" || !quotedKey && strings.ContainsAny(key, " \t") {
 		return 0, "", false, false
 	}
 	return indent, key, commented, true
@@ -317,7 +348,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 			// placeholder even when explanatory prose follows it. Activate only
 			// its structural lines at that exact position; the prose remains in
 			// place rather than forcing an EOF append.
-			if (localValue.Kind == yaml.SequenceNode && safeCommentedCandidate([]string{targetLines[targetSpan.start]}, key.Value)) || (safeCommentedCandidate(targetLines[targetSpan.start:targetSpan.end], key.Value) && !hasFollowingCommentProse(targetLines, targetSpan.end)) {
+			if commentedFlowCollectionHeader(targetLines[targetSpan.start], key.Value) || (localValue.Kind == yaml.SequenceNode && safeCommentedCandidate([]string{targetLines[targetSpan.start]}, key.Value)) || (safeCommentedCandidate(targetLines[targetSpan.start:targetSpan.end], key.Value) && !hasFollowingCommentProse(targetLines, targetSpan.end)) {
 				candidateReplacements, ok = activateCommentedValue(target, localValue, childPath, targetLines, localLines, targetSpans, localSpans)
 			} else if localValue.Kind == yaml.ScalarNode && safeCommentedScalarLine(targetLines[targetSpan.start], key.Value) {
 				// Documentation around a scalar default belongs to neighboring

@@ -127,8 +127,8 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 		if localName == "gitversion.yaml" && template.GitVersionAuthoritative {
 			// These reusable Terraform templates define the repository's versioning
 			// policy. Unlike app-template values, consumer overrides must not survive
-			// an upgrade: use the target file's exact content without merging values.
-			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, mode: target.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
+			// an upgrade: use the target policy without merging consumer values.
+			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, baseline: target.data, mode: target.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
 			usedTargets[targetName] = true
 			continue
 		}
@@ -136,7 +136,7 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 			if hasYAMLComment(local.data) {
 				warnConfig(r, localName, "comment-only")
 			}
-			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
+			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, baseline: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
 			usedTargets[targetName] = true
 			continue
 		}
@@ -157,7 +157,7 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 				return cloudOpsworksConfigPlan{}, fmt.Errorf("validate merged YAML %s", localName)
 			}
 		}
-		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: content, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
+		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: content, baseline: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
 		usedTargets[targetName] = true
 	}
 
@@ -174,7 +174,21 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 			continue
 		}
 		target := templates[targetName]
-		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(targetName)), content: target.data, mode: target.mode, name: targetName})
+		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(targetName)), content: target.data, baseline: target.data, mode: target.mode, name: targetName})
+	}
+	// All renderers and template-copy paths share the same hard two-space
+	// output contract, including the semantic fallback (yaml.Marshal defaults
+	// to four spaces). Normalize before validating or writing any destination.
+	for index := range plan {
+		deduplicated, err := deduplicateYAMLTemplateEntries(plan[index].baseline, plan[index].content)
+		if err != nil {
+			return cloudOpsworksConfigPlan{}, fmt.Errorf("reconcile YAML duplicates %s: %w", plan[index].name, err)
+		}
+		content, err := sanitizeYAMLIndentation(deduplicated)
+		if err != nil {
+			return cloudOpsworksConfigPlan{}, fmt.Errorf("normalize YAML indentation %s: %w", plan[index].name, err)
+		}
+		plan[index].content = content
 	}
 	sort.Slice(plan, func(i, j int) bool { return plan[i].path < plan[j].path })
 	if err := validateYAMLWriteDestinations(state.WorkDir, plan); err != nil {
@@ -217,6 +231,7 @@ type yamlDocument struct {
 type yamlWrite struct {
 	path         string
 	content      []byte
+	baseline     []byte
 	mode         os.FileMode
 	name         string
 	removeSource string
