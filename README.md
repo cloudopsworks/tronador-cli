@@ -277,7 +277,7 @@ For installed binaries:
 
 For source builds:
 
-- Go 1.26.5 or later, matching the module toolchain target.
+- Go 1.26.7 or later, matching the module toolchain target.
 - `make` or `gmake` if you use the repository Makefile targets.
 
 ### Installation
