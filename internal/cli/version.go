@@ -28,12 +28,21 @@ func currentVersion() string {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version number of tronador-cli",
-	Long:  `All software has versions. This is tronador-cli's version.`,
+	Long: `All software has versions. This is tronador-cli's version.
+
+In an interactive terminal the version is shown with the Tronador banner.
+When output is piped or redirected, or with --short, only the version string
+is printed so scripts can parse it. Set NO_COLOR to disable colors.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(currentVersion())
+		short, _ := cmd.Flags().GetBool("short")
+		if !short && printBanner(cmd.OutOrStdout()) {
+			return
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), currentVersion())
 	},
 }
 
 func init() {
+	versionCmd.Flags().Bool("short", false, "Print only the version string, without the banner")
 	rootCmd.AddCommand(versionCmd)
 }

@@ -196,7 +196,8 @@ See [docs/readme-docs-command.md](docs/readme-docs-command.md) for full flags, d
 
 ### Version and Completion
 
-- `tronador version` — print the release binary version.
+- `tronador version` — print the release binary version. In an interactive terminal it shows the Tronador banner (CloudOps Works logo, rainbow title, version, commit, and platform); piped or redirected output, and `tronador version --short`, print only the version string. Set `NO_COLOR` to disable colors.
+- `tronador` / `tronador --help` — top-level help opens with the same banner in an interactive terminal.
 - `tronador completion <shell>` — generate Cobra shell completion scripts.
 
 ### Make Command Support
@@ -434,6 +435,7 @@ tronador docs copyright-add --workdir ../my-service --software-description "My s
 
 ```bash
 tronador version
+tronador version --short
 tronador iac module --help
 tronador aws remediation --help
 ```
