@@ -7,5 +7,6 @@ import (
 
 func main() {
 	cli.SetVersion(buildVersion())
+	cli.SetCommit(buildCommit())
 	cli.Execute()
 }
