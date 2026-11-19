@@ -20,20 +20,36 @@ type Config struct {
 
 // ToolConfig contains tool-specific data. Generic install behavior stays in Go.
 type ToolConfig struct {
-	Name              string                `json:"name"`
-	Executable        string                `json:"executable,omitempty"`
-	DefaultVersion    string                `json:"default_version,omitempty"`
-	VersionEnvVars    []string              `json:"version_env_vars,omitempty"`
-	URLTemplate       string                `json:"url_template,omitempty"`
-	Format            string                `json:"format,omitempty"`
-	BinaryName        string                `json:"binary_name,omitempty"`
-	ArchiveBinaryPath string                `json:"archive_binary_path,omitempty"`
-	ChecksumSHA256    string                `json:"checksum_sha256,omitempty"`
+	Name              string   `json:"name"`
+	Executable        string   `json:"executable,omitempty"`
+	DefaultVersion    string   `json:"default_version,omitempty"`
+	VersionEnvVars    []string `json:"version_env_vars,omitempty"`
+	URLTemplate       string   `json:"url_template,omitempty"`
+	Format            string   `json:"format,omitempty"`
+	BinaryName        string   `json:"binary_name,omitempty"`
+	ArchiveBinaryPath string   `json:"archive_binary_path,omitempty"`
+	ChecksumSHA256    string   `json:"checksum_sha256,omitempty"`
+	VersionArgs       []string `json:"version_args,omitempty"`
+	VersionRegex      string   `json:"version_regex,omitempty"`
+
+	// projectOverridden marks definitions changed by a project-scoped (repo
+	// content) tools.json. Such definitions keep legacy local-first behavior:
+	// repository content must not be able to reject a working local tool and
+	// force a download over the shared cache.
+	projectOverridden bool
 	PlatformOverrides map[string]ToolConfig `json:"platform_overrides,omitempty"`
 }
 
 // LoadConfig returns the effective embedded-plus-runtime override config.
 func LoadConfig(workDir, explicitPath string) (Config, error) {
+	return loadConfig(workDir, explicitPath, true)
+}
+
+// loadConfig merges overrides onto the embedded catalog. Project-scoped files
+// (inside workDir) are repository content and therefore untrusted: they may
+// never set version probe fields, and they are skipped entirely when
+// includeProject is false.
+func loadConfig(workDir, explicitPath string, includeProject bool) (Config, error) {
 	data, err := defaultConfigFS.ReadFile(defaultToolsConfigPath)
 	if err != nil {
 		return Config{}, fmt.Errorf("load embedded tool config: %w", err)
@@ -42,17 +58,75 @@ func LoadConfig(workDir, explicitPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	project := map[string]bool{}
+	user := map[string]bool{}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		for _, path := range normalizeConfigPaths([]string{filepath.Join(home, ".cloudopsworks", "tronador", "tools.json")}) {
+			user[path] = true
+		}
+	}
+	for _, path := range normalizeConfigPaths(projectConfigPaths(workDir)) {
+		// With --workdir $HOME the project path equals the user config; the
+		// user's own file stays trusted.
+		if !user[path] {
+			project[path] = true
+		}
+	}
 	for _, path := range configOverridePaths(workDir, explicitPath) {
 		if path == "" || !Exists(path) {
+			continue
+		}
+		if project[path] && !includeProject {
 			continue
 		}
 		override, err := loadConfigFile(path)
 		if err != nil {
 			return Config{}, err
 		}
+		if project[path] {
+			override = markProjectOverride(stripProbeFields(override))
+		}
 		config = mergeConfig(config, override)
 	}
 	return config, nil
+}
+
+// stripProbeFields removes fields that make Tronador execute local binaries
+// with config-chosen arguments; only trusted config sources may set them.
+func stripProbeFields(config Config) Config {
+	for i := range config.Tools {
+		config.Tools[i] = stripToolProbeFields(config.Tools[i])
+	}
+	return config
+}
+
+func markProjectOverride(config Config) Config {
+	for i := range config.Tools {
+		config.Tools[i].projectOverridden = true
+	}
+	return config
+}
+
+func stripToolProbeFields(tool ToolConfig) ToolConfig {
+	tool.VersionArgs, tool.VersionRegex = nil, ""
+	for key, override := range tool.PlatformOverrides {
+		tool.PlatformOverrides[key] = stripToolProbeFields(override)
+	}
+	return tool
+}
+
+func projectConfigPaths(workDir string) []string {
+	if workDir == "" {
+		workDir = "."
+	}
+	abs, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(abs, ".cloudopsworks", "tronador", "tools.json"),
+		filepath.Join(abs, ".tronador", "tools.json"),
+	}
 }
 
 // Tool returns a platform-effective tool definition from the config.
@@ -82,15 +156,7 @@ func configOverridePaths(workDir, explicitPath string) []string {
 	if configDir, err := os.UserHomeDir(); err == nil && configDir != "" {
 		paths = append(paths, filepath.Join(configDir, ".cloudopsworks", "tronador", "tools.json"))
 	}
-	if workDir == "" {
-		workDir = "."
-	}
-	if abs, err := filepath.Abs(workDir); err == nil {
-		paths = append(paths,
-			filepath.Join(abs, ".cloudopsworks", "tronador", "tools.json"),
-			filepath.Join(abs, ".tronador", "tools.json"),
-		)
-	}
+	paths = append(paths, projectConfigPaths(workDir)...)
 	if env := firstSetEnv("TRONADOR_TOOLS_CONFIG", "TRONADOR_TOOLS_CONFIG_PATH"); env != "" {
 		paths = append(paths, env)
 	}
@@ -168,6 +234,7 @@ func mergeConfig(base, override Config) Config {
 
 func mergeToolConfig(base, override ToolConfig) ToolConfig {
 	out := base
+	out.projectOverridden = base.projectOverridden || override.projectOverridden
 	if override.Name != "" {
 		out.Name = override.Name
 	}
@@ -194,6 +261,12 @@ func mergeToolConfig(base, override ToolConfig) ToolConfig {
 	}
 	if override.ChecksumSHA256 != "" {
 		out.ChecksumSHA256 = override.ChecksumSHA256
+	}
+	if len(override.VersionArgs) > 0 {
+		out.VersionArgs = append([]string(nil), override.VersionArgs...)
+	}
+	if override.VersionRegex != "" {
+		out.VersionRegex = override.VersionRegex
 	}
 	if len(override.PlatformOverrides) > 0 {
 		if out.PlatformOverrides == nil {
@@ -228,6 +301,11 @@ func (t ToolConfig) toTool(configuredPath, version string) Tool {
 		Executable:     t.executable(),
 		ConfiguredPath: configuredPath,
 		Version:        version,
+		VersionArgs:    append([]string(nil), t.VersionArgs...),
+		VersionRegex:   t.VersionRegex,
+		// A project-touched definition is not trusted to drive version-based
+		// rejection of local executables.
+		SkipVersionCheck: t.projectOverridden,
 		Download: DownloadSpec{
 			URLTemplate:       t.URLTemplate,
 			Format:            t.Format,

@@ -46,7 +46,8 @@ func repoRoot() string {
 func TestVersionsTagInGitHubActions(t *testing.T) {
 	repo := newRepo(t, false)
 	gitVersion := filepath.Join(t.TempDir(), "gitversion")
-	write(t, gitVersion, "#!/bin/sh\necho v0.2.0\n")
+	// Answer the provisioner's major-version probe like a supported GitVersion 6.x.
+	write(t, gitVersion, "#!/bin/sh\nif [ \"$1\" = /version ]; then echo 6.7.0; exit 0; fi\necho v0.2.0\n")
 	if err := os.Chmod(gitVersion, 0o755); err != nil {
 		t.Fatal(err)
 	}

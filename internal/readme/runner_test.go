@@ -221,6 +221,7 @@ func TestBuildUsesProvisionedGomplateFromToolsDir(t *testing.T) {
 	dir := t.TempDir()
 	toolsDir := t.TempDir()
 	writeExecutable(t, toolsDir, "gomplate", `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "gomplate version 5.1.0"; exit 0; fi
 out=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--out" ]; then

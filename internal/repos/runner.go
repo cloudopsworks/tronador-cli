@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	toolspkg "tronador-cli/internal/tools"
 )
 
 // Options controls repository command execution.
@@ -41,6 +43,7 @@ type Runner struct {
 	effects          *upgradeEffects
 	suppressStaging  bool
 	templateCheckout string
+	ghResolved       string
 }
 
 type upgradeEffects struct {
@@ -2743,7 +2746,11 @@ func (r *Runner) fetchTags(ctx context.Context, repository string) ([]string, er
 }
 
 func (r *Runner) fetchTagsFromShell(ctx context.Context, repository string) ([]string, error) {
-	out, err := r.output(ctx, r.ghPath(), "api", fmt.Sprintf("repos/%s/tags", repository), "--jq", ".[].name")
+	gh, err := r.ghPath(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.output(ctx, gh, "api", fmt.Sprintf("repos/%s/tags", repository), "--jq", ".[].name")
 	if err != nil {
 		return nil, err
 	}
@@ -3039,17 +3046,26 @@ func (r *Runner) gitPath() string {
 	return "git"
 }
 
-func (r *Runner) ghPath() string {
+func (r *Runner) ghPath(ctx context.Context) (string, error) {
 	if r.Opts.GHPath != "" {
-		return r.Opts.GHPath
+		return r.Opts.GHPath, nil
 	}
 	if env := os.Getenv("GH"); env != "" {
-		return env
+		return env, nil
 	}
-	if path, err := exec.LookPath("gh"); err == nil {
-		return path
+	if r.Opts.DryRun {
+		// Dry-run never executes gh (outputInDir only prints), so do not
+		// probe or provision anything.
+		return "gh", nil
 	}
-	return "gh"
+	if r.ghResolved == "" {
+		path, err := toolspkg.ResolveTrusted(ctx, "gh", "GH", r.Opts.WorkDir, r.Opts.DryRun, r.Opts.Stderr)
+		if err != nil {
+			return "", err
+		}
+		r.ghResolved = path
+	}
+	return r.ghResolved, nil
 }
 
 func (r *Runner) path(parts ...string) string {

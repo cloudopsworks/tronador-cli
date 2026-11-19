@@ -27,10 +27,18 @@ type Options struct {
 	WorkDir     string
 	ConfigPath  string
 	SkipInstall bool
-	DryRun      bool
-	HTTPClient  *http.Client
-	Stdout      io.Writer
-	Stderr      io.Writer
+	// SkipVersionCheck trusts any locally found executable regardless of its
+	// version. By default a PATH or cached executable whose major version
+	// differs from the supported version is ignored, exactly as if the tool
+	// were not installed.
+	SkipVersionCheck bool
+	// IgnoreProjectConfig skips project-scoped tools.json overrides so
+	// repository content cannot redirect which executable is resolved.
+	IgnoreProjectConfig bool
+	DryRun              bool
+	HTTPClient          *http.Client
+	Stdout              io.Writer
+	Stderr              io.Writer
 }
 
 // Tool describes a binary that can be resolved locally or provisioned on demand.
@@ -39,7 +47,15 @@ type Tool struct {
 	Executable     string
 	ConfiguredPath string
 	Version        string
-	Download       DownloadSpec
+	// VersionArgs is the argv used to ask the executable for its version. When
+	// empty, local executables are not version-checked.
+	VersionArgs []string
+	// VersionRegex optionally extracts the version from the probe output; its
+	// first capture group is the version.
+	VersionRegex string
+	// SkipVersionCheck disables major-version rejection for this tool only.
+	SkipVersionCheck bool
+	Download         DownloadSpec
 }
 
 // DownloadSpec describes a direct downloadable upstream tool artifact.
@@ -59,6 +75,8 @@ type ResolvedTool struct {
 	Path      string
 	Source    string
 	Installed bool
+	// Version is the locally detected version when a probe ran.
+	Version string
 }
 
 // Provisioner resolves tools and installs only the requested missing binary into
@@ -105,6 +123,13 @@ func NewProvisioner(opts Options) (*Provisioner, error) {
 		}
 		opts.SkipInstall = skip
 	}
+	if value := os.Getenv("TRONADOR_TOOLS_VERSION_CHECK"); value != "" {
+		check, err := ParseBoolEnv("TRONADOR_TOOLS_VERSION_CHECK", value)
+		if err != nil {
+			return nil, err
+		}
+		opts.SkipVersionCheck = !check
+	}
 	if value := os.Getenv("TRONADOR_TOOLS_INSTALL"); value != "" {
 		install, err := ParseBoolEnv("TRONADOR_TOOLS_INSTALL", value)
 		if err != nil {
@@ -121,7 +146,7 @@ func NewProvisioner(opts Options) (*Provisioner, error) {
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
 	}
-	config, err := LoadConfig(opts.WorkDir, opts.ConfigPath)
+	config, err := loadConfig(opts.WorkDir, opts.ConfigPath, !opts.IgnoreProjectConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -146,22 +171,45 @@ func (p *Provisioner) Ensure(ctx context.Context, tool Tool) (ResolvedTool, erro
 		}
 		return ResolvedTool{Name: tool.Name, Path: path, Source: "configured"}, nil
 	}
-	if path, err := exec.LookPath(tool.Executable); err == nil {
-		return ResolvedTool{Name: tool.Name, Path: path, Source: "path"}, nil
+	desired := resolveToolVersion(tool)
+	var rejected []incompatibleTool
+	pathHit, lookErr := exec.LookPath(tool.Executable)
+	if lookErr == nil {
+		detected, ok := p.checkCompatibility(ctx, tool, pathHit, desired)
+		if ok {
+			return ResolvedTool{Name: tool.Name, Path: pathHit, Source: "path", Version: detected}, nil
+		}
+		rejected = append(rejected, incompatibleTool{Path: pathHit, Detected: detected})
 	}
 
 	toolPath := p.ToolPath(tool.Executable)
-	if ExecutableExists(toolPath) {
-		return ResolvedTool{Name: tool.Name, Path: toolPath, Source: "tools-dir"}, nil
+	if ExecutableExists(toolPath) && !(lookErr == nil && sameFile(pathHit, toolPath)) {
+		detected, ok := p.checkCompatibility(ctx, tool, toolPath, desired)
+		if ok {
+			return ResolvedTool{Name: tool.Name, Path: toolPath, Source: "tools-dir", Version: detected}, nil
+		}
+		rejected = append(rejected, incompatibleTool{Path: toolPath, Detected: detected})
 	}
 	if p.Opts.SkipInstall {
+		if len(rejected) > 0 {
+			return ResolvedTool{}, fmt.Errorf("%w: %s; enable on-demand Tronador tool provisioning to install the supported version, pass an explicit path, or set TRONADOR_TOOLS_VERSION_CHECK=false", ErrIncompatibleVersion, describeIncompatible(tool.Name, desired, rejected))
+		}
 		return ResolvedTool{}, fmt.Errorf("%s executable not found; install it, pass an explicit path, or enable on-demand Tronador tool provisioning", tool.Executable)
+	}
+	if len(rejected) > 0 {
+		fmt.Fprintf(p.Opts.Stderr, "tronador: %s; provisioning a Tronador-managed copy\n", describeIncompatible(tool.Name, desired, rejected))
 	}
 	path, err := p.Install(ctx, tool)
 	if err != nil {
 		return ResolvedTool{}, err
 	}
 	return ResolvedTool{Name: tool.Name, Path: path, Source: "download", Installed: !p.Opts.DryRun}, nil
+}
+
+func sameFile(a, b string) bool {
+	ai, errA := os.Stat(a)
+	bi, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(ai, bi)
 }
 
 // EnsureTool resolves or provisions the named configured tool.

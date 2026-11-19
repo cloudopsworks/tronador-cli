@@ -527,17 +527,32 @@ func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("PATH wins over configured version", func(t *testing.T) {
+	t.Run("PATH wins when major matches configured version", func(t *testing.T) {
 		repo := setupVersionsTagRepo(t)
 		restoreVersionsToolOptions(t)
 		bin := t.TempDir()
 		writeCLITool(t, bin, "gitversion", "2.3.4")
 		t.Setenv("PATH", bin)
 		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
-		versionsToolVersions = []string{"gitversion=99.0.0"}
+		versionsToolVersions = []string{"gitversion=2.9.0"}
 		stdout, _ := executeVersionsTagCommand(t)
 		if stdout != "v2.3.4\n" {
 			t.Fatalf("stdout = %q", stdout)
+		}
+	})
+
+	t.Run("PATH with different major is ignored without network", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		bin := t.TempDir()
+		writeCLITool(t, bin, "gitversion", "2.3.4")
+		t.Setenv("PATH", bin)
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolsDir = filepath.Join(t.TempDir(), "cache")
+		versionsToolVersions = []string{"gitversion=99.0.0"}
+		_, _, err := executeVersionsTagCommandError(t)
+		if err == nil || !strings.Contains(err.Error(), "gitversion 2.3.4") || !strings.Contains(err.Error(), "incompatible") || !strings.Contains(err.Error(), "--allow-network") {
+			t.Fatalf("error = %v; want actionable incompatible-version error", err)
 		}
 	})
 
@@ -545,12 +560,12 @@ func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
 		repo := setupVersionsTagRepo(t)
 		restoreVersionsToolOptions(t)
 		cache := t.TempDir()
-		writeCLITool(t, cache, "gitversion", "3.4.5")
+		writeCLITool(t, cache, "gitversion", "6.4.5")
 		t.Setenv("PATH", t.TempDir())
 		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
 		versionsToolsDir, versionsNoInstallTools = cache, true
 		stdout, _ := executeVersionsTagCommand(t)
-		if stdout != "v3.4.5\n" {
+		if stdout != "v6.4.5\n" {
 			t.Fatalf("stdout = %q", stdout)
 		}
 	})
@@ -568,6 +583,40 @@ func TestVersionsTagCLIUsesProjectStyleToolResolution(t *testing.T) {
 		}
 		if _, statErr := os.Stat(cache); !os.IsNotExist(statErr) {
 			t.Fatalf("missing-tool path created cache: %v", statErr)
+		}
+	})
+
+	t.Run("PATH with different major falls back to provisioned supported version", func(t *testing.T) {
+		repo := setupVersionsTagRepo(t)
+		restoreVersionsToolOptions(t)
+		requested := make(chan string, 1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requested <- r.URL.Path
+			_, _ = w.Write([]byte("#!/bin/sh\nprintf '7.8.9\\n'\n"))
+		}))
+		defer server.Close()
+		downloadURL := server.URL + "/{version}/gitversion"
+		config := fmt.Sprintf(`{"tools":[{"name":"gitversion","executable":"gitversion","default_version":"7.8.9","version_args":["/version"],"url_template":%q,"format":"binary","platform_overrides":{%q:{"url_template":%q,"format":"binary"}}}]}`,
+			downloadURL, runtime.GOOS+"/"+runtime.GOARCH, downloadURL)
+		configPath := filepath.Join(t.TempDir(), "tools.json")
+		if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		bin := t.TempDir()
+		writeCLITool(t, bin, "gitversion", "5.12.0")
+		t.Setenv("PATH", bin)
+		versionsWorkDir, versionsGitPath, versionsMainBranch = repo, gitPath, "main"
+		versionsToolsDir, versionsToolsConfig = filepath.Join(t.TempDir(), "cache"), configPath
+		versionsAllowNetwork = true
+		stdout, stderr := executeVersionsTagCommand(t)
+		if stdout != "v7.8.9\n" {
+			t.Fatalf("stdout = %q (stderr %q)", stdout, stderr)
+		}
+		if path := <-requested; path != "/7.8.9/gitversion" {
+			t.Fatalf("request path = %q", path)
+		}
+		if !strings.Contains(stderr, "gitversion 5.12.0") || !strings.Contains(stderr, "incompatible") {
+			t.Fatalf("stderr = %q; want incompatible-version notice", stderr)
 		}
 	})
 

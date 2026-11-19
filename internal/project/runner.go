@@ -812,6 +812,13 @@ func explicitToolPath(paths map[string]string, name string) string {
 }
 
 func (r *Runner) toolError(capability, name string, err error) *Error {
+	if errors.Is(err, toolspkg.ErrIncompatibleVersion) {
+		provision := "pass --allow-network"
+		if r.Opts.NoInstallTools {
+			provision = "remove --no-install-tools and pass --allow-network"
+		}
+		return &Error{Code: "project_tool_version_incompatible", Command: "project", Capability: capability, Tool: name, Hint: provision + " to provision the supported version, --tool-path " + name + "=<path> to force a binary, or set TRONADOR_TOOLS_VERSION_CHECK=false", ExitStatus: 1, Cause: err}
+	}
 	code := "project_tool_unavailable"
 	lower := strings.ToLower(err.Error())
 	if strings.Contains(lower, "is not configured") {
