@@ -5,6 +5,7 @@
       "executable": "gomplate",
       "default_version": "5.1.0",
       "version_env_vars": ["TRONADOR_GOMPLATE_VERSION", "GOMPLATE_VERSION"],
+      "version_args": ["--version"],
       "url_template": "https://github.com/hairyhenderson/gomplate/releases/download/v{version}/gomplate_{os}-{arch}{ext}",
       "format": "binary"
     },
@@ -13,6 +14,7 @@
       "executable": "gh",
       "default_version": "2.95.0",
       "version_env_vars": ["TRONADOR_GH_VERSION", "GH_VERSION"],
+      "version_args": ["--version"],
       "format": "tar.gz",
       "archive_binary_path": "*/bin/gh",
       "platform_overrides": {
@@ -31,6 +33,7 @@
       "executable": "boilerplate",
       "default_version": "0.15.0",
       "version_env_vars": ["TRONADOR_BOILERPLATE_VERSION", "BOILERPLATE_VERSION"],
+      "version_args": ["--version"],
       "url_template": "https://github.com/gruntwork-io/boilerplate/releases/download/v{version}/boilerplate_{os}_{arch}{ext}",
       "format": "binary"
     },
@@ -39,6 +42,7 @@
       "executable": "gitversion",
       "default_version": "6.7.0",
       "version_env_vars": ["TRONADOR_GITVERSION_VERSION", "GITVERSION_VERSION"],
+      "version_args": ["/version"],
       "format": "tar.gz",
       "archive_binary_path": "gitversion",
       "platform_overrides": {
@@ -61,6 +65,7 @@
       "executable": "yq",
       "default_version": "4.53.3",
       "version_env_vars": ["TRONADOR_YQ_VERSION", "YQ_VERSION"],
+      "version_args": ["--version"],
       "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}",
       "format": "binary"
     },
@@ -79,6 +84,7 @@
       "executable": "terraform",
       "default_version": "1.11.1",
       "version_env_vars": ["TRONADOR_TERRAFORM_VERSION", "TERRAFORM_VERSION"],
+      "version_args": ["-version"],
       "url_template": "https://releases.hashicorp.com/terraform/{version}/terraform_{version}_{os}_{arch}.zip",
       "format": "zip",
       "archive_binary_path": "terraform"
@@ -88,6 +94,7 @@
       "executable": "terraform-docs",
       "default_version": "0.24.0",
       "version_env_vars": ["TRONADOR_TERRAFORM_DOCS_VERSION", "TERRAFORM_DOCS_VERSION"],
+      "version_args": ["--version"],
       "url_template": "https://github.com/terraform-docs/terraform-docs/releases/download/v{version}/terraform-docs-v{version}-{os}-{arch}.tar.gz",
       "format": "tar.gz",
       "archive_binary_path": "terraform-docs",
@@ -103,6 +110,7 @@
       "executable": "tofu",
       "default_version": "1.11.4",
       "version_env_vars": ["TRONADOR_TOFU_VERSION", "TOFU_VERSION"],
+      "version_args": ["-version"],
       "url_template": "https://github.com/opentofu/opentofu/releases/download/v{version}/tofu_{version}_{os}_{arch}.zip",
       "format": "zip",
       "archive_binary_path": "tofu"
@@ -112,6 +120,7 @@
       "executable": "terragrunt",
       "default_version": "1.1.2",
       "version_env_vars": ["TRONADOR_TERRAGRUNT_VERSION", "TERRAGRUNT_VERSION"],
+      "version_args": ["--version"],
       "url_template": "https://github.com/gruntwork-io/terragrunt/releases/download/v{version}/terragrunt_{os}_{arch}{ext}",
       "format": "binary"
     }

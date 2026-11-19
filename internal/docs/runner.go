@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	toolspkg "tronador-cli/internal/tools"
 )
 
 // Options controls docs command execution.
@@ -139,13 +141,9 @@ func (r *Runner) Terraform(ctx context.Context, opts TerraformOptions) error {
 	if opts.Format == "" {
 		opts.Format = "md"
 	}
-	terraformDocs := opts.TerraformDocsPath
-	if !r.Opts.DryRun || terraformDocs == "" {
-		var err error
-		terraformDocs, err = resolveExecutable(terraformDocs, "TERRAFORM_DOCS", "terraform-docs")
-		if err != nil {
-			return err
-		}
+	terraformDocs, err := r.resolveTerraformDocs(ctx, opts.TerraformDocsPath)
+	if err != nil {
+		return err
 	}
 	if !opts.SkipInit {
 		if err := r.Init(); err != nil {
@@ -267,6 +265,29 @@ func resolveMake(configured string) (string, error) {
 		return p, nil
 	}
 	return "", fmt.Errorf("make executable not found; install make/gmake or pass --make")
+}
+
+// resolveTerraformDocs honors an explicit path (flag or TERRAFORM_DOCS) as-is;
+// otherwise it uses the shared resolver so an unsupported major version on
+// PATH is never used (see tools.ResolveTrusted for the install policy).
+func (r *Runner) resolveTerraformDocs(ctx context.Context, configured string) (string, error) {
+	if configured == "" {
+		configured = os.Getenv("TERRAFORM_DOCS")
+	}
+	if configured != "" {
+		if r.Opts.DryRun {
+			return configured, nil
+		}
+		return resolveExecutable(configured, "TERRAFORM_DOCS", "terraform-docs")
+	}
+	if r.Opts.DryRun {
+		// Dry-run never executes terraform-docs: no probe, no provisioning.
+		if path, err := exec.LookPath("terraform-docs"); err == nil {
+			return path, nil
+		}
+		return "terraform-docs", nil
+	}
+	return toolspkg.ResolveTrusted(ctx, "terraform-docs", "TERRAFORM_DOCS", r.Opts.WorkDir, false, r.Opts.Stderr)
 }
 
 func resolveExecutable(configured, envName, fallback string) (string, error) {

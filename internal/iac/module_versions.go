@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	toolspkg "tronador-cli/internal/tools"
 )
 
 // ModuleVersionsOptions controls the iac module workflow.
@@ -183,7 +185,7 @@ func NewRunner(opts ModuleVersionsOptions) (*Runner, error) {
 		opts.TagLister = NewGitHubTagLister()
 	}
 	if opts.Commenter == nil {
-		opts.Commenter = ghPRCommenter{}
+		opts.Commenter = &ghPRCommenter{}
 	}
 	return &Runner{opts: opts, searchRoot: searchRoot}, nil
 }
@@ -790,10 +792,29 @@ func replaceRefValue(source, ref string) string {
 	return refQueryRe.ReplaceAllString(source, "${1}"+ref)
 }
 
-type ghPRCommenter struct{}
+type ghPRCommenter struct {
+	gh    string
+	ghErr error
+}
 
-func (ghPRCommenter) CommentPR(ctx context.Context, workdir, prNumber, body string) error {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "comment", prNumber, "--body", body)
+func (c *ghPRCommenter) CommentPR(ctx context.Context, workdir, prNumber, body string) error {
+	gh := c.gh
+	if gh == "" {
+		gh = os.Getenv("GH")
+	}
+	if c.ghErr != nil {
+		return c.ghErr
+	}
+	if gh == "" {
+		resolved, err := toolspkg.ResolveTrusted(ctx, "gh", "GH", workdir, false, nil)
+		if err != nil {
+			c.ghErr = err
+			return err
+		}
+		gh = resolved
+	}
+	c.gh = gh
+	cmd := exec.CommandContext(ctx, gh, "pr", "comment", prNumber, "--body", body)
 	cmd.Dir = workdir
 	cmd.Stdout = io.Discard
 	var stderr strings.Builder

@@ -53,8 +53,10 @@ existing executable in the Tronador tools cache (`--tools-dir`, or
 relative path supplied through `--tool-path` is resolved from the caller's
 current directory before command execution changes to `--workdir`; a bare
 executable name supplied through the flag is searched on `PATH`.
-`--tool-version` selects the version only if a download is necessary; it never
-replaces a usable explicit, `PATH`, or cached executable. Downloads require `--allow-network`.
+A `PATH` or cached executable is used only when its major version matches the
+supported version (the catalog default, or `--tool-version`); otherwise it is
+treated as absent and the supported version is downloaded. `--tool-version`
+never replaces an explicit `--tool-path`. Downloads require `--allow-network`.
 `--no-install-tools` prohibits them even when network permission is present.
 The `--allow-network` flag permits only missing-tool downloads—it is not an
 offline mode switch and does not suppress the workflow's normal Git or GitHub

@@ -264,7 +264,7 @@ func TestRunnerWorkflowUsesCachedToolWithoutNetwork(t *testing.T) {
 		t.Skip("shell fixture")
 	}
 	toolsDir := t.TempDir()
-	writeToolScript(t, toolsDir, "gh", "from-cache")
+	writeVersionedToolScript(t, toolsDir, "gh", "--version", "gh version 2.95.0 (2026-01-01)", "from-cache")
 	t.Setenv("PATH", t.TempDir())
 	runner, err := NewRunner(Options{WorkDir: t.TempDir(), ToolsDir: toolsDir, NoInstallTools: true})
 	if err != nil {
@@ -280,12 +280,12 @@ func TestRunnerWorkflowUsesCachedToolWithoutNetwork(t *testing.T) {
 	}
 }
 
-func TestRunnerWorkflowPATHWinsOverConfiguredVersion(t *testing.T) {
+func TestRunnerWorkflowPATHWinsWhenMajorMatchesConfiguredVersion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
 	}
 	bin := t.TempDir()
-	writeToolScript(t, bin, "gitversion", "from-path")
+	writeVersionedToolScript(t, bin, "gitversion", "/version", "99.4.1", "from-path")
 	t.Setenv("PATH", bin)
 	toolsDir := filepath.Join(t.TempDir(), "cache")
 	runner, err := NewRunner(Options{
@@ -441,6 +441,21 @@ func TestResolverInstallGateCannotBeEnabledByEnvironment(t *testing.T) {
 			}
 		})
 	}
+}
+
+// writeVersionedToolScript writes a fake tool that answers the version probe
+// probeArg with version and prints output for every other invocation.
+func writeVersionedToolScript(t *testing.T, dir, name, probeArg, version, output string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	script := "#!/bin/sh\nif [ \"$1\" = '" + probeArg + "' ]; then printf '%s\\n' '" + version + "'; exit 0; fi\nprintf '%s\\n' '" + output + "'\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func writeToolScript(t *testing.T, dir, name, output string) string {

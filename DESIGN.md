@@ -502,11 +502,27 @@ needed by its profiles; it does not invent a second installer.
 For each `ToolRequirement`, resolution occurs in this order:
 
 1. an explicit command flag or profile-approved environment override;
-2. an executable found on `PATH`;
+2. an executable found on `PATH` whose major version matches the supported
+   version;
 3. the provisioned executable in `--tools-dir` (default
-   `~/.cloudopsworks/tronador` or `TRONADOR_TOOLS_DIR`); and
+   `~/.cloudopsworks/tronador` or `TRONADOR_TOOLS_DIR`), subject to the same
+   major-version check; and
 4. on-demand installation of exactly that missing tool from its effective
    catalog entry when installation is enabled and network access is allowed.
+
+Steps 2 and 3 probe the executable with the catalog `version_args`. A local
+executable whose major version differs from the supported version (catalog
+default or the explicitly requested version) is treated as absent, so the
+resolver falls through to the next step and ultimately provisions the supported
+release. If the declared probe fails, a generic `--version` probe is tried (a
+CLI whose syntax changed across majors, such as GitVersion 7, still reports its
+version). A local executable whose version cannot be read at all is rejected
+too. Explicit paths (step 1) are never version-checked, and
+`TRONADOR_TOOLS_VERSION_CHECK=false` disables the check.
+Probe arguments come only from trusted catalog sources, and a tool definition
+touched by a project-scoped `tools.json` keeps the legacy local-first behavior
+so repository content cannot force a download over a working tool or the
+shared cache.
 
 The effective catalog merges, in order, embedded defaults, the user
 `~/.cloudopsworks/tronador/tools.json`, project
@@ -656,6 +672,7 @@ Required failure codes:
 | `project_tool_install_failed` | Tool download, extraction, verification, or installation failed. |
 | `project_prerequisite_missing` | A declared non-tool prerequisite is unavailable. |
 | `project_network_not_allowed` | Declared network use lacks `--allow-network`. |
+| `project_tool_version_incompatible` | Only local tools with an unsupported major version exist and provisioning is not permitted. |
 | `project_confirmation_required` | Destructive operation lacks `--yes` in non-interactive mode. |
 | `project_operation_failed` | Native operation or typed tool call failed; child exit status is preserved. |
 

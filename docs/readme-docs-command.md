@@ -86,6 +86,45 @@ needed by the command being executed. It does not clone or use
 `--no-install-gomplate` / `--no-install-terraform-docs` flag to require a
 preinstalled executable.
 
+### Major-version compatibility
+
+Every executable found on `PATH` or in the tools directory is probed with its
+catalog `version_args` (for example `gh --version` or `gitversion /version`).
+If the reported major version differs from the supported version — the
+catalog `default_version`, or the version selected by a tool-version flag or
+`version_env_vars` — the local copy is ignored exactly as if the tool were not
+installed: a compatible cached copy is used, otherwise the supported release is
+provisioned into the tools directory (replacing an incompatible cached copy).
+When installation is disabled the command fails with an error naming the
+incompatible local version. Newer and older majors are both rejected; minor and
+patch differences are accepted.
+
+- Explicit tool paths (`--gomplate`, `--tool-path name=<path>`, `GH`,
+  `GOMPLATE`, `TERRAFORM_DOCS`, ...) are trusted and never version-checked.
+- If the declared probe fails, a generic `--version` probe is tried, so a tool
+  whose CLI changed across majors (GitVersion 7 no longer accepts `/version`)
+  is still identified and rejected.
+- A local executable whose version cannot be read at all (every probe fails,
+  times out, or prints no recognizable version) is treated as incompatible.
+  The check is skipped only when the supported version itself is not a
+  semantic version.
+- The probe runs in the command's workdir, so version-manager shims (tfenv,
+  asdf, mise) report the version that will actually run there.
+- `TRONADOR_TOOLS_VERSION_CHECK=false` disables the check entirely.
+- `version_args` and `version_regex` are honored only from trusted sources
+  (embedded catalog, user `~/.cloudopsworks/tronador/tools.json`,
+  `TRONADOR_TOOLS_CONFIG`, `--tools-config`); project-scoped `tools.json` files
+  cannot set them, because a cloned repository must not choose arguments for
+  local binaries.
+- A tool whose definition is changed by a project-scoped `tools.json` keeps
+  the legacy local-first behavior (no major-version rejection), so repository
+  content cannot force a download over a working tool or the shared cache.
+- Commands without an `--allow-network` flag (`repos` and `iac` calling `gh`,
+  `docs terraform` calling `terraform-docs`) ignore project-scoped `tools.json`,
+  never download during `--dry-run`, and download the supported version only
+  when `TRONADOR_TOOLS_INSTALL=true` is set. Otherwise an incompatible local
+  copy produces an error instead of being used.
+
 Tool metadata is JSON-driven. The binary ships an embedded `tools.json` with
 entries for:
 
@@ -95,6 +134,8 @@ entries for:
 - `boilerplate`
 - `gitversion`
 - `yq`
+- `terraform`, `tofu`, `terragrunt` (plus `go` and `git`, which are resolved
+  but never downloaded)
 
 Runtime overrides are merged field-by-field by tool name in this order:
 
@@ -117,6 +158,8 @@ Supported JSON fields per tool:
   "executable": "yq",
   "default_version": "4.47.2",
   "version_env_vars": ["TRONADOR_YQ_VERSION", "YQ_VERSION"],
+  "version_args": ["--version"],
+  "version_regex": "",
   "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}{ext}",
   "format": "binary",
   "binary_name": "yq",
@@ -126,6 +169,9 @@ Supported JSON fields per tool:
 }
 ```
 
+`version_args` is the argv used to probe a local executable's version; omit it
+to skip the major-version check for that tool. `version_regex` optionally
+overrides version extraction from the probe output (first capture group).
 `format` supports `binary`, `zip`, and `tar.gz`. Checksums are optional and are
 validated only when `checksum_sha256` is configured.
 

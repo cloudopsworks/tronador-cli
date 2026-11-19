@@ -13,6 +13,7 @@ import (
 )
 
 func TestNewProvisionerDefaultsToolsDirUnderUserCloudOpsWorks(t *testing.T) {
+	t.Setenv("TRONADOR_TOOLS_DIR", "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	provisioner, err := NewProvisioner(Options{WorkDir: t.TempDir(), Stdout: io.Discard, Stderr: io.Discard})
@@ -86,7 +87,7 @@ func TestEnsureUsesCachedToolFromToolsDir(t *testing.T) {
 	t.Setenv("PATH", "")
 	t.Setenv("HOME", t.TempDir())
 	toolsDir := t.TempDir()
-	cached := writeToolExecutable(t, toolsDir, "terraform-docs", "#!/bin/sh\nexit 0\n")
+	cached := writeToolExecutable(t, toolsDir, "terraform-docs", "#!/bin/sh\necho 'terraform-docs version v0.24.0'\n")
 	provisioner, err := NewProvisioner(Options{WorkDir: t.TempDir(), ToolsDir: toolsDir, SkipInstall: true, Stdout: io.Discard, Stderr: io.Discard})
 	if err != nil {
 		t.Fatalf("NewProvisioner() error = %v", err)

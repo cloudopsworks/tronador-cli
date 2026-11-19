@@ -74,7 +74,11 @@ func (r *Runner) checkoutTemplateRepositoryFromShell(ctx context.Context, ref st
 func (r *Runner) setDefaultRepository(ctx context.Context, owner, repo string) error {
 	// gh repo set-default writes gh CLI state. Keep the shell call here for
 	// compatibility while the Git/GitHub read paths move to native clients.
-	return r.run(ctx, r.ghPath(), "repo", "set-default", fmt.Sprintf("%s/%s", owner, repo))
+	gh, err := r.ghPath(ctx)
+	if err != nil {
+		return err
+	}
+	return r.run(ctx, gh, "repo", "set-default", fmt.Sprintf("%s/%s", owner, repo))
 }
 
 // runTemplateAnalysis executes only temporary-checkout operations in dry-run.
