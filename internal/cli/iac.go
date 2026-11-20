@@ -7,6 +7,7 @@ import (
 	"tronador-cli/internal/iac"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -18,6 +19,7 @@ var (
 	iacModuleVersionsAlpha   bool
 	iacModuleVersionsBeta    bool
 	iacModuleVersionsFixGit  bool
+	iacModuleVersionsMerge   bool
 	iacModuleVersionsReport  bool
 	iacModuleVersionsComment string
 )
@@ -56,11 +58,24 @@ With --upgrade, patch is
 selected by default; use --minor or --major to select a broader release tier.
 When --major has no eligible major target, it falls back to the highest eligible
 minor target in the current major version line.
-The --minor and --major flags require --upgrade and are mutually exclusive.`,
+The --minor and --major flags require --upgrade and are mutually exclusive.
+
+With --upgrade --merge-inputs (alias --merge-input, -m), each processed module's
+inputs.yaml is merged with the module version's .boilerplate/inputs.yaml using
+the same comment-preserving YAML merge as "tronador repos upgrade": the
+boilerplate is the baseline and values configured locally are preserved. The
+upgraded ref is used when an upgrade applies, otherwise the current ref.
+inputs.yaml is left unchanged, with a warning, when it is missing, when the
+boilerplate inputs.yaml is missing or contains Go templates (regenerate the
+Terragrunt scaffolding instead), or when the merge cannot be performed safely.
+terragrunt.hcl processing is unaffected by these conditions.`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if (iacModuleVersionsMinor || iacModuleVersionsMajor) && !iacModuleVersionsUpgrade {
 				return fmt.Errorf("--minor and --major require --upgrade")
+			}
+			if iacModuleVersionsMerge && !iacModuleVersionsUpgrade {
+				return fmt.Errorf("--merge-inputs requires --upgrade")
 			}
 			return nil
 		},
@@ -74,6 +89,7 @@ The --minor and --major flags require --upgrade and are mutually exclusive.`,
 				AllowAlpha:          iacModuleVersionsAlpha,
 				AllowBeta:           iacModuleVersionsBeta,
 				FixPrefix:           iacModuleVersionsFixGit,
+				MergeInputs:         iacModuleVersionsMerge,
 				DryRun:              commandDryRun(cmd),
 				ReportGitHubActions: iacModuleVersionsReport,
 				CommentPRNumber:     iacModuleVersionsComment,
@@ -95,6 +111,13 @@ The --minor and --major flags require --upgrade and are mutually exclusive.`,
 	cmd.Flags().StringVarP(&iacModuleVersionsPath, "path", "p", "", "Module discovery path relative to --workdir, or an in-workdir absolute path")
 	cmd.Flags().BoolVarP(&iacModuleVersionsReport, "report-ghaction", "r", false, "Emit GitHub Actions warning annotations for findings")
 	cmd.Flags().StringVarP(&iacModuleVersionsComment, "comment-pr-num", "c", "", "PR number to comment on when --report-ghaction is enabled")
+	cmd.Flags().BoolVarP(&iacModuleVersionsMerge, "merge-inputs", "m", false, "With --upgrade, merge each module's inputs.yaml with the module version's .boilerplate/inputs.yaml (alias --merge-input)")
+	cmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+		if name == "merge-input" {
+			name = "merge-inputs"
+		}
+		return pflag.NormalizedName(name)
+	})
 	cmd.MarkFlagsMutuallyExclusive("minor", "major")
 	return cmd
 }

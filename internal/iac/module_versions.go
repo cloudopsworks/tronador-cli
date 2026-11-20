@@ -1,6 +1,7 @@
 package iac
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,12 +9,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	reposp "tronador-cli/internal/repos"
 	toolspkg "tronador-cli/internal/tools"
 )
 
@@ -27,12 +30,14 @@ type ModuleVersionsOptions struct {
 	AllowAlpha          bool
 	AllowBeta           bool
 	FixPrefix           bool
+	MergeInputs         bool
 	DryRun              bool
 	ReportGitHubActions bool
 	CommentPRNumber     string
 	Stdout              io.Writer
 	Stderr              io.Writer
 	TagLister           TagLister
+	FileFetcher         FileFetcher
 	Commenter           PRCommenter
 }
 
@@ -149,6 +154,9 @@ func NewRunner(opts ModuleVersionsOptions) (*Runner, error) {
 	if (opts.Minor || opts.Major) && !opts.Upgrade {
 		return nil, errors.New("--minor and --major require --upgrade")
 	}
+	if opts.MergeInputs && !opts.Upgrade {
+		return nil, errors.New("--merge-inputs requires --upgrade")
+	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = "."
 	}
@@ -183,6 +191,9 @@ func NewRunner(opts ModuleVersionsOptions) (*Runner, error) {
 	}
 	if opts.TagLister == nil {
 		opts.TagLister = NewGitHubTagLister()
+	}
+	if opts.FileFetcher == nil {
+		opts.FileFetcher = NewGitHubFileFetcher()
 	}
 	if opts.Commenter == nil {
 		opts.Commenter = &ghPRCommenter{}
@@ -290,13 +301,15 @@ func (r *Runner) processFile(ctx context.Context, file string) error {
 	entries := sourceEntries(file, lines)
 	if len(entries) == 0 {
 		fmt.Fprintf(r.opts.Stdout, "⚠️  No source found in %s\n", rel)
-		return nil
+		return r.mergeModuleInputs(ctx, file, nil)
 	}
 
 	changed := false
+	results := make([]moduleResult, 0, len(entries))
 	for _, entry := range entries {
 		result := r.processEntry(ctx, entry)
 		r.printResult(ctx, result)
+		results = append(results, result)
 		if result.NewSource != "" && result.NewSource != entry.Source {
 			updated, ok := replaceSourceInLine(entry.Line, result.NewSource)
 			if !ok {
@@ -306,18 +319,168 @@ func (r *Runner) processFile(ctx context.Context, file string) error {
 			changed = true
 		}
 	}
-	if !changed {
+	if changed {
+		if r.opts.DryRun {
+			fmt.Fprintf(r.opts.Stdout, "🧪 Dry-run: would update %s\n", rel)
+		} else {
+			if err := os.WriteFile(file, []byte(strings.Join(lines, "")), 0o644); err != nil {
+				return fmt.Errorf("write %s: %w", rel, err)
+			}
+			fmt.Fprintf(r.opts.Stdout, "✏️  Updated %s\n", rel)
+		}
+	}
+	return r.mergeModuleInputs(ctx, file, results)
+}
+
+// boilerplateInputsPath is the module-relative location of the Terragrunt
+// scaffolding inputs template published by CloudOps Works Terraform modules.
+const boilerplateInputsPath = ".boilerplate/inputs.yaml"
+
+// mergeModuleInputs merges the module directory's inputs.yaml with the module
+// version's .boilerplate/inputs.yaml using the repos upgrade YAML merge. Every
+// condition that prevents a safe merge is reported as a warning and leaves
+// inputs.yaml untouched; HCL processing has already completed by this point.
+// Only a failure to write the merged file is returned as an error.
+func (r *Runner) mergeModuleInputs(ctx context.Context, file string, results []moduleResult) error {
+	if !r.opts.MergeInputs {
 		return nil
+	}
+	inputsPath := filepath.Join(filepath.Dir(file), "inputs.yaml")
+	relInputs := r.rel(inputsPath)
+	info, err := os.Lstat(inputsPath)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  No inputs.yaml found for %s; skipping inputs merge\n", r.rel(file))
+		return nil
+	}
+	if err != nil {
+		fmt.Fprintf(r.opts.Stdout, "❌ Cannot inspect %s: %v; skipping inputs merge\n", relInputs, err)
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  %s is not a regular file; skipping inputs merge\n", relInputs)
+		return nil
+	}
+
+	supported := make([]moduleResult, 0, 1)
+	for _, result := range results {
+		if result.Info.Supported {
+			supported = append(supported, result)
+		}
+	}
+	if len(supported) != 1 {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  %s needs exactly one supported GitHub module source to merge inputs (found %d); %s left unchanged\n", r.rel(file), len(supported), relInputs)
+		return nil
+	}
+	module := supported[0]
+	ref := module.Info.Ref
+	if module.UpgradeNeeded && module.SelectedTag != "" {
+		ref = module.SelectedTag
+	}
+	boilerplate, ok := moduleBoilerplatePath(module.Info.Subdir)
+	if !ok {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  Module subdirectory %q in %s cannot be resolved; %s left unchanged\n", module.Info.Subdir, r.rel(file), relInputs)
+		return nil
+	}
+	origin := fmt.Sprintf("%s@%s %s", module.Info.Repository, ref, boilerplate)
+
+	template, err := r.opts.FileFetcher.FetchFile(ctx, module.Info.Repository, boilerplate, ref)
+	if errors.Is(err, ErrFileNotFound) {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  %s not found; %s left unchanged\n", origin, relInputs)
+		return nil
+	}
+	if err != nil {
+		fmt.Fprintf(r.opts.Stdout, "❌ Failed to fetch %s: %v; %s left unchanged\n", origin, err, relInputs)
+		return nil
+	}
+	if containsGoTemplate(template) {
+		fmt.Fprintf(r.opts.Stdout, "⚠️  %s uses Go templates; Terragrunt scaffolding for %s should be generated again. %s left unchanged\n", origin, r.rel(filepath.Dir(file)), relInputs)
+		return nil
+	}
+
+	local, err := os.ReadFile(inputsPath)
+	if err != nil {
+		fmt.Fprintf(r.opts.Stdout, "❌ Cannot read %s: %v; skipping inputs merge\n", relInputs, err)
+		return nil
+	}
+	merged, err := reposp.MergeTemplateYAML(relInputs, template, local)
+	if err != nil {
+		fmt.Fprintf(r.opts.Stdout, "❌ Could not merge %s with %s: %v; %s left unchanged\n", relInputs, origin, err, relInputs)
+		return nil
+	}
+	if bytes.Equal(merged.Content, local) {
+		fmt.Fprintf(r.opts.Stdout, "✅ %s already matches %s\n", relInputs, origin)
+		return nil
+	}
+	if merged.CommentOnly {
+		fmt.Fprintf(r.opts.Stdout, "WARNING %s has no active values; replacing it with the boilerplate baseline\n", relInputs)
+	}
+	for _, keyPath := range merged.Unmapped {
+		fmt.Fprintf(r.opts.Stdout, "WARNING preserving unmapped configuration %s path %s\n", relInputs, keyPath)
+	}
+	for _, keyPath := range merged.Added {
+		fmt.Fprintf(r.opts.Stdout, "WARNING adding boilerplate value %s path %s; review it before applying\n", relInputs, keyPath)
+	}
+	if merged.RendererFallback {
+		fmt.Fprintf(r.opts.Stdout, "WARNING %s could not be merged in place; layout and comments were re-rendered\n", relInputs)
 	}
 	if r.opts.DryRun {
-		fmt.Fprintf(r.opts.Stdout, "🧪 Dry-run: would update %s\n", rel)
+		fmt.Fprintf(r.opts.Stdout, "🧪 Dry-run: would merge %s with %s\n", relInputs, origin)
 		return nil
 	}
-	if err := os.WriteFile(file, []byte(strings.Join(lines, "")), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", rel, err)
+	if err := replaceRegularFile(inputsPath, merged.Content, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("write %s: %w", relInputs, err)
 	}
-	fmt.Fprintf(r.opts.Stdout, "✏️  Updated %s\n", rel)
+	fmt.Fprintf(r.opts.Stdout, "✏️  Merged %s with %s\n", relInputs, origin)
 	return nil
+}
+
+// moduleBoilerplatePath scopes the boilerplate lookup to the module's
+// subdirectory for //subdir sources, so a monorepo never merges another
+// module's baseline. It rejects subdirectories that escape the repository.
+func moduleBoilerplatePath(subdir string) (string, bool) {
+	trimmed := strings.Trim(subdir, "/")
+	if trimmed == "" {
+		return boilerplateInputsPath, true
+	}
+	cleaned := path.Clean(trimmed)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+		return "", false
+	}
+	if cleaned == "." {
+		return boilerplateInputsPath, true
+	}
+	return path.Join(cleaned, boilerplateInputsPath), true
+}
+
+// replaceRegularFile writes content to a sibling temporary file and renames it
+// over target, so a crash never leaves a truncated file and a target swapped
+// for a symlink after inspection is replaced rather than written through.
+func replaceRegularFile(target string, content []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, target)
+}
+
+// containsGoTemplate reports Go template actions. Boilerplate renders every
+// file in .boilerplate as a template, so any action means the file is not a
+// plain YAML baseline and the module scaffolding must be regenerated instead.
+func containsGoTemplate(data []byte) bool {
+	return bytes.Contains(data, []byte("{{"))
 }
 
 func sourceEntries(file string, lines []string) []ModuleEntry {

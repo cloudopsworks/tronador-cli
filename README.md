@@ -89,7 +89,7 @@ Global flags available from the root command:
 
 `tronador iac` commands run only when `--workdir` contains `.cloudopsworks/.iac`.
 
-- `iac module` — scan `terragrunt.hcl` files for direct GitHub module sources with `?ref=` pins, report available patch/minor/major targets, flag missing `git::` prefixes, and optionally mutate the selected tier.
+- `iac module` — scan `terragrunt.hcl` files for direct GitHub module sources with `?ref=` pins, report available patch/minor/major targets, flag missing `git::` prefixes, and optionally mutate the selected tier. With `--upgrade --merge-inputs` (`-m`), also merge each module's `inputs.yaml` with the target version's `.boilerplate/inputs.yaml` using the `repos upgrade` YAML merge.
 - Compatibility aliases: `iac module-versions` and `iac module_versions`.
 - `--path` limits module discovery without changing marker validation; relative paths resolve under `--workdir` and paths outside `--workdir` are rejected.
 
@@ -348,6 +348,9 @@ tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --maj
 
 # Allow alpha and beta prereleases when selecting updates
 tronador iac module --workdir ../my-iac-workspace --upgrade --alpha --beta
+
+# Upgrade refs and merge each module's inputs.yaml with the new boilerplate
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --merge-inputs
 ```
 
 #### Tag AWS Resources
