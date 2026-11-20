@@ -132,30 +132,12 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 			usedTargets[targetName] = true
 			continue
 		}
-		if !hasActiveYAMLNode(local.node) {
-			if hasYAMLComment(local.data) {
-				warnConfig(r, localName, "comment-only")
-			}
-			plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: target.data, baseline: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
-			usedTargets[targetName] = true
-			continue
-		}
-		merged := cloneYAMLNode(target.node)
-		var unmapped []string
-		mergeYAMLNodes(merged, local.node, "", &unmapped)
-		for _, path := range unmapped {
+		content, warnings, err := mergeYAMLDocument(target, local, localName)
+		for _, path := range warnings {
 			warnConfig(r, localName, path)
 		}
-		content, rendered := renderYAMLTargetBaseline(target.data, local.data, target.node, local.node)
-		if !rendered {
-			warnConfig(r, localName, "renderer-fallback: raw spans not provable")
-			content, err = yaml.Marshal(merged)
-			if err != nil {
-				return cloudOpsworksConfigPlan{}, fmt.Errorf("marshal merged YAML %s: %w", localName, err)
-			}
-			if !validateRenderedYAML(content) {
-				return cloudOpsworksConfigPlan{}, fmt.Errorf("validate merged YAML %s", localName)
-			}
+		if err != nil {
+			return cloudOpsworksConfigPlan{}, err
 		}
 		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: content, baseline: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
 		usedTargets[targetName] = true
@@ -432,24 +414,36 @@ func readYAMLDocuments(base, root string, names []string) (map[string]yamlDocume
 		if err != nil {
 			return nil, fmt.Errorf("read YAML %s: %w", name, err)
 		}
-		var node yaml.Node
-		decoder := yaml.NewDecoder(bytes.NewReader(data))
-		if err := decoder.Decode(&node); err != nil && err != io.EOF {
-			return nil, fmt.Errorf("parse YAML %s: %w", name, err)
-		}
-		var extra yaml.Node
-		if err := decoder.Decode(&extra); err != io.EOF {
-			if err == nil {
-				return nil, fmt.Errorf("unsafe YAML %s: multiple documents are not supported", name)
-			}
-			return nil, fmt.Errorf("parse YAML %s: %w", name, err)
-		}
-		if err := validateYAMLNode(&node, name); err != nil {
+		document, err := parseYAMLDocument(name, data)
+		if err != nil {
 			return nil, err
 		}
-		documents[name] = yamlDocument{node: &node, mode: info.Mode().Perm(), data: data}
+		document.mode = info.Mode().Perm()
+		documents[name] = document
 	}
 	return documents, nil
+}
+
+// parseYAMLDocument decodes exactly one YAML document and rejects constructs
+// the merge cannot round-trip safely (aliases, anchors, duplicate keys). The
+// returned document has no file mode; callers that write it must set one.
+func parseYAMLDocument(name string, data []byte) (yamlDocument, error) {
+	var node yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(&node); err != nil && err != io.EOF {
+		return yamlDocument{}, fmt.Errorf("parse YAML %s: %w", name, err)
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return yamlDocument{}, fmt.Errorf("unsafe YAML %s: multiple documents are not supported", name)
+		}
+		return yamlDocument{}, fmt.Errorf("parse YAML %s: %w", name, err)
+	}
+	if err := validateYAMLNode(&node, name); err != nil {
+		return yamlDocument{}, err
+	}
+	return yamlDocument{node: &node, data: data}, nil
 }
 
 // validateYAMLSourceFile re-checks every source component immediately before
@@ -910,6 +904,155 @@ func mappingEnabled(node *yaml.Node, key string) bool {
 		}
 	}
 	return false
+}
+
+// mergeYAMLDocument overlays configured local values onto a template baseline.
+// It returns the merged content and the paths that warrant an operator warning
+// (comment-only local file, unmapped local keys, renderer fallback). Callers
+// still own duplicate reconciliation and indentation normalization.
+func mergeYAMLDocument(target, local yamlDocument, name string) ([]byte, []string, error) {
+	var warnings []string
+	if !hasActiveYAMLNode(local.node) {
+		if hasYAMLComment(local.data) {
+			warnings = append(warnings, yamlWarningCommentOnly)
+		}
+		return target.data, warnings, nil
+	}
+	merged := cloneYAMLNode(target.node)
+	var unmapped []string
+	mergeYAMLNodes(merged, local.node, "", &unmapped)
+	warnings = append(warnings, unmapped...)
+	content, rendered := renderYAMLTargetBaseline(target.data, local.data, target.node, local.node)
+	if rendered {
+		return content, warnings, nil
+	}
+	warnings = append(warnings, yamlWarningRendererFallback)
+	content, err := yaml.Marshal(merged)
+	if err != nil {
+		return nil, warnings, fmt.Errorf("marshal merged YAML %s: %w", name, err)
+	}
+	if !validateRenderedYAML(content) {
+		return nil, warnings, fmt.Errorf("validate merged YAML %s", name)
+	}
+	return content, warnings, nil
+}
+
+const (
+	yamlWarningCommentOnly      = "comment-only"
+	yamlWarningRendererFallback = "renderer-fallback: raw spans not provable"
+)
+
+// YAMLMergeResult is the outcome of MergeTemplateYAML.
+type YAMLMergeResult struct {
+	// Content is the merged, normalized YAML ready to be written.
+	Content []byte
+	// Unmapped lists local key paths that had no active slot in the template
+	// and were preserved as-is.
+	Unmapped []string
+	// Added lists the topmost key paths that are active in Content but were not
+	// active in the local document, i.e. values introduced by the template.
+	Added []string
+	// CommentOnly reports that the local document had no active values and was
+	// replaced by the template baseline.
+	CommentOnly bool
+	// RendererFallback reports that comment-preserving raw rendering was not
+	// provable and the semantic encoder produced Content instead.
+	RendererFallback bool
+}
+
+func newYAMLMergeResult(warnings []string) YAMLMergeResult {
+	var result YAMLMergeResult
+	for _, warning := range warnings {
+		switch warning {
+		case yamlWarningCommentOnly:
+			result.CommentOnly = true
+		case yamlWarningRendererFallback:
+			result.RendererFallback = true
+		default:
+			result.Unmapped = append(result.Unmapped, warning)
+		}
+	}
+	return result
+}
+
+// activeYAMLKeyPaths returns the dot-joined path of every active mapping key,
+// descending through nested mappings (sequence items are treated as values).
+func activeYAMLKeyPaths(node *yaml.Node) map[string]bool {
+	paths := make(map[string]bool)
+	var walk func(*yaml.Node, string)
+	walk = func(n *yaml.Node, prefix string) {
+		if n == nil || n.Kind != yaml.MappingNode {
+			return
+		}
+		for index := 0; index+1 < len(n.Content); index += 2 {
+			path := n.Content[index].Value
+			if prefix != "" {
+				path = prefix + "." + path
+			}
+			paths[path] = true
+			walk(n.Content[index+1], path)
+		}
+	}
+	walk(documentRoot(node), "")
+	return paths
+}
+
+// addedYAMLKeyPaths returns the topmost paths active in merged but not local.
+func addedYAMLKeyPaths(local, merged *yaml.Node) []string {
+	before, after := activeYAMLKeyPaths(local), activeYAMLKeyPaths(merged)
+	added := make([]string, 0)
+	for path := range after {
+		if before[path] {
+			continue
+		}
+		parentAdded := false
+		for parent := path; strings.Contains(parent, "."); {
+			parent = parent[:strings.LastIndex(parent, ".")]
+			if after[parent] && !before[parent] {
+				parentAdded = true
+				break
+			}
+		}
+		if !parentAdded {
+			added = append(added, path)
+		}
+	}
+	sort.Strings(added)
+	return added
+}
+
+// MergeTemplateYAML applies the same comment-preserving merge used by
+// `repos upgrade` for CloudOps configuration: the template is the baseline and
+// values configured in local are overlaid onto it. name is used only in errors.
+func MergeTemplateYAML(name string, template, local []byte) (YAMLMergeResult, error) {
+	target, err := parseYAMLDocument(name+" (template)", template)
+	if err != nil {
+		return YAMLMergeResult{}, err
+	}
+	localDoc, err := parseYAMLDocument(name, local)
+	if err != nil {
+		return YAMLMergeResult{}, err
+	}
+	content, warnings, err := mergeYAMLDocument(target, localDoc, name)
+	result := newYAMLMergeResult(warnings)
+	if err != nil {
+		return result, err
+	}
+	deduplicated, err := deduplicateYAMLTemplateEntries(target.data, content)
+	if err != nil {
+		return result, fmt.Errorf("reconcile YAML duplicates %s: %w", name, err)
+	}
+	normalized, err := sanitizeYAMLIndentation(deduplicated)
+	if err != nil {
+		return result, fmt.Errorf("normalize YAML indentation %s: %w", name, err)
+	}
+	mergedDoc, err := parseYAMLDocument(name+" (merged)", normalized)
+	if err != nil {
+		return result, err
+	}
+	result.Content = normalized
+	result.Added = addedYAMLKeyPaths(localDoc.node, mergedDoc.node)
+	return result, nil
 }
 
 func mergeYAMLNodes(target, local *yaml.Node, path string, unmapped *[]string) {

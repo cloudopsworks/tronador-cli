@@ -61,3 +61,33 @@ func TestIACModuleTierFlagsAreMutuallyExclusive(t *testing.T) {
 		t.Fatal("parsing --minor and --major succeeded, want mutually-exclusive error")
 	}
 }
+
+func TestIACModuleExposesMergeInputsFlagWithAliases(t *testing.T) {
+	cmd := newIACModuleVersionsCommand()
+	flag := cmd.Flag("merge-inputs")
+	if flag == nil || flag.Shorthand != "m" {
+		t.Fatalf("--merge-inputs/-m missing: %#v", flag)
+	}
+	if cmd.Flags().Lookup("merge-input") != flag {
+		t.Fatal("--merge-input does not resolve to --merge-inputs")
+	}
+}
+
+func TestIACModuleMergeInputsRequiresUpgrade(t *testing.T) {
+	for _, args := range [][]string{{"--merge-inputs"}, {"-m"}, {"--merge-input"}} {
+		t.Run(args[0], func(t *testing.T) {
+			t.Cleanup(func() {
+				iacModuleVersionsMerge = false
+				iacModuleVersionsUpgrade = false
+			})
+			cmd := newIACModuleVersionsCommand()
+			cmd.SetArgs(args)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			err := cmd.Execute()
+			if err == nil || err.Error() != "--merge-inputs requires --upgrade" {
+				t.Fatalf("Execute(%v) error = %v, want --merge-inputs requires --upgrade", args, err)
+			}
+		})
+	}
+}

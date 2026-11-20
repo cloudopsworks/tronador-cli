@@ -81,6 +81,49 @@ same version. Non-SemVer refs are reported but are never automatically
 rewritten. Findings such as outdated refs or missing prefixes are report results
 and do not by themselves cause a non-zero exit code.
 
+### Merging module `inputs.yaml`
+
+With `-u, --upgrade` plus `-m, --merge-inputs` (alias `--merge-input`), each
+processed module directory's `inputs.yaml` is merged with the Terraform module's
+`.boilerplate/inputs.yaml` at the target version. The merge is the same
+comment-preserving YAML merge that `tronador repos upgrade` applies to
+CloudOps configuration files:
+
+- the boilerplate `inputs.yaml` is the baseline, so new options and updated
+  documentation comments are picked up;
+- every value configured locally is kept, placed in its template slot when the
+  boilerplate documents it (commented-out duplicates are removed), and
+  otherwise preserved with a `WARNING preserving unmapped configuration` line;
+- values that are active in the boilerplate but were not set locally (for example
+  a new required input with a placeholder) are added and reported with
+  `WARNING adding boilerplate value ... review it before applying`, because
+  Terragrunt passes `inputs.yaml` to Terraform;
+- a local `inputs.yaml` with no active values is replaced by the boilerplate
+  baseline, with a warning;
+- the output uses two-space indentation and is written atomically, only when it
+  changes, keeping the file's permissions.
+
+The target version is the selected upgrade tag when the module is upgraded,
+otherwise the module's current `?ref=`. The boilerplate is read through the
+GitHub API from the module repository root, or from `<subdir>/.boilerplate/inputs.yaml`
+for `//subdir` sources, so the same authentication used for tag
+lookup applies.
+
+`inputs.yaml` is left unchanged, with a warning, when:
+
+- the module directory has no `inputs.yaml`;
+- the module directory's `inputs.yaml` is a symlink or cannot be read;
+- the `terragrunt.hcl` does not have exactly one supported GitHub source;
+- the module version has no `.boilerplate/inputs.yaml`, or it cannot be fetched;
+- the boilerplate `inputs.yaml` contains Go templates (`{{ ... }}`). Such
+  modules render `inputs.yaml` during scaffolding, so regenerate the Terragrunt
+  scaffolding for that module instead;
+- either YAML document cannot be merged safely (invalid YAML, multiple
+  documents, anchors/aliases, or duplicate keys).
+
+In every case `terragrunt.hcl` is processed as usual. `--merge-inputs` requires
+`--upgrade`; with `--dry-run` the command reports the merge without writing.
+
 Operational failures, such as an invalid workdir, missing `.cloudopsworks/.iac`,
 out-of-scope `--path`, file read/write errors, or unhandled tag lookup failures,
 return non-zero.
@@ -96,6 +139,7 @@ return non-zero.
 | `--major` | With `--upgrade`, select the highest eligible later major target. Mutually exclusive with `--minor`. |
 | `--alpha` | Allow alpha prerelease tags when selecting an update. |
 | `--beta` | Allow beta prerelease tags when selecting an update. |
+| `-m, --merge-inputs` | With `--upgrade`, merge each module's `inputs.yaml` with the module version's `.boilerplate/inputs.yaml`. Alias: `--merge-input`. |
 | `--fix-prefix` | Add missing `git::` prefixes for eligible GitHub HTTPS sources without changing refs. |
 | `--dry-run` | Analyze and print intended mutations without writing files. |
 | `-r, --report-ghaction` | Emit GitHub Actions warning annotations for outdated modules. |
@@ -140,6 +184,14 @@ Allow alpha and beta prereleases when applying updates:
 
 ```bash
 tronador iac module --workdir ../my-iac-workspace --upgrade --alpha --beta
+```
+
+Upgrade module refs and merge each module's `inputs.yaml` with the new
+version's boilerplate (preview first with `--dry-run`):
+
+```bash
+tronador iac module --workdir ../my-iac-workspace --path env/dev --upgrade --merge-inputs --dry-run
+tronador iac module --workdir ../my-iac-workspace --path env/dev -u -m
 ```
 
 Only add missing `git::` prefixes without changing `?ref=` pins:
