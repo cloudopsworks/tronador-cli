@@ -103,6 +103,11 @@ CloudOps configuration files:
 - the output uses two-space indentation and is written atomically, only when it
   changes, keeping the file's permissions.
 
+The merge recognizes both `#key:` and `# key:` template slots, including
+blocks commented from column one (for example, `#      subnets:`). It keeps
+the nesting of configured values and leaves unused examples commented. A
+prose line such as `# endpoint: see issue #123` is not a template slot.
+
 The target version is the selected upgrade tag when the module is upgraded,
 otherwise the module's current `?ref=`. The boilerplate is read through the
 GitHub API from the module repository root, or from `<subdir>/.boilerplate/inputs.yaml`

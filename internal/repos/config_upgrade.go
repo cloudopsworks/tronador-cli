@@ -918,14 +918,12 @@ func mergeYAMLDocument(target, local yamlDocument, name string) ([]byte, []strin
 		}
 		return target.data, warnings, nil
 	}
-	merged := cloneYAMLNode(target.node)
-	var unmapped []string
-	mergeYAMLNodes(merged, local.node, "", &unmapped)
-	warnings = append(warnings, unmapped...)
-	content, rendered := renderYAMLTargetBaseline(target.data, local.data, target.node, local.node)
+	content, activated, rendered := renderYAMLTargetBaselineWithPlacements(target.data, local.data, target.node, local.node)
 	if rendered {
-		return content, warnings, nil
+		return content, unmappedYAMLPlacements(documentRoot(target.node), documentRoot(local.node), activated), nil
 	}
+	merged := cloneYAMLNode(target.node)
+	mergeYAMLNodes(merged, local.node, "", &warnings)
 	warnings = append(warnings, yamlWarningRendererFallback)
 	content, err := yaml.Marshal(merged)
 	if err != nil {
@@ -946,8 +944,8 @@ const (
 type YAMLMergeResult struct {
 	// Content is the merged, normalized YAML ready to be written.
 	Content []byte
-	// Unmapped lists local key paths that had no active slot in the template
-	// and were preserved as-is.
+	// Unmapped lists local key paths preserved without a corresponding active
+	// or successfully reused commented template slot.
 	Unmapped []string
 	// Added lists the topmost key paths that are active in Content but were not
 	// active in the local document, i.e. values introduced by the template.
@@ -1061,6 +1059,36 @@ func mergeYAMLNodes(target, local *yaml.Node, path string, unmapped *[]string) {
 		return
 	}
 	mergeYAMLValue(targetRoot, localRoot, path, unmapped)
+}
+
+// unmappedYAMLPlacements reports the topmost missing paths. A verified
+// commented mapping opens a scope but does not prove any of its children:
+// each child must also have been placed in a template slot.
+func unmappedYAMLPlacements(target, local *yaml.Node, activated map[string]bool) []string {
+	var unmapped []string
+	var visit func(*yaml.Node, *yaml.Node, string)
+	visit = func(target, local *yaml.Node, parent string) {
+		if local == nil || local.Kind != yaml.MappingNode || (parent != "" && target != nil && target.Kind != yaml.MappingNode && !bareYAMLMappingHeader(target)) {
+			return
+		}
+		for index := 0; index+1 < len(local.Content); index += 2 {
+			key, localValue := local.Content[index].Value, local.Content[index+1]
+			path := joinRawYAMLPath(parent, key)
+			if target != nil && target.Kind == yaml.MappingNode {
+				if targetIndex := mappingIndex(target, key); targetIndex >= 0 {
+					visit(target.Content[targetIndex+1], localValue, path)
+					continue
+				}
+			}
+			if activated[path] {
+				visit(nil, localValue, path)
+				continue
+			}
+			unmapped = append(unmapped, strings.ReplaceAll(path, rawYAMLPathSeparator, "."))
+		}
+	}
+	visit(target, local, "")
+	return unmapped
 }
 
 func mergeYAMLValue(target, local *yaml.Node, path string, unmapped *[]string) {

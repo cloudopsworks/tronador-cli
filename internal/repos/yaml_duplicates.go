@@ -146,22 +146,3 @@ func yamlMappingValues(root *yaml.Node) map[string]*yaml.Node {
 	walk(root, "")
 	return values
 }
-
-func commentedEntryValue(lines []string, key string) *yaml.Node {
-	if !safeCommentedCandidate(lines, key) {
-		return nil
-	}
-	plain := make([]string, len(lines))
-	for index, line := range lines {
-		plain[index] = uncommentStructuralLine(line)
-	}
-	var node yaml.Node
-	if yaml.Unmarshal([]byte(strings.Join(plain, "\n")), &node) != nil {
-		return nil
-	}
-	root := documentRoot(&node)
-	if root == nil || root.Kind != yaml.MappingNode || len(root.Content) != 2 {
-		return nil
-	}
-	return root.Content[1]
-}
