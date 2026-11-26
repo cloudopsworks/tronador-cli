@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/cli/go-gh/v2/pkg/api"
+	"go.yaml.in/yaml/v3"
 )
 
 type fetchCall struct {
@@ -117,6 +119,118 @@ func TestMergeInputsUsesUpgradedRefBoilerplate(t *testing.T) {
 	}
 	if !strings.Contains(out, "already matches") {
 		t.Fatalf("second run output missing no-op notice:\n%s", out)
+	}
+}
+
+func TestMergeInputsPreservesRotationBoilerplateCommentAlignment(t *testing.T) {
+	const inactiveSettings = `  # For API-key rotation, use a pre-existing management secret.
+  # management_api_key: # (Optional) Management credentials.
+  #   secret_arn: example/management
+  # provider_settings: # (Optional) Provider-specific configuration.
+  #   organization_id: org_example
+`
+	const inactiveIAM = `  # iam: # (Optional) Extra permissions.
+  #   statements:
+  #     - effect: Allow
+  #       action:
+  #         - service:Read
+`
+	const vpcDocs = "# VPC configuration applies only to standalone deployments.\n"
+	const inactiveVPC = `# vpc:
+#   enabled: false # (Optional) Attach to a VPC.
+#   subnets:
+#     - subnet-example
+`
+	const boilerplate = `# Module configuration
+settings:
+  type: postgres # (Required) Rotation target.
+  # timeout: 60 # (Optional) Timeout in seconds.
+` + inactiveSettings + `  # logging: # (Optional) Logging configuration.
+  #   log_format: JSON # (Optional) Log format.
+  # environment: # (Optional) Environment configuration.
+  #   variables:
+  #     - name: DEFAULT_CA
+  #       value: /sample/default.pem
+  # allowed_secrets: # (Optional) Target secrets.
+  #   - example/default-secret
+` + inactiveIAM + "\n" + vpcDocs + inactiveVPC
+	for _, tc := range []struct {
+		name, variables, vpc string
+	}{
+		{"mongodbatlas", "\n      - name: CUSTOM_CA\n        value: /sample/custom.pem", ""},
+		{"postgres", " []", "vpc:\n  enabled: true\n  subnets:\n    - subnet-configured\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, hcl, inputs := newMergeWorkspace(t, true)
+			// Downstream copies may use a different pad after their '#' markers.
+			local := "settings:\n  type: " + tc.name + "\n  timeout: 90\n" +
+				strings.ReplaceAll(inactiveSettings, "  # ", "  #") +
+				"  logging:\n    log_format: Text\n  environment:\n    variables:" + tc.variables +
+				"\n  allowed_secrets:\n    - example/configured-secret\n" + tc.vpc
+			writeFile(t, inputs, local)
+			opts := ModuleVersionsOptions{WorkDir: dir, Upgrade: true, MergeInputs: true, FileFetcher: &fakeFileFetcher{files: map[string]string{
+				"cloudopsworks/terraform-module@v1.0.1:.boilerplate/inputs.yaml": boilerplate,
+			}}}
+			out := runMerge(t, opts)
+			if !strings.Contains(readFile(t, hcl), "ref=v1.0.1") || !strings.Contains(out, "Merged env/mod/inputs.yaml") {
+				t.Fatalf("module pin and inputs were not updated:\n%s", out)
+			}
+			got := readFile(t, inputs)
+			var wantValues, gotValues map[string]any
+			if err := yaml.Unmarshal([]byte(local), &wantValues); err != nil {
+				t.Fatalf("invalid local test fixture: %v", err)
+			}
+			if err := yaml.Unmarshal([]byte(got), &gotValues); err != nil {
+				t.Fatalf("invalid merged YAML: %v\n%s", err, got)
+			}
+			if !reflect.DeepEqual(gotValues, wantValues) {
+				t.Errorf("merge changed active configuration:\n got: %#v\nwant: %#v", gotValues, wantValues)
+			}
+			if strings.Contains(out, "layout and comments were re-rendered") {
+				t.Errorf("merge fell back to re-rendering layout:\n%s", out)
+			}
+			if strings.Contains(out, "WARNING preserving unmapped configuration") {
+				t.Errorf("commented template slots were reported as unmapped:\n%s", out)
+			}
+			blocks := []string{inactiveSettings, inactiveIAM, vpcDocs}
+			if tc.vpc == "" {
+				blocks = append(blocks, vpcDocs+inactiveVPC)
+			}
+			for _, block := range blocks {
+				if strings.Count(got, block) != 1 {
+					t.Errorf("boilerplate block did not survive once at its original indentation:\n%s\nmerged:\n%s", block, got)
+				}
+			}
+			if strings.Count(got, "For API-key rotation, use a pre-existing management secret.") != 1 ||
+				strings.Count(got, "management_api_key:") != 1 {
+				t.Errorf("unpadded copies of already-documented settings survived:\n%s", got)
+			}
+			if strings.Index(got, inactiveSettings) > strings.Index(got, "\n  logging:") ||
+				strings.Index(got, inactiveIAM) > strings.Index(got, vpcDocs) {
+				t.Errorf("boilerplate documentation moved out of its section:\n%s", got)
+			}
+			if strings.Contains(got, "example/default-secret") || strings.Contains(got, "DEFAULT_CA") {
+				t.Errorf("replaced sequence placeholders survived:\n%s", got)
+			}
+			if out := runMerge(t, opts); readFile(t, inputs) != got || !strings.Contains(out, "already matches") {
+				t.Errorf("second merge was not a no-op:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestMergeInputsWarnsForUndocumentedConfiguration(t *testing.T) {
+	dir, _, inputs := newMergeWorkspace(t, true)
+	writeFile(t, inputs, mergeTestLocal+"operator_option: configured\n")
+	fetcher := &fakeFileFetcher{files: map[string]string{
+		"cloudopsworks/terraform-module@v1.0.1:.boilerplate/inputs.yaml": mergeTestBoilerplate,
+	}}
+	out := runMerge(t, ModuleVersionsOptions{WorkDir: dir, Upgrade: true, MergeInputs: true, FileFetcher: fetcher})
+	if !strings.Contains(out, "WARNING preserving unmapped configuration env/mod/inputs.yaml path operator_option") {
+		t.Fatalf("output missing unmapped configuration warning:\n%s", out)
+	}
+	if got := readFile(t, inputs); !strings.Contains(got, "operator_option: configured") {
+		t.Fatalf("undocumented operator setting was not preserved:\n%s", got)
 	}
 }
 

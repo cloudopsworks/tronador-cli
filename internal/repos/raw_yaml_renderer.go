@@ -14,16 +14,23 @@ import (
 // which attaches trailing comments to whichever node it happens to emit next.
 // It returns false when a local value cannot be safely placed in the template.
 func renderYAMLTargetBaseline(target, local []byte, targetNode, localNode *yaml.Node) ([]byte, bool) {
+	content, _, ok := renderYAMLTargetBaselineWithPlacements(target, local, targetNode, localNode)
+	return content, ok
+}
+
+// Return commented placements only when the entire raw render is verified.
+func renderYAMLTargetBaselineWithPlacements(target, local []byte, targetNode, localNode *yaml.Node) ([]byte, map[string]bool, bool) {
 	targetLines := splitYAMLLines(target)
 	localLines := splitYAMLLines(local)
 	targetSpans := yamlRawSpans(targetLines)
 	localSpans := yamlRawSpans(localLines)
 	replacements := make(map[int]rawReplacement)
-	if !overlayRawYAML(documentRoot(targetNode), documentRoot(localNode), "", targetLines, localLines, targetSpans, localSpans, replacements) {
-		return nil, false
+	activated := make(map[string]bool)
+	if !overlayRawYAML(documentRoot(targetNode), documentRoot(localNode), "", targetLines, localLines, targetSpans, localSpans, replacements, activated) {
+		return nil, nil, false
 	}
 	if len(replacements) == 0 {
-		return target, true
+		return target, activated, true
 	}
 	starts := make([]int, 0, len(replacements))
 	for start := range replacements {
@@ -42,21 +49,23 @@ func renderYAMLTargetBaseline(target, local []byte, targetNode, localNode *yaml.
 	// lines untouched.
 	content = restoreTrailingLineFeeds(content, trailingLineFeedCount(target))
 	if !validateRenderedYAML(content) || !renderedYAMLSemanticallyMatches(content, targetNode, localNode) {
-		return nil, false
+		return nil, nil, false
 	}
-	return content, true
+	return content, activated, true
 }
 
 type rawYAMLSpan struct {
-	start, end   int
-	indent       int
-	renderIndent int
-	commented    bool
+	start, end int
+	indent     int
+	commented  bool
 }
 
 type rawReplacement struct {
 	start, end int
 	lines      []string
+	// activatedPath is set only when replacing a proven commented slot,
+	// not when inserting a local value next to one.
+	activatedPath string
 }
 
 func trailingLineFeedCount(data []byte) int {
@@ -127,67 +136,77 @@ func yamlRawSpans(lines []string) map[string]rawYAMLSpan {
 }
 
 type rawYAMLSpanEntry struct {
-	path string
-	span rawYAMLSpan
+	path   string
+	span   rawYAMLSpan
+	parent int // index of the containing entry, or -1 at the root
 }
 
 func yamlRawSpanEntries(lines []string) []rawYAMLSpanEntry {
-	type stackItem struct {
-		indent    int
-		path      string
-		commented bool
-	}
 	var entries []rawYAMLSpanEntry
-	var stack []stackItem
+	var stack []int
+	childIndents := make(map[int]int)
 	for index, line := range lines {
 		indent, key, commented, ok := rawYAMLKey(line)
 		if !ok {
 			continue
 		}
-		for len(stack) > 0 && stack[len(stack)-1].indent >= indent {
+		for len(stack) > 0 {
+			ancestor := entries[stack[len(stack)-1]].span
+			// An inactive key cannot be the parent of an active entry.
+			if ancestor.indent < indent && (commented || !ancestor.commented) {
+				break
+			}
 			stack = stack[:len(stack)-1]
 		}
-		// Commented-out keys describe inactive defaults, not parents of a
-		// subsequent active sibling. Drop them before resolving an active path;
-		// otherwise a commented `extra:` makes a later active sibling appear as
-		// `extra.sibling` instead of its YAML parent's child.
-		if !commented {
-			for len(stack) > 0 && stack[len(stack)-1].commented {
-				stack = stack[:len(stack)-1]
+		path, parent := key, -1
+		if len(stack) > 0 {
+			parent = stack[len(stack)-1]
+			path = joinRawYAMLPath(entries[parent].path, key)
+			if !commented {
+				childIndents[parent] = indent
 			}
 		}
-		path := key
-		if len(stack) > 0 {
-			path = joinRawYAMLPath(stack[len(stack)-1].path, key)
-		}
-		entries = append(entries, rawYAMLSpanEntry{path: path, span: rawYAMLSpan{start: index, indent: indent, commented: commented}})
-		stack = append(stack, stackItem{indent: indent, path: path, commented: commented})
+		stack = append(stack, len(entries))
+		entries = append(entries, rawYAMLSpanEntry{
+			path: path, parent: parent, span: rawYAMLSpan{start: index, indent: indent, commented: commented},
+		})
 	}
-	// A leading space after '#' is a comment pad when the root default is
-	// written as `# key:`; descendants use that same pad. With `#key:` the
-	// pad is zero. Preserve the resulting YAML indentation independently from
-	// the parser indentation used only for raw path lookup.
-	rootPads := make(map[string]int)
-	for _, entry := range entries {
-		if entry.span.commented && !strings.Contains(entry.path, rawYAMLPathSeparator) {
-			rootPads[entry.path] = commentedKeySpaces(lines[entry.span.start])
+
+	// The marker may be at the key or in column one. A commented subtree
+	// shares its marker padding, not its indentation. Active siblings give
+	// the actual key column, even if they occur *after* the commented block.
+	pads := make([]int, len(entries))
+	for i, entry := range entries {
+		if !entry.span.commented {
+			continue
 		}
+		line := lines[entry.span.start]
+		spaces := commentedKeySpaces(line)
+		column := leadingRawSpaces(line) + spaces
+		switch {
+		case entry.parent < 0:
+			pads[i] = spaces
+		case spaces == 1:
+			pads[i] = 1
+		case entries[entry.parent].span.commented:
+			pads[i] = min(spaces, pads[entry.parent])
+		case spaces > 0:
+			expected, ok := childIndents[entry.parent]
+			if !ok {
+				expected = entries[entry.parent].span.indent + configYAMLIndent
+			}
+			if column == expected+1 {
+				pads[i] = 1
+			}
+		}
+		entries[i].span.indent = column - pads[i]
 	}
 	for entryIndex := range entries {
 		span := entries[entryIndex].span
-		if span.commented {
-			root := entryPathRoot(entries[entryIndex].path)
-			pad := rootPads[root]
-			physical := len(lines[span.start]) - len(strings.TrimLeft(lines[span.start], " "))
-			span.renderIndent = physical + commentedKeySpaces(lines[span.start]) - pad
-		} else {
-			span.renderIndent = span.indent
-		}
 		end := len(lines)
-		for index := span.start + 1; index < len(lines); index++ {
-			indent, _, _, ok := rawYAMLKey(lines[index])
-			if ok && indent <= span.indent {
-				end = index
+		for _, next := range entries[entryIndex+1:] {
+			if next.span.indent <= span.indent {
+				end = next.span.start
 				// A separated prose/blank block before the next key belongs to
 				// that next key, not to the preceding value being replaced. Do
 				// not steal an adjacent prose line from a commented candidate:
@@ -279,8 +298,8 @@ func rawYAMLKey(line string) (indent int, key string, commented bool, ok bool) {
 	return indent, key, commented, true
 }
 
-func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLines []string, targetSpans, localSpans map[string]rawYAMLSpan, replacements map[int]rawReplacement) bool {
-	if local == nil || local.Kind != yaml.MappingNode || (path != "" && (target == nil || target.Kind != yaml.MappingNode)) {
+func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLines []string, targetSpans, localSpans map[string]rawYAMLSpan, replacements map[int]rawReplacement, activated map[string]bool) bool {
+	if local == nil || local.Kind != yaml.MappingNode {
 		return false
 	}
 	for index := 0; index+1 < len(local.Content); index += 2 {
@@ -300,7 +319,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 		}
 		uniqueCommentedTarget := false
 		if targetHasSpan && targetSpan.commented {
-			uniqueCommentedTarget = countCommentedPath(targetLines, childPath, targetSpan.indent) == 1
+			uniqueCommentedTarget = countCommentedPath(targetLines, childPath) == 1
 			if !uniqueCommentedTarget {
 				selected, ok := compatibleCommentedTargetSpan(targetLines, childPath, localValue)
 				if ok {
@@ -352,7 +371,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 				candidateReplacements, ok = activateCommentedValue(target, localValue, childPath, targetLines, localLines, targetSpans, localSpans)
 			} else if localValue.Kind == yaml.ScalarNode && safeCommentedScalarLine(targetLines[targetSpan.start], key.Value) {
 				// Documentation around a scalar default belongs to neighboring
-				// sections, but the exact no-gap commented key is still a provable
+				// sections, but the documented key line can still be a provable
 				// template placeholder. A block scalar also owns its body lines.
 				candidateReplacements, ok = activateCommentedScalar(localValue, childPath, targetSpan, localSpan, targetLines, localLines, targetSpans)
 			} else if localValue.Kind != yaml.MappingNode && path == "" {
@@ -372,6 +391,9 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 				if !addRawReplacement(replacements, rawYAMLSpan{start: replacement.start, end: replacement.end}, replacement.lines) {
 					return false
 				}
+				if replacement.activatedPath != "" {
+					activated[replacement.activatedPath] = true
+				}
 			}
 			if len(candidateReplacements) == 0 {
 				return false
@@ -379,7 +401,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 			continue
 		}
 		targetValue := target.Content[targetIndex+1]
-		if targetValue.Kind == yaml.MappingNode && localValue.Kind == yaml.MappingNode {
+		if localValue.Kind == yaml.MappingNode && (targetValue.Kind == yaml.MappingNode || bareYAMLMappingHeader(targetValue)) {
 			// A flow-style mapping has no raw child spans to recurse through.  It
 			// is still structurally safe to render as one collection because the
 			// active target entry proves both its position and indentation.  The
@@ -397,7 +419,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 				// examples. Only replace its proven header: those examples are
 				// documentation, not members of the parsed empty map, and must
 				// remain in their target location.
-				if expandTargetEmptyFlow {
+				if expandTargetEmptyFlow || bareYAMLMappingHeader(targetValue) {
 					span.end = span.start + 1
 				}
 				if !addRawReplacement(replacements, span, replacement) {
@@ -405,7 +427,7 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 				}
 				continue
 			}
-			if !overlayRawYAML(targetValue, localValue, childPath, targetLines, localLines, targetSpans, localSpans, replacements) {
+			if !overlayRawYAML(targetValue, localValue, childPath, targetLines, localLines, targetSpans, localSpans, replacements, activated) {
 				return false
 			}
 			continue
@@ -446,6 +468,12 @@ func overlayRawYAML(target, local *yaml.Node, path string, targetLines, localLin
 		}
 	}
 	return true
+}
+
+// A bare `settings:` whose children are all commented is parsed as null,
+// but still owns their template slots. An explicit `settings: null` does not.
+func bareYAMLMappingHeader(value *yaml.Node) bool {
+	return value != nil && value.Kind == yaml.ScalarNode && value.Tag == "!!null" && value.Value == "" && value.Style == 0
 }
 
 func targetEmptyFlowMapping(value *yaml.Node, line string) bool {
@@ -490,7 +518,7 @@ func yamlIndentWidth(path string, spans map[string]rawYAMLSpan) int {
 		if !isDirectYAMLChild(path, candidatePath) {
 			continue
 		}
-		delta := candidate.renderIndent - parent.renderIndent
+		delta := candidate.indent - parent.indent
 		if delta > 0 && (width == 0 || delta < width) {
 			width = delta
 		}
@@ -616,10 +644,10 @@ func isDirectYAMLChild(parentPath, candidatePath string) bool {
 	return !strings.Contains(strings.TrimPrefix(candidatePath, prefix), rawYAMLPathSeparator)
 }
 
-func countCommentedPath(lines []string, path string, indent int) int {
+func countCommentedPath(lines []string, path string) int {
 	count := 0
 	for _, entry := range yamlRawSpanEntries(lines) {
-		if entry.path == path && entry.span.commented && entry.span.indent == indent {
+		if entry.path == path && entry.span.commented {
 			count++
 		}
 	}
@@ -645,8 +673,8 @@ func compatibleCommentedTargetSpan(lines []string, path string, local *yaml.Node
 		if local.Kind == yaml.SequenceNode {
 			span.end = commentedSequenceSpanEnd(lines, span)
 		}
-		kind, ok := commentedCandidateValueKind(lines[span.start:span.end], pathLeaf(path))
-		if ok && kind == local.Kind {
+		value := commentedEntryValue(lines[span.start:span.end], pathLeaf(path))
+		if value != nil && value.Kind == local.Kind {
 			matches = append(matches, span)
 		}
 	}
@@ -656,28 +684,6 @@ func compatibleCommentedTargetSpan(lines []string, path string, local *yaml.Node
 	return matches[0], true
 }
 
-func commentedCandidateValueKind(lines []string, wantedKey string) (yaml.Kind, bool) {
-	if !safeCommentedCandidate(lines, wantedKey) {
-		return 0, false
-	}
-	plain := make([]string, 0, len(lines))
-	for _, line := range lines {
-		plain = append(plain, uncommentStructuralLine(line))
-	}
-	var node yaml.Node
-	if err := yaml.Unmarshal([]byte(strings.Join(plain, "\n")+"\n"), &node); err != nil {
-		return 0, false
-	}
-	root := documentRoot(&node)
-	if root == nil || root.Kind != yaml.MappingNode || len(root.Content) != 2 || root.Content[0].Value != wantedKey {
-		return 0, false
-	}
-	return root.Content[1].Kind, true
-}
-
-// safeCommentedCandidate only recognizes a block when it can be reconstructed
-// as exactly one YAML mapping entry. This rejects narrative comments that look
-// like YAML by accident, mixed active/commented blocks, and ambiguous defaults.
 func hasFollowingCommentProse(lines []string, end int) bool {
 	if end >= len(lines) {
 		return false
@@ -691,19 +697,19 @@ func hasFollowingCommentProse(lines []string, end int) bool {
 }
 
 func safeCommentedCandidate(lines []string, wantedKey string) bool {
+	return commentedEntryValue(lines, wantedKey) != nil
+}
+
+// Reconstruct exactly one commented YAML entry. An unannotated `# key: text`
+// could just be prose, even if the local file has that key. A nested YAML
+// collection, typed scalar or inline annotation is evidence of a template slot.
+func commentedEntryValue(lines []string, wantedKey string) *yaml.Node {
 	if len(lines) == 0 {
-		return false
+		return nil
 	}
-	// A single space after the marker with no additional virtual indentation
-	// (for example "# key: explanation") is usually narrative prose. The
-	// decisive evidence is indentation encoded after the marker, not the key
-	// name: "#      targets:" is a nested structural default even though it
-	// begins with "# ".
-	firstPhysicalIndent := leadingRawSpaces(lines[0])
-	firstVirtualIndent, _, firstCommented, firstIsKey := rawYAMLKey(lines[0])
-	first := strings.TrimLeft(lines[0], " ")
-	if !firstCommented || !firstIsKey || (strings.HasPrefix(first, "# ") && firstVirtualIndent <= firstPhysicalIndent) {
-		return false
+	_, key, commented, ok := rawYAMLKey(lines[0])
+	if !ok || !commented || key != wantedKey {
+		return nil
 	}
 	plain := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -711,51 +717,56 @@ func safeCommentedCandidate(lines []string, wantedKey string) bool {
 			plain = append(plain, "")
 			continue
 		}
-		indent := len(line) - len(strings.TrimLeft(line, " "))
-		rest := line[indent:]
-		if !strings.HasPrefix(rest, "#") {
-			return false
+		if !strings.HasPrefix(strings.TrimLeft(line, " "), "#") {
+			return nil
 		}
 		uncommented := uncommentStructuralLine(line)
-		trimmed := strings.TrimSpace(uncommented)
-		if _, _, _, ok := rawYAMLKey(line); !ok && !strings.HasPrefix(trimmed, "-") {
-			return false
+		if _, _, _, ok := rawYAMLKey(line); !ok && !strings.HasPrefix(strings.TrimSpace(uncommented), "-") {
+			return nil
 		}
 		plain = append(plain, uncommented)
 	}
-	data := []byte(strings.Join(plain, "\n") + "\n")
-	if !validateRenderedYAML(data) {
-		return false
+	doc, err := parseYAMLDocument("commented template entry", []byte(strings.Join(plain, "\n")+"\n"))
+	if err != nil {
+		return nil
 	}
-	var node yaml.Node
-	if err := yaml.Unmarshal(data, &node); err != nil {
-		return false
+	root := documentRoot(doc.node)
+	if root == nil || root.Kind != yaml.MappingNode || len(root.Content) != 2 || root.Content[0].Value != wantedKey {
+		return nil
 	}
-	root := documentRoot(&node)
-	return root != nil && root.Kind == yaml.MappingNode && len(root.Content) == 2 && root.Content[0].Value == wantedKey
+	value := root.Content[1]
+	if commentedKeySpaces(lines[0]) == 1 && value.Kind == yaml.ScalarNode && !documentedScalarSlot(plain[0], wantedKey, value) {
+		return nil
+	}
+	return value
 }
 
-func safeCommentedScalarLine(line, wantedKey string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	// A space directly after '#' normally marks prose rather than the
-	// commented-out scalar convention. Legacy global inputs use one known
-	// padded placeholder: `# runner_set: "arc-runner-set"`. Do not infer
-	// arbitrary padded prose (even quoted prose) as schema.
-	if !strings.HasPrefix(trimmed, "#") {
-		return false
+// A dated note or an issue reference is not proof of a template slot. Require
+// a boilerplate annotation for ambiguous padded text; allow plain numeric and
+// boolean defaults and the existing quoted runner placeholder.
+func documentedScalarSlot(line, key string, value *yaml.Node) bool {
+	switch value.Tag {
+	case "!!bool", "!!int", "!!float":
+		return true
 	}
-	if strings.HasPrefix(trimmed, "# ") {
-		if wantedKey != "runner_set" {
-			return false
-		}
-		var doc yaml.Node
-		if err := yaml.Unmarshal([]byte(uncommentStructuralLine(line)+"\n"), &doc); err != nil {
-			return false
-		}
-		root := documentRoot(&doc)
-		return root != nil && root.Kind == yaml.MappingNode && len(root.Content) == 2 && root.Content[0].Value == wantedKey && root.Content[1].Kind == yaml.ScalarNode && root.Content[1].Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0
+	if key == "runner_set" && value.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0 {
+		return true
 	}
-	return safeCommentedCandidate([]string{line}, wantedKey)
+	_, annotation := splitRawInlineComment(line)
+	annotation = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(annotation, "#")))
+	for _, kind := range []string{"required", "optional"} {
+		if strings.HasPrefix(annotation, "("+kind+")") || strings.HasPrefix(annotation, "("+kind+" ") || strings.HasPrefix(annotation, kind+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// Immediately before prose, a padded standalone scalar needs independent
+// evidence: its indentation alone cannot distinguish a label from a default.
+func safeCommentedScalarLine(line, key string) bool {
+	value := commentedEntryValue([]string{line}, key)
+	return value != nil && (commentedKeySpaces(line) == 0 || documentedScalarSlot(uncommentStructuralLine(line), key, value))
 }
 
 func uncommentStructuralLine(line string) string {
@@ -779,12 +790,12 @@ func activateCommentedValue(target, local *yaml.Node, path string, targetLines, 
 	}
 	if local.Kind == yaml.MappingNode {
 		header := []string{activatedMappingHeader(targetLines[targetSpan.start], renderedTargetIndent(path, targetSpans))}
-		replacements := []rawReplacement{{start: targetSpan.start, end: targetSpan.start + 1, lines: header}}
+		replacements := []rawReplacement{{start: targetSpan.start, end: targetSpan.start + 1, lines: header, activatedPath: path}}
 		for index := 0; index+1 < len(local.Content); index += 2 {
 			key, localValue := local.Content[index], local.Content[index+1]
 			childPath := joinRawYAMLPath(path, key.Value)
 			childSpan, hasChild := targetSpans[childPath]
-			if hasChild && childSpan.commented && countCommentedPath(targetLines, childPath, childSpan.indent) == 1 && (safeCommentedCandidate(targetLines[childSpan.start:childSpan.end], key.Value) || commentedFlowCollectionHeader(targetLines[childSpan.start], key.Value)) {
+			if hasChild && childSpan.commented && countCommentedPath(targetLines, childPath) == 1 && (safeCommentedCandidate(targetLines[childSpan.start:childSpan.end], key.Value) || commentedFlowCollectionHeader(targetLines[childSpan.start], key.Value)) {
 				child, ok := activateCommentedValue(nil, localValue, childPath, targetLines, localLines, targetSpans, localSpans)
 				if !ok {
 					return nil, false
@@ -818,7 +829,7 @@ func activateCommentedValue(target, local *yaml.Node, path string, targetLines, 
 		lines = normalized
 	}
 	lines = preserveTargetKeyComment(targetSequence, preserveSequenceComments(targetSequence, lines))
-	return []rawReplacement{{start: targetSpan.start, end: sequenceEnd, lines: lines}}, true
+	return []rawReplacement{{start: targetSpan.start, end: sequenceEnd, lines: lines, activatedPath: path}}, true
 }
 
 // activateCommentedScalar replaces a documented scalar at its template slot.
@@ -899,7 +910,8 @@ func activateCommentedScalar(local *yaml.Node, path string, targetSpan, localSpa
 			targetEnd++
 		}
 	}
-	return []rawReplacement{{start: targetSpan.start, end: targetEnd, lines: lines}}, true
+	lines = preserveTargetKeyComment(targetLines[targetSpan.start:targetSpan.start+1], lines)
+	return []rawReplacement{{start: targetSpan.start, end: targetEnd, lines: lines, activatedPath: path}}, true
 }
 
 func scalarSourceMatches(lines []string, wanted *yaml.Node) bool {
@@ -1088,14 +1100,14 @@ func renderDocumentedCommentedValue(local *yaml.Node, path string, targetLines, 
 	}
 	// Keep prose as comments within an activated header; it is not parsed as a
 	// default, while the active local entry remains the only structural key.
-	header := rawReplacement{start: targetSpan.start, end: targetSpan.start + 1, lines: reindentRawLines([]string{uncommentStructuralLine(targetLines[targetSpan.start])}, renderedTargetIndent(path, targetSpans))}
+	header := rawReplacement{start: targetSpan.start, end: targetSpan.start + 1, lines: reindentRawLines([]string{uncommentStructuralLine(targetLines[targetSpan.start])}, renderedTargetIndent(path, targetSpans)), activatedPath: path}
 	replacements := []rawReplacement{header}
 	var missingLines []string
 	for index := 0; index+1 < len(local.Content); index += 2 {
 		key, localValue := local.Content[index], local.Content[index+1]
 		childPath := joinRawYAMLPath(path, key.Value)
 		childSpan, exists := targetSpans[childPath]
-		if exists && childSpan.commented && countCommentedPath(targetLines, childPath, childSpan.indent) == 1 {
+		if exists && childSpan.commented && countCommentedPath(targetLines, childPath) == 1 {
 			child, ok := activateCommentedValue(nil, localValue, childPath, targetLines, localLines, targetSpans, localSpans)
 			if ok {
 				replacements = append(replacements, child...)
@@ -1222,14 +1234,7 @@ func addRawReplacement(replacements map[int]rawReplacement, span rawYAMLSpan, li
 }
 
 func renderedTargetIndent(path string, spans map[string]rawYAMLSpan) int {
-	return spans[path].renderIndent
-}
-
-func entryPathRoot(path string) string {
-	if separator := strings.Index(path, rawYAMLPathSeparator); separator >= 0 {
-		return path[:separator]
-	}
-	return path
+	return spans[path].indent
 }
 
 func commentedKeySpaces(line string) int {
@@ -1302,27 +1307,24 @@ func replaceRawScalar(target, local string) string {
 // has found the YAML comment marker, so semicolons in quoted scalar values are
 // never considered separators here.
 func mergeRawInlineComments(target, local string) string {
-	seen := make(map[string]struct{})
-	fragments := make([]rawInlineCommentFragment, 0)
-	for _, comment := range []string{target, local} {
-		for _, fragment := range rawInlineCommentFragments(comment) {
-			if _, exists := seen[fragment.normalized]; exists {
-				continue
-			}
-			seen[fragment.normalized] = struct{}{}
-			fragments = append(fragments, fragment)
+	// Semicolons in the template are punctuation, not instructions to insert
+	// a new '#'. Compare fragments to recognize notes from older merges, but
+	// retain the target annotation itself verbatim.
+	comment := strings.TrimSpace(target)
+	seen := make(map[string]bool)
+	for _, fragment := range rawInlineCommentFragments(target) {
+		seen[fragment.normalized] = true
+	}
+	for _, fragment := range rawInlineCommentFragments(local) {
+		if seen[fragment.normalized] {
+			continue
 		}
-	}
-	if len(fragments) == 0 {
-		return ""
-	}
-	// The first occurrence is target-owned when present, so retain its exact
-	// marker spelling (for example `#sample` versus `# sample`). Later unique
-	// fragments use the established delimiter while normalized bodies prevent
-	// that delimiter from growing on subsequent renders.
-	comment := fragments[0].lexical
-	for _, fragment := range fragments[1:] {
-		comment += "; # " + fragment.normalized
+		seen[fragment.normalized] = true
+		if comment == "" {
+			comment = fragment.lexical
+		} else {
+			comment += "; # " + fragment.normalized
+		}
 	}
 	return comment
 }

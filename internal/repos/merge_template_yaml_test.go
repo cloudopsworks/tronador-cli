@@ -36,7 +36,7 @@ extra: true
 	if result.CommentOnly {
 		t.Fatal("CommentOnly = true")
 	}
-	if !contains(result.Unmapped, "extra") {
+	if !reflect.DeepEqual(result.Unmapped, []string{"extra"}) {
 		t.Fatalf("Unmapped = %v, want extra", result.Unmapped)
 	}
 
@@ -46,6 +46,53 @@ extra: true
 	}
 	if string(again.Content) != got {
 		t.Fatalf("merge is not idempotent:\n%s\nwant\n%s", again.Content, got)
+	}
+}
+
+func TestMergeTemplateYAMLOnlyWarnsForUnmappedPlacements(t *testing.T) {
+	template := `#feature:
+#  enabled: false # Default flag.
+#  timeout: 5
+# endpoint: descriptive prose, not a template field
+settings:
+  known: default
+  # legacy: descriptive prose, not a template field
+`
+	local := `feature:
+  enabled: true
+  operator_override:
+    mode: custom
+endpoint: https://example.test
+settings:
+  known: custom
+  legacy: configured
+  extra: true
+`
+	result, err := MergeTemplateYAML("inputs.yaml", []byte(template), []byte(local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RendererFallback {
+		t.Fatalf("renderer fell back:\n%s", result.Content)
+	}
+	want := []string{"feature.operator_override", "endpoint", "settings.legacy", "settings.extra"}
+	if !reflect.DeepEqual(result.Unmapped, want) {
+		t.Fatalf("Unmapped = %v, want %v", result.Unmapped, want)
+	}
+}
+
+func TestMergeTemplateYAMLFallbackDoesNotClaimPartialPlacement(t *testing.T) {
+	template := "active: true\n#known: false\n#choice: 1\n#choice: 2\n"
+	local := "known: true\nchoice: 3\n"
+	result, err := MergeTemplateYAML("inputs.yaml", []byte(template), []byte(local))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RendererFallback {
+		t.Fatalf("expected an ambiguous candidate to trigger fallback:\n%s", result.Content)
+	}
+	if !reflect.DeepEqual(result.Unmapped, []string{"known", "choice"}) {
+		t.Fatalf("Unmapped = %v, want all paths without a verified placement", result.Unmapped)
 	}
 }
 
@@ -73,11 +120,62 @@ func TestMergeTemplateYAMLRejectsUnsafeYAML(t *testing.T) {
 	}
 }
 
-func contains(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
+func TestMergeTemplateYAMLCommentMarkerAlignment(t *testing.T) {
+	const nested = "settings:\n  rotation:\n    provider:\n"
+	for _, tc := range []struct{ name, prefix, indent, marker string }{
+		{"root_hash_no_pad", "", "", "#"},
+		{"root_hash_one_pad", "", "", "# "},
+		{"indented_hash_no_pad", nested, "      ", "      #"},
+		{"indented_hash_one_pad", nested, "      ", "      # "},
+		{"column_one_six_spaces", nested, "      ", "#      "},
+		{"column_one_seven_spaces", nested, "      ", "#       "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, i := tc.marker, tc.indent
+			const annotation = " # (Optional) Low for development; higher for production."
+			target := tc.prefix + m + "retries: 3" + annotation + "\n" +
+				m + "network:\n" + m + "  subnets:\n" + m + "    - example\n" + m + "  unused: true\n" + i + "region: dev\n"
+			local := tc.prefix + i + "region: dev\n" + i + "retries: 7\n" + i + "network:\n" + i + "  subnets:\n" + i + "    - custom\n"
+			want := tc.prefix + i + "retries: 7" + annotation + "\n" +
+				i + "network:\n" + i + "  subnets:\n" + i + "    - custom\n" + m + "  unused: true\n" + i + "region: dev\n"
+			for range 2 {
+				result, err := MergeTemplateYAML("inputs.yaml", []byte(target), []byte(local))
+				if err != nil || result.RendererFallback || len(result.Unmapped) != 0 || string(result.Content) != want {
+					t.Fatalf("fallback=%v, unmapped=%v, err=%v\ngot:\n%swant:\n%s", result.RendererFallback, result.Unmapped, err, result.Content, want)
+				}
+				local = string(result.Content)
+			}
+		})
 	}
-	return false
+}
+
+func TestMergeTemplateYAMLDoesNotConsumePaddedProse(t *testing.T) {
+	target := "settings:\n  # status: see issue #123\n  # reviewed: 2026-01-01\n  region: dev\n"
+	local := "settings:\n  region: dev\n  status: active\n  reviewed: today\n"
+	result, err := MergeTemplateYAML("inputs.yaml", []byte(target), []byte(local))
+	if err != nil || !strings.Contains(string(result.Content), "# status: see issue #123\n  # reviewed: 2026-01-01") ||
+		!reflect.DeepEqual(result.Unmapped, []string{"settings.status", "settings.reviewed"}) {
+		t.Fatalf("unmapped=%v, err=%v\n%s", result.Unmapped, err, result.Content)
+	}
+}
+
+func TestMergeTemplateYAMLIndividuallyCommentedChildren(t *testing.T) {
+	const target = `settings:
+  # enabled: false
+  # network:
+    # subnets:
+      # - default
+    # unused: true
+`
+	const local = `settings:
+  enabled: true
+  network:
+    subnets:
+      - custom
+`
+	const want = local + "    # unused: true\n"
+	result, err := MergeTemplateYAML("inputs.yaml", []byte(target), []byte(local))
+	if err != nil || result.RendererFallback || len(result.Unmapped) != 0 || string(result.Content) != want {
+		t.Fatalf("fallback=%v, unmapped=%v, err=%v\ngot:\n%swant:\n%s", result.RendererFallback, result.Unmapped, err, result.Content, want)
+	}
 }

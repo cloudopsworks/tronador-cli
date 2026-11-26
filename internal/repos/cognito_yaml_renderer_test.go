@@ -85,7 +85,7 @@ lambda:
 	out := renderCognitoYAML(t, target, local)
 	layout := strings.ReplaceAll(out, "\r\n", "\n")
 	assertContainsAll(t, layout,
-		"environment: \"dev\"\nrunner_set: \"finconecta-dev-runners\"\ndisable_deploy: false",
+		"environment: \"dev\"\nrunner_set: \"finconecta-dev-runners\" # Optional: when using self-hosted runners\ndisable_deploy: false",
 		"aws:\n  region: us-east-1\n  build_sts_role_arn: runtime-build-role",
 		"lambda:\n  iam:",
 		"  timeout: 10",
