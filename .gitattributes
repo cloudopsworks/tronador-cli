@@ -1,0 +1,5 @@
+# Keep Go module files LF on every checkout. Windows runners check out with
+# core.autocrlf=true; a CRLF go.sum makes the GoReleaser `go mod tidy -diff`
+# hook fail even though the module content is tidy.
+go.mod text eol=lf
+go.sum text eol=lf
