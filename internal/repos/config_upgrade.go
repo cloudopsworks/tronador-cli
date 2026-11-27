@@ -139,6 +139,7 @@ func (r *Runner) buildCloudOpsworksConfigPlanForTemplate(state RepositoryState, 
 		if err != nil {
 			return cloudOpsworksConfigPlan{}, err
 		}
+		content = withoutStaleTemplateComments(localName, content, target.data, r.templateOwnedComments)
 		plan = append(plan, yamlWrite{path: filepath.Join(destinationRoot, filepath.FromSlash(localName)), content: content, baseline: target.data, mode: local.mode, name: localName, removeSource: legacyYAMLSource(sourceRoot, legacyRoot, localName)})
 		usedTargets[targetName] = true
 	}
