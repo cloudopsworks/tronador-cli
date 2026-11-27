@@ -44,6 +44,10 @@ type Runner struct {
 	suppressStaging  bool
 	templateCheckout string
 	ghResolved       string
+	// templateOwnedComments maps raw YAML key paths to the inline comment
+	// fragments any template release wrote on that key, in any CloudOps file.
+	// Nil means the merge keeps its two-way comment handling.
+	templateOwnedComments map[string]map[string]bool
 }
 
 type upgradeEffects struct {
@@ -503,7 +507,14 @@ func (r *Runner) Stack(ctx context.Context, opts StackOptions) (err error) {
 	if opts.PullBranch == "" {
 		opts.PullBranch = r.Opts.PullBranch
 	}
+	// A pre-fetched template has no git metadata left to read, and history
+	// from an earlier run on this Runner must not leak into this merge.
+	r.templateOwnedComments = nil
+	defer func() { r.templateOwnedComments = nil }()
 	if opts.TemplateHash == "" {
+		// Fetch removes the template's git metadata, so read the template's
+		// release history first. It only refines comment merging.
+		r.templateOwnedComments = templateOwnedCommentFragments(r.readTemplateHistoryConfig())
 		hash, err := r.Fetch(ctx, opts.PullBranch)
 		if err != nil {
 			return err

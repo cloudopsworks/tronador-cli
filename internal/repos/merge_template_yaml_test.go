@@ -179,3 +179,28 @@ func TestMergeTemplateYAMLIndividuallyCommentedChildren(t *testing.T) {
 		t.Fatalf("fallback=%v, unmapped=%v, err=%v\ngot:\n%swant:\n%s", result.RendererFallback, result.Unmapped, err, result.Content, want)
 	}
 }
+
+func TestMergeTemplateYAMLPreservesInlineCommentAlignment(t *testing.T) {
+	target := "goreleaser:           # enable goreleaser\n" +
+		"#  enabled: true       # build release binaries\n" +
+		"#  chocolatey: true    # windows packages\n" +
+		"#  macos: true         # macOS packages\n" +
+		"region: dev # single-space annotation\n"
+	local := "goreleaser:\n" +
+		"  enabled: true # build release binaries\n" +
+		"  chocolatey: false\n" +
+		"  macos: a-value-wider-than-the-column\n" +
+		"region: production\n"
+	want := "goreleaser:           # enable goreleaser\n" +
+		"  enabled: true       # build release binaries\n" +
+		"  chocolatey: false   # windows packages\n" +
+		"  macos: a-value-wider-than-the-column # macOS packages\n" +
+		"region: production # single-space annotation\n"
+	for range 2 {
+		result, err := MergeTemplateYAML("inputs-global.yaml", []byte(target), []byte(local))
+		if err != nil || result.RendererFallback || len(result.Unmapped) != 0 || string(result.Content) != want {
+			t.Fatalf("fallback=%v, unmapped=%v, err=%v\ngot:\n%swant:\n%s", result.RendererFallback, result.Unmapped, err, result.Content, want)
+		}
+		local = string(result.Content)
+	}
+}

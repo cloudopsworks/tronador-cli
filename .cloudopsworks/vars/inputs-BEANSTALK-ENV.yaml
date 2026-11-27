@@ -39,45 +39,95 @@ api_gateway:
     #  path: "/"
 beanstalk:
   # Solution stack is one of:
-  #  java         = "^64bit Amazon Linux 2023 (.*) running Corretto 21(.*)$"
-  #  java8        = "^64bit Amazon Linux 2 (.*) running Corretto 8(.*)$"
-  #  java11       = "^64bit Amazon Linux 2 (.*) running Corretto 11(.*)$"
-  #  java17       = "^64bit Amazon Linux 2 (.*) running Corretto 17(.*)$"
-  #  tomcat       = "^64bit Amazon Linux 2023 (.*) Tomcat (.*) Corretto 21(.*)$"
-  #  java17_23    = "^64bit Amazon Linux 2023 (.*) running Corretto 17(.*)$"
-  #  tomcatj8     = "^64bit Amazon Linux 2 (.*) Tomcat (.*) Corretto 8(.*)$"
-  #  tomcatj11    = "^64bit Amazon Linux 2 (.*) Tomcat (.*) Corretto 11(.*)$"
-  #  tomcatj17    = "^64bit Amazon Linux 2023 (.*) Tomcat (.*) Corretto 17(.*)$"
-  #  node         = "^64bit Amazon Linux 2023 (.*) Node.js 20(.*)$"
-  #  node22       = "^64bit Amazon Linux 2023 (.*) Node.js 22(.*)$"
-  #  node14       = "^64bit Amazon Linux 2 (.*) Node.js 14(.*)$"
-  #  node16       = "^64bit Amazon Linux 2 (.*) Node.js 16(.*)$"
-  #  node18       = "^64bit Amazon Linux 2 (.*) Node.js 18(.*)$"
-  #  node18_23    = "^64bit Amazon Linux 2023 (.*) Node.js 18(.*)$"
-  #  go           = "^64bit Amazon Linux 2 (.*) running Go (.*)$"
-  #  docker       = "^64bit Amazon Linux 2 (.*) running Docker (.*)$"
-  #  docker-m     = "^64bit Amazon Linux 2 (.*) Multi-container Docker (.*)$"
-  #  dotnet-core  = "^64bit Amazon Linux 2 (.*) running .NET Core(.*)$"
-  #  dotnet-6     = "^64bit Amazon Linux 2023 (.*) running .NET 6(.*)$"
-  #  dotnet-8     = "^64bit Amazon Linux 2023 (.*) running .NET 8(.*)$"
-  #  dotnet-9     = "^64bit Amazon Linux 2023 (.*) running .NET 9(.*)$"
-  #  dotnet       = "^64bit Amazon Linux 2023 (.*) running .NET 9(.*)$"
-  #  python       = "^64bit Amazon Linux 2023 (.*) running Python 3.13(.*)$"
-  #  python313    = "^64bit Amazon Linux 2023 (.*) running Python 3.13(.*)$"
-  #  python312    = "^64bit Amazon Linux 2023 (.*) running Python 3.12(.*)$"
-  #  python311    = "^64bit Amazon Linux 2023 (.*) running Python 3.11(.*)$"
-  #  python39     = "^64bit Amazon Linux 2023 (.*) running Python 3.9(.*)$"
-  #  python38     = "^64bit Amazon Linux 2 (.*) running Python 3.8(.*)$"
-  #  python37     = "^64bit Amazon Linux 2 (.*) running Python 3.7(.*)$"
-  #  net-core-w16 = "^64bit Windows Server Core 2016 (.*) running IIS (.*)$"
-  #  net-core-w19 = "^64bit Windows Server Core 2019 (.*) running IIS (.*)$"
-  #  net-core-w22 = "^64bit Windows Server Core 2022 (.*) running IIS (.*)$"
-  #  net-core-w25 = "^64bit Windows Server Core 2025 (.*) running IIS (.*)$"
-  #  dotnet-w16   = "^64bit Windows Server 2016 (.*) running IIS (.*)$"
-  #  dotnet-w19   = "^64bit Windows Server 2019 (.*) running IIS (.*)$"
-  #  dotnet-w22   = "^64bit Windows Server 2022 (.*) running IIS (.*)$"
-  #  dotnet-w25   = "^64bit Windows Server 2025 (.*) running IIS (.*)$"
-  # Can specify complete name for certain environments to Stick the stack to a specific version.
+  # https://github.com/cloudopsworks/terraform-aws-beanstalk-deploy/blob/v1.3.2/platforms.tf
+  # Deploy module v5.2.2: shortcuts select the newest matching stack in the AWS region.
+  # A -latest shortcut follows the branch chosen by the module, not necessarily your build runtime.
+  # Java and Tomcat:
+  #  java          = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 21$"  # alias for java21
+  #  java8_23      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 8$"
+  #  java11_23     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 11$"
+  #  java17_23     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 17$"
+  #  java21        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 21$"
+  #  java25        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 25$"
+  #  java-latest   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Corretto 25$"  # alias for java25
+  #  tomcat        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 11 Corretto 21$"  # alias for tomcat11j21
+  #  tomcatj17     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat [0-9.]+ Corretto 17$"
+  #  tomcat9j8     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 9 Corretto 8$"
+  #  tomcat9j11    = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 9 Corretto 11$"
+  #  tomcat9j17    = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 9 Corretto 17$"
+  #  tomcat10j17   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 10 Corretto 17$"
+  #  tomcat10j21   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 10 Corretto 21$"
+  #  tomcat11j17   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 11 Corretto 17$"
+  #  tomcat11j21   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 11 Corretto 21$"
+  #  tomcat11j25   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 11 Corretto 25$"
+  #  tomcat-latest = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Tomcat 11 Corretto 25$"  # alias for tomcat11j25
+  # Node.js:
+  #  node          = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 24$"  # alias for node24
+  #  node22        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 22$"  # AWS scheduled retirement: 2027-07-31
+  #  node24        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 24$"
+  #  node26        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 26$"
+  #  node-latest   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 26$"  # alias for node26
+  # Go and containers:
+  #  go            = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Go 1$"
+  #  docker        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Docker$"  # alias for docker_al2023
+  #  docker_al2023 = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Docker$"
+  #  docker-m      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running ECS$"  # alias for ecs
+  #  ecs           = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running ECS$"
+  # .NET on Linux:
+  #  dotnet        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 10$"  # alias for dotnet10
+  #  dotnet-8      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 8$"  # AWS scheduled retirement: 2027-03-31
+  #  dotnet-9      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 9$"  # AWS scheduled retirement: 2027-03-31
+  #  dotnet10      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 10$"
+  #  dotnet-10     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 10$"  # alias for dotnet10
+  #  dotnet-latest = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 10$"  # alias for dotnet10
+  # .NET on Windows Server and Server Core:
+  #  dotnet-w19    = "^64bit Windows Server 2019 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  #  dotnet-w22    = "^64bit Windows Server 2022 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  #  dotnet-w25    = "^64bit Windows Server 2025 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  #  net-core-w19  = "^64bit Windows Server Core 2019 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  #  net-core-w22  = "^64bit Windows Server Core 2022 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  #  net-core-w25  = "^64bit Windows Server Core 2025 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"
+  # Python:
+  #  python        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]14$"  # alias for python314
+  #  python311     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]11$"
+  #  python312     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]12$"
+  #  python313     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]13$"
+  #  python314     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]14$"
+  #  python315     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]15$"
+  #  python-latest = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]15$"  # alias for python315
+  # PHP and Ruby:
+  #  php           = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]5$"  # alias for php85
+  #  php82         = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]2$"  # AWS scheduled retirement: 2027-03-31
+  #  php83         = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]3$"
+  #  php84         = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]4$"
+  #  php85         = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]5$"
+  #  php-latest    = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running PHP 8[.]5$"  # alias for php85
+  #  ruby          = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Ruby 4[.]0$"  # alias for ruby40
+  #  ruby33        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Ruby 3[.]3$"  # AWS scheduled retirement: 2027-07-31
+  #  ruby34        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Ruby 3[.]4$"
+  #  ruby40        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Ruby 4[.]0$"
+  #  ruby-latest   = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Ruby 4[.]0$"  # alias for ruby40
+  # Deprecated shortcuts (AWS-retired branches). Use only if AWS still lists the stack
+  # for your account and region; select a compatible replacement for new environments.
+  #  java8         = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Corretto 8$"  # use java8_23
+  #  java11        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Corretto 11$"  # use java11_23
+  #  java17        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Corretto 17$"  # use java17_23
+  #  tomcatj8      = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Tomcat [0-9.]+ Corretto 8$"  # use tomcat9j8
+  #  tomcatj11     = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Tomcat [0-9.]+ Corretto 11$"  # use tomcat9j11
+  #  node20        = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 20$"  # use node24 or node26
+  #  node14        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Node[.]js 14$"  # use node24 or node26
+  #  node16        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Node[.]js 16$"  # use node24 or node26
+  #  node18        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Node[.]js 18$"  # use node24 or node26
+  #  node18_23     = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Node[.]js 18$"  # use node24 or node26
+  #  go_al2        = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Go 1$"  # use go
+  #  dotnet-core   = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running [.]NET Core$"  # use dotnet-10
+  #  dotnet-6      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running [.]NET 6$"  # use dotnet-10
+  #  dotnet-w16    = "^64bit Windows Server 2016 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"  # use dotnet-w22 or dotnet-w25
+  #  net-core-w16  = "^64bit Windows Server Core 2016 v[0-9]+([.][0-9]+)+ running IIS 10[.]0$"  # use net-core-w22 or net-core-w25
+  #  python37      = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Python 3[.]7$"  # use python314
+  #  python38      = "^64bit Amazon Linux 2 v[0-9]+([.][0-9]+)+ running Python 3[.]8$"  # use python314
+  #  python39      = "^64bit Amazon Linux 2023 v[0-9]+([.][0-9]+)+ running Python 3[.]9$"  # use python314
+  # A complete AWS solution stack name pins one version; a custom regex selects the newest match.
   solution_stack: go
   application: APPLICATION
   #wait_for_ready_timeout: "20m"
@@ -128,8 +178,8 @@ beanstalk:
   ##
   # Optional variable for adding extra tags to the environment
   extra_tags: {}
-  #    key: value
-  #    key2: value2
+  #  key: value
+  #  key2: value2
   extra_settings:
     - name: "PORT"
       namespace: "aws:elasticbeanstalk:application:environment"
@@ -142,9 +192,10 @@ beanstalk:
   ##
   # Enable custom shared Rules where below rule mappings mandate over elastic beanstalk configuration.
   #custom_shared_rules: true
+  #
   ##
   # Optional Variable for mapping rules for shared Load Balancer
   rule_mappings: []
 tags: {}
-# TAG1: value1
-# TAG2: value2
+  #TAG1: value1
+  #TAG2: value2

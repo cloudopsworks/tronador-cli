@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -1293,13 +1294,32 @@ func rawLineVirtualIndent(line string) int {
 }
 
 func replaceRawScalar(target, local string) string {
-	_, targetComment := splitRawInlineComment(target)
+	targetValue, targetComment := splitRawInlineComment(target)
 	localValue, localComment := splitRawInlineComment(local)
 	comment := mergeRawInlineComments(targetComment, localComment)
+	value := strings.TrimRight(localValue, " ")
 	if comment == "" {
-		return strings.TrimRight(localValue, " ")
+		return value
 	}
-	return strings.TrimRight(localValue, " ") + " " + comment
+	return value + inlineCommentGap(targetValue, targetComment, value) + comment
+}
+
+// inlineCommentGap keeps a deliberately aligned template annotation aligned.
+// The column is measured from the key, not the line start, because activating
+// a commented template line shifts its indentation. A template that separates
+// its comment with a single space is not aligned, so it keeps one space; so does
+// a merged value too wide to fit before the template column.
+func inlineCommentGap(targetValue, targetComment, value string) string {
+	targetText := strings.TrimLeft(targetValue, " ")
+	if targetComment == "" || len(targetText)-len(strings.TrimRight(targetText, " ")) <= 1 {
+		return " "
+	}
+	column := utf8.RuneCountInString(targetText)
+	width := utf8.RuneCountInString(strings.TrimLeft(value, " "))
+	if width >= column {
+		return " "
+	}
+	return strings.Repeat(" ", column-width)
 }
 
 // mergeRawInlineComments keeps target annotations first, then adds distinct

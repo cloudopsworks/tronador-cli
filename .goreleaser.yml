@@ -3,7 +3,7 @@
 version: 2
 before:
   hooks:
-    - go mod tidy
+    - go mod tidy -diff
     - ./scripts/validate-installers.sh
 builds:
   - id: tronador-cli
@@ -15,14 +15,13 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
+      - '-X main.version={{.Version}} -X main.commit={{.Commit}}'
     goos:
       - freebsd
       - linux
       - darwin
     goarch:
       - amd64
-      - '386'
       - arm
       - arm64
     ignore:
