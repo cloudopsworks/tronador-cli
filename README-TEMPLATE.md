@@ -2,8 +2,8 @@
 
 ## Agent command policy
 
-The `Makefile` remains for compatibility, but direct Make invocation is deprecated
-for README and Git-flow/version operations. Agents must use the Tronador CLI:
+Use Tronador CLI (`tronador-cli`, installed as `tronador`) directly for project initialization, README generation,
+branch management, and versioning. Do not invoke Makefile targets for these tasks.
 
 - Run `tronador readme build` to render README output. If committed target/dependency
   documentation also needs refresh, run `tronador docs targets` first.
@@ -132,6 +132,13 @@ Adjust these names to match your environments and promotion flow.
 
 ### `.cloudopsworks/vars/inputs-global.yaml`
 This is the main global configuration file used by the workflows.
+
+Artifact packaging uses the defaults in
+[`cloudopsworks/blueprints/artifacts/config/golang.yaml`](https://github.com/cloudopsworks/blueprints/blob/v5.10/artifacts/config/golang.yaml).
+If you previously set `zipGlobs` or `excludeGlobs` in `.cloudopsworks/cloudopsworks-ci.yaml`,
+move only project-specific patterns here as top-level lists. Both are optional:
+`zipGlobs` adds paths to package and `excludeGlobs` filters paths out. Each list is
+merged with the corresponding blueprint defaults, not used as a replacement.
 
 Set these values before your first pipeline run:
 - `organization_name`
@@ -424,7 +431,7 @@ these commands — never fetch or apply template changes manually.
 4. Commit the result with: `chore: upgrade from <template-name> <old-version> → <new-version> +semver: patch`
 5. Use `/cw-release` to create and merge the hotfix PR (see [Release Workflow — use `cw-release`](#release-workflow--use-cw-release)).
 
-> **Note:** `Makefile`, `.github/`, `.cloudopsworks/labeler.yml`, `.cloudopsworks/Makefile`,
+> **Note:** `Makefile`, `.github/`, `.cloudopsworks/labeler.yml`,
 > and `.cloudopsworks/LICENSE` are owned by the template and will be overwritten on every upgrade.
 > Do not edit these files manually in derived repositories.
 

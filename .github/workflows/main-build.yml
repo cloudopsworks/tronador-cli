@@ -1,5 +1,5 @@
 ##
-# (c) 2021-2025
+# (c) 2021-2026
 #     Cloud Ops Works LLC - https://cloudops.works/
 #     Find us on:
 #       GitHub: https://github.com/cloudopsworks
@@ -270,14 +270,6 @@ jobs:
           golang_version: ${{ needs.code-build.outputs.golang_version }}
           chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
 
-      - name: Chocolatey Package Push
-        uses: ./bp/cd/release/chocolatey
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          semver: ${{ needs.code-build.outputs.semver }}
-          goreleaser_config: ${{ needs.code-build.outputs.golang_goreleaser_chocolatey_config }}
-          chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
-
   goreleaser_main:
     name: 'GoReleaser Pipeline'
     needs:
@@ -328,6 +320,35 @@ jobs:
           apple_store_connect_key_b64: ${{ secrets.APPLE_STORE_CONNECT_KEY_BASE64 }}
           apple_store_connect_key_id: ${{ secrets.APPLE_STORE_CONNECT_KEY_ID }}
           apple_store_connect_issuer_id: ${{ secrets.APPLE_STORE_CONNECT_ISSUER_ID }}
+
+  chocolatey_push:
+    name: 'Chocolatey Push - Windows'
+    needs:
+      - code-build
+      - goreleaser_chocolatey
+      - goreleaser_main
+    if: |
+      (! cancelled()) &&
+      (needs.goreleaser_chocolatey.result == 'success') &&
+      (needs.goreleaser_main.result == 'success') &&
+      (needs.code-build.outputs.is_release == 'true') &&
+      (needs.code-build.outputs.has_qualifier != 'true') &&
+      (needs.code-build.outputs.golang_goreleaser_chocolatey == 'true')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout w/Blueprint
+        uses: cloudopsworks/blueprints/cd/checkout@v5.10
+        id: co
+        with:
+          blueprint_ref: 'v5.10'
+
+      - name: Chocolatey Package Push
+        uses: ./bp/cd/release/chocolatey
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          semver: ${{ needs.code-build.outputs.semver }}
+          goreleaser_config: ${{ needs.code-build.outputs.golang_goreleaser_chocolatey_config }}
+          chocolatey_api_key: ${{ secrets.CHOCOLATEY_API_KEY }}
 
   scan:
     name: 'Code Scan SAST/SCA/DAST'

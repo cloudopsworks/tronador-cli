@@ -1,5 +1,7 @@
 # This file contains the input variables for the Lambda environment.
 # Agents: cloud=aws ; cloud_type=lambda
+# Before enabling the new trigger, tracing or Scheduler options below, use a
+# released Lambda deployment module and a Blueprint pin that supports them.
 environment: "dev|uat|prod|demo"
 #runner_set: "RUNNER-ENV" # Optional: when using self-hosted runners
 #disable_deploy: true
@@ -13,15 +15,18 @@ aws:
 #  deploy_sts_role_arn: "DEPLOYMENT_AWS_STS_ROLE_ARN" # Optional: when existing role is different for build and deploy
 lambda:
   arch: x86_64 | arm64
+  # Optional: remove the inline {} after iam: before uncommenting any nested keys.
+  # The default and dedicated roles both receive required polling and Active X-Ray permissions.
+  # S3, SNS, EventBridge rules and Scheduler add their principals automatically.
+  # SQS, DynamoDB Streams and Kinesis are polled by the function role, not invoker callers.
   iam: {}
   #  enabled: true
-  #  execRole:
-  #    enabled: true
+  #  execRole: # List only additional callers; repeating a non-Scheduler trigger removes its role trust source restriction.
+  #    enabled: true # Optional with a non-empty list; false disables configured callers, not inferred trigger trust.
   #    principals:
-  #      - lambda.amazonaws.com
-  #      - apigateway.amazonaws.com
+  #      - apigateway.amazonaws.com # Use lambda_exec_role_arn as the API Gateway integration credentials.
   #  policy_attachments:
-  #    - arn: arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+  #    - arn: arn:aws:iam::123456789012:policy/my-lambda-app-policy # For additional application permissions.
   #  statements:
   #    - effect: Allow # Uncomment below to if vpc.enabled = true
   #      action:
@@ -93,27 +98,29 @@ lambda:
   ##
   # Optionals: function Urls
   functionUrls: []
+  
   ##
-  # Optionals: event bridge scheduling
-  #            Remove comment on items to enable
+  # Optional: EventBridge Scheduler invokes Lambda on a timer; it is not an EventBridge event rule.
+  # An invocation role is created automatically when schedules are configured. Scheduler trust is restricted
+  # to this account and the selected schedule group. X-Ray is configured on the Lambda below, not on the schedule.
   schedule:
-    enabled: false # (optional) Enable or disable singe schedule
-  #  schedule_group: "my-schedule-group" # (optional) Schedule group name, schedule group must already exists
-  #  flexible:
-  #    enabled: true
-  #    maxWindow: 20 # Minutes
-    expression: "rate(1 hour)" # (optional) Schedule expression, can be cron or rate, required if enabled is true
-  #  timezone: "UTC-3"
-  #  suspended: false
-  #  payload: {} | ""             # (optional) Payload to send to the Lambda function, can be YAML (will be converted to JSON), JSON or string, defaults to null
-  #  multiple:                 # (optional) Multiple schedules, can be used to create multiple schedules for the same Lambda function
-  #    - expression: "rate(1 hour)" # (optional) Schedule expression, can be cron or rate, required if enabled is true
-        #  flexible:
-        #    enabled: true
-        #    maxWindow: 20 # Minutes
-        #  timezone: "UTC-3"
-        #  suspended: false
-        #  payload: {} | ""               # (optional) Payload to send to the Lambda function, can be YAML (will be converted to JSON), JSON or string, defaults to null
+    enabled: false # (optional) Enable the standalone schedule; can be combined with multiple.; # (optional) Enable or disable singe schedule
+    #schedule_group: "my-schedule-group" # (optional) Existing group name; omitted or empty creates a dedicated group.
+    #flexible:
+    #  enabled: true
+    #  maxWindow: 20 # Minutes
+    expression: "rate(1 hour)" # (optional) Schedule expression (rate, cron, or at); required if enabled is true.; # (optional) Schedule expression, can be cron or rate, required if enabled is true
+    #timezone: "America/Sao_Paulo" # IANA time zone; defaults to UTC.
+    #suspended: false
+    #payload: {job: "hourly"}    # (optional) Payload encoded as JSON; omitted by default.
+    #multiple:                    # (optional) Additional schedules for the same Lambda function.
+    #  - expression: "rate(1 day)" # (required) Schedule expression for this entry.
+    #    flexible:
+    #      enabled: true
+    #      maxWindow: 20 # Minutes
+    #    timezone: "America/Sao_Paulo" # IANA time zone; defaults to UTC.
+    #    suspended: false
+    #    payload: {job: "daily"} # (optional) Payload encoded as JSON; omitted by default.
 
   ##
   # VPC configuration for the Lambda function
@@ -131,10 +138,14 @@ lambda:
   #  system_log_level: INFO | DEBUG | ERROR
 
   ##
-  # Optional: Xray tracing enable
+  # Optional: AWS X-Ray mode is per Lambda function/version, not per trigger.
+  # Remove the inline {} after tracing: before uncommenting the keys below.
+  # Active samples invocations and automatically grants trace writes to the Lambda execution role,
+  # not the Scheduler invoker. Use PassThrough explicitly to switch off previously enabled Active
+  # tracing; it forwards trace context without generating automatic Lambda traces.
   tracing: {}
-  #  enabled: true
-  #  mode: Active | PassThrough
+  #  enabled: true # Omit to leave the function's current mode unmanaged.
+  #  mode: Active  # Active (default when enabled) or PassThrough.
 
   ##
   # Optional: Change default lambda ephemeral storage
@@ -150,50 +161,58 @@ lambda:
   #  local_mount_path: /mnt/efs
   
   ##
-  # Optional: triggers notifications for the lambda function.
+  # Optional: bind up to one existing event source per type, in the function's Region.
+  # Use sources in the provider's account; SQS queueName and DynamoDB tableName are local-account lookups.
+  # Remove the inline {} after triggers: before uncommenting only the bindings you need.
+  # Lambda gets polling permissions for SQS, DynamoDB Streams, and Kinesis with either role.
+  # Grant any customer-managed KMS key permissions separately. Batch sizes explicitly set above
+  # 10 need maximumBatchingWindowInSeconds >= 1; normal SQS FIFO mappings are capped at 10 with no window.
   triggers: {}
-  #  s3:
-  #    bucketName: BUCKET_NAME
+  #  s3: # Owns the bucket's entire notification configuration. No automatic object permissions or write-to-invocation trace link.
+  #    bucketName: "my-bucket"
+  #    sourceAccount: "123456789012" # Defaults to the provider account; for a different owner, set its ID.
+  #    # The deployment credentials still need permission to manage that bucket's notification configuration.
   #    events:
-  #      - s3:ObjectCreated:*
-  #    filterPrefix: "OtherLogs/"
-  #    filterSuffix: ".log"
-  #  sqs:
-  #    queueName: SQS_QUEUE_NAME
-  #    batchSize: 10 # Optional: Maximum number of items to retrieve in a single batch, defaults to 10
-  #    maximumConcurrency: 2 # Optional: Maximum number of concurrent messages to process
-  #    metricsConfig: true # Optional: Enable metrics for the DynamoDB stream, defaults to false
-  #    filterCriteria:
-  #      - pattern: '{ "body": { "Temperature": [ { "numeric": [ ">", 0, "<=", 100 ] } ], "Location": [ "New York" ] } }'
+  #      - "s3:ObjectCreated:*"
+  #    filterPrefix: "OtherLogs/" # Optional; omit for no prefix filter.
+  #    filterSuffix: ".log"       # Optional; omit for no suffix filter.
+  #  sqs: # A traced producer can use X-Amzn-Trace-Id or the AWSTraceHeader system attribute.
+  #    queueName: "orders"
+  #    batchSize: 25 # Optional; defaults to 10.
+  #    maximumBatchingWindowInSeconds: 1 # Optional, 0-300 seconds; omit for FIFO.
+  #    maximumConcurrency: 2 # Optional, 2-1000 concurrent invocations for this mapping.
+  #    metricsConfig: true # Optional EventCount metric; defaults to false.
+  #    filterCriteria: # Optional; choose pattern_object (as below) or a JSON string under pattern per entry.
   #      - pattern_object:
   #          body:
-  #            Temperature:
-  #              - numeric:
-  #                  - ">"
-  #                  - 0
-  #                  - "<="
-  #                  - 100
-  #            Location:
-  #              - New York
-  #
-  #  dynamodb:
-  #    tableName: DYNAMODB_TABLE_NAME
-  #    startingPosition: LATEST | TRIM_HORIZON # Optional: Starting position for the stream, defaults to LATEST
-  #    batchSize: 100 # Optional: Maximum number of records to retrieve in a single batch, defaults to 100
-  #    maximumRetryAttempts: 3 # Optional: Maximum number of retry attempts for failed records, defaults to -1
-  #    metricsConfig: true # Optional: Enable metrics for the DynamoDB stream, defaults to false
-  #    filterCriteria:
-  #      - pattern: '{ "body": { "Temperature": [ { "numeric": [ ">", 0, "<=", 100 ] } ], "Location": [ "New York" ] } }'
+  #            Location: ["New York"]
+  #  dynamodb: # Requires table Streams to be enabled; no automatic writer-to-consumer trace link.
+  #    tableName: "orders"
+  #    startingPosition: LATEST # LATEST (default) or TRIM_HORIZON.
+  #    batchSize: 100 # Optional; defaults to 100.
+  #    maximumBatchingWindowInSeconds: 1 # Optional, 0-300 seconds; defaults to 0.
+  #    maximumRetryAttempts: 3 # Optional; defaults to -1 (retry until records expire).
+  #    metricsConfig: true # Optional EventCount metric; defaults to false.
+  #    filterCriteria: # Optional; filter only under the dynamodb key.
   #      - pattern_object:
-  #          body:
-  #            Temperature:
-  #              - numeric:
-  #                  - ">"
-  #                  - 0
-  #                  - "<="
-  #                  - 100
-  #            Location:
-  #              - New York
+  #          dynamodb:
+  #            Keys:
+  #              orderId:
+  #                S: ["order-42"]
+  #  sns: # An SNS segment requires topic-owner Active tracing and an X-Ray resource policy.
+  #    topicArn: "arn:aws:sns:us-east-1:123456789012:orders" # Existing standard topic; no direct FIFO binding.
+  #  eventbridge: # Use a traced PutEvents publisher for upstream trace context; not a Scheduler binding.
+  #    ruleName: "order-created-to-lambda" # Unique on the existing classic event bus.
+  #    eventBusName: "app-events" # Optional; defaults to default.
+  #    eventPattern: # Required non-empty YAML object, not a JSON string.
+  #      source: ["com.example.orders"]
+  #      detail-type: ["OrderCreated"]
+  #  kinesis: # Shared-throughput polling; no automatic producer-to-consumer trace link.
+  #    streamArn: "arn:aws:kinesis:us-east-1:123456789012:stream/orders" # Stream ARN, not a consumer ARN.
+  #    startingPosition: LATEST # LATEST (default) or TRIM_HORIZON.
+  #    batchSize: 100 # Optional; defaults to 100.
+  #    maximumBatchingWindowInSeconds: 1 # Optional, 0-300 seconds; defaults to 0.
+  #    maximumRetryAttempts: 3 # Optional; defaults to -1 (retry until records expire).
 
   ## Lambda Layers
   layers: []

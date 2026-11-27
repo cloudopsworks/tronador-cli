@@ -1,30 +1,11 @@
 ##
-# (c) 2021-2025
+# (c) 2021-2026
 #     Cloud Ops Works LLC - https://cloudops.works/
 #     Find us on:
 #       GitHub: https://github.com/cloudopsworks
 #       WebSite: https://cloudops.works
 #     Distributed Under Apache v2.0 License
 #
-zipGlobs:
-  - conf/**
-excludeGlobs:
-  - Dockerfile
-  - .helmignore
-  - .dockerignore
-  - .git*
-  - .git/
-  - OWNER*
-  - README.md
-  - jenkins*
-  - charts/*
-  - cloudopsworks-ci*
-  - skafold*
-  - tronador/*
-  - .tronador
-  - Makefile
-  - apifiles/*
-  - test-results/*
 
 # Repo & CD Configurations
 # Some of them previously managed in OWNERS file
@@ -150,5 +131,26 @@ cd:
         env: demo2
         targetName: demo2
 
+zipGlobs:
+  - conf/**
+
+excludeGlobs:
+  - Dockerfile
+  - .helmignore
+  - .dockerignore
+  - .git*
+  - .git/
+  - OWNER*
+  - README.md
+  - jenkins*
+  - charts/*
+  - cloudopsworks-ci*
+  - skafold*
+  - tronador/*
+  - .tronador
+  - Makefile
+  - apifiles/*
+  - test-results/*
+
 ############ DO NOT MODIFY BELOW ############
-#workflow-version-tag: v1.3.56 - hash: 8055bee33101edd442ff3ef44c1a16be2465fef7
+#workflow-version-tag: v1.3.63 - hash: 58cecea1441ad6a7e52e11adfe644f9088cb7f05
