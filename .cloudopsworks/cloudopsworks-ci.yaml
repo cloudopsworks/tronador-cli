@@ -131,26 +131,5 @@ cd:
         env: demo2
         targetName: demo2
 
-zipGlobs:
-  - conf/**
-
-excludeGlobs:
-  - Dockerfile
-  - .helmignore
-  - .dockerignore
-  - .git*
-  - .git/
-  - OWNER*
-  - README.md
-  - jenkins*
-  - charts/*
-  - cloudopsworks-ci*
-  - skafold*
-  - tronador/*
-  - .tronador
-  - Makefile
-  - apifiles/*
-  - test-results/*
-
 ############ DO NOT MODIFY BELOW ############
 #workflow-version-tag: v1.3.63 - hash: 58cecea1441ad6a7e52e11adfe644f9088cb7f05
